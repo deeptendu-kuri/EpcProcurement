@@ -26,9 +26,9 @@ export { getUsageSummary, hasCapacity, usedToday, dailyBudget, recordUsage, type
 
 export const DEFAULT_MODELS: Record<LLMRole, { groq: string; cloudflare: string }> = {
   triage: { groq: "openai/gpt-oss-20b", cloudflare: "@cf/openai/gpt-oss-20b" },
-  extract_a: { groq: "qwen3.8-27b", cloudflare: "@cf/openai/gpt-oss-20b" },
+  extract_a: { groq: "qwen/qwen3.8-27b", cloudflare: "@cf/openai/gpt-oss-20b" },
   extract_b: { groq: "openai/gpt-oss-20b", cloudflare: "@cf/openai/gpt-oss-20b" },
-  draft: { groq: "qwen3.8-27b", cloudflare: "@cf/openai/gpt-oss-20b" },
+  draft: { groq: "qwen/qwen3.8-27b", cloudflare: "@cf/openai/gpt-oss-20b" },
   judge: { groq: "openai/gpt-oss-20b", cloudflare: "@cf/openai/gpt-oss-20b" },
 };
 

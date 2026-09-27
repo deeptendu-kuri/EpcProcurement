@@ -81,7 +81,7 @@ describe("provider selection", () => {
     expect(providerFor("extract_b")).toBe("cloudflare");
     expect(providerFor("judge")).toBe("cloudflare");
     expect(providerFor("draft")).toBe("groq");
-    expect(getLLM("extract_a", db).model).toBe("qwen3.8-27b");
+    expect(getLLM("extract_a", db).model).toBe("qwen/qwen3.8-27b");
   });
 });
 
