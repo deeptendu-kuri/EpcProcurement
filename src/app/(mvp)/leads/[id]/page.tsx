@@ -1,10 +1,22 @@
-/** Placeholder — replaced by the UI builder (docs/mvp/09 §4.3, 12 §1 F3). */
+import { notFound } from "next/navigation";
+import { outreachRules } from "@/mvp/compliance";
+import { getProductById } from "@/mvp/config/profile";
+import { getLeadDetail } from "@/mvp/repo";
+import { LeadView } from "@/components/mvp/lead-view";
+
+/** Lead page with proof (docs/mvp/09 §4.3, 12 §1 F3/F4). */
 export default async function LeadPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return (
-    <section className="surface rounded-xl p-5">
-      <h1 className="text-xl font-bold text-[#101828]">Lead</h1>
-      <p className="mt-2 text-sm text-[#667085]">The lead page with proof for {id} is coming in the next build step.</p>
-    </section>
-  );
+  const detail = await getLeadDetail(id);
+  if (!detail) notFound();
+
+  const productNames = (detail.lead.client_product_ids ?? []).map((productId) => getProductById(productId)?.name ?? productId);
+  let companyOutreach = null;
+  try {
+    companyOutreach = outreachRules(detail.buyer.country ?? "");
+  } catch (error) {
+    console.error("[lead page] outreach rules failed:", error);
+  }
+
+  return <LeadView detail={detail} productNames={productNames} companyOutreach={companyOutreach} />;
 }

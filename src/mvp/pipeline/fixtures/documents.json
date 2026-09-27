@@ -1,0 +1,145 @@
+[
+  {
+    "id": "fx-01",
+    "url": "https://example.com/exchange-filings/example-infra-projects-jamnagar-kandla-epc-order",
+    "publisher_key": "example-exchange",
+    "source_name": "Example Stock Exchange filings (sample)",
+    "tier": "A",
+    "published_offset_days": -12,
+    "market": "IN",
+    "title": "Example Infra Projects Ltd - Disclosure of significant EPC order",
+    "text": "Disclosure under Regulation 30. Example Infra Projects Ltd has received an EPC order from Example Gas Transmission Ltd for the Example Jamnagar-Kandla Gas Pipeline Project in Gujarat, India. The order is valued at Rs 1,450 crore and was received on {{date:-13}}. The scope covers engineering, procurement and construction of approximately 120 km of 24-inch gas pipeline, including supply of API 5L X65 line pipe, with delivery of line pipe at Kandla port. Mechanical completion is scheduled for {{date:+540}}. Rajesh Kumar, Project Director at Example Infra Projects Ltd, will lead the execution team."
+  },
+  {
+    "id": "fx-02",
+    "url": "https://example.org/energy-news/example-infra-wins-jamnagar-kandla-pipeline",
+    "publisher_key": "example-energy-news",
+    "source_name": "Example Energy News (sample)",
+    "tier": "B",
+    "published_offset_days": -10,
+    "market": "IN",
+    "title": "Example Infra Projects wins Rs 1,450 crore gas pipeline contract",
+    "text": "Example Infra Projects Ltd has won the EPC contract for the Example Jamnagar–Kandla Gas Pipeline from Example Gas Transmission Ltd, the company said in an exchange filing. The 120 km pipeline will use 24-inch API 5L X65 line pipe and will run from Jamnagar to Kandla in Gujarat. Priya Sharma, Procurement Manager at Example Infra Projects Ltd, said line pipe and valve packages will be tendered to approved vendors in the coming weeks. Industry sources said the contract is worth Rs 1,450 crore."
+  },
+  {
+    "id": "fx-03",
+    "url": "https://example.com/tenders/sa/ex-swt-2026-114",
+    "publisher_key": "example-tender-portal",
+    "source_name": "Example Tender Portal (sample)",
+    "tier": "A",
+    "published_offset_days": -6,
+    "market": "SA",
+    "title": "Tender: Example Jubail-Riyadh Water Transmission Pipeline Project",
+    "text": "Example National Water Company has invited bids for the Example Jubail-Riyadh Water Transmission Pipeline Project in Saudi Arabia. Tender No. EX-SWT-2026-114. The EPC scope includes about 210 km of 48-inch API 5L X70 steel line pipe, pumping stations and associated valves, with line pipe to be delivered to Jubail port. Bids must be submitted by {{date:+34}}. Pre-bid clarifications: Contracts Manager Faisal Al-Harbi, Example National Water Company."
+  },
+  {
+    "id": "fx-04",
+    "url": "https://example.org/construction-weekly/ruwais-piping-subcontract",
+    "publisher_key": "example-construction-weekly",
+    "source_name": "Example Construction Weekly (sample)",
+    "tier": "B",
+    "published_offset_days": -20,
+    "market": "AE",
+    "title": "Example Emirates Piping Services wins Ruwais piping subcontract",
+    "text": "Example Gulf Contracting LLC, the main EPC contractor on the Example Ruwais Gas Processing Expansion, has awarded the mechanical and piping works subcontract to Example Emirates Piping Services LLC. The subcontract, valued at AED 180 million, was signed on {{date:-22}} and covers fabrication and erection of about 45,000 inch-dia of process piping and installation of static equipment. The Example Ruwais Gas Processing Expansion is owned by Example Emirates Gas Company PJSC and is located in Ruwais, Abu Dhabi. Ahmed Al Mansoori, Package Manager at Example Emirates Piping Services LLC, said material take-offs for pipe, fittings and valves are being finalised."
+  },
+  {
+    "id": "fx-05",
+    "url": "https://example.com/exchange-filings/example-valves-order-ruwais",
+    "publisher_key": "example-exchange",
+    "source_name": "Example Stock Exchange filings (sample)",
+    "tier": "A",
+    "published_offset_days": -15,
+    "market": "AE",
+    "title": "Example Valves Manufacturing Pvt Ltd receives order for Ruwais project",
+    "text": "Example Valves Manufacturing Pvt Ltd has received an order from Example Gulf Contracting LLC, the main EPC contractor for the Example Ruwais Gas Processing Expansion in Abu Dhabi, for the supply of API 6D pipeline ball valves. The order is valued at USD 6.5 million and deliveries are scheduled through {{date:+200}}. This is the second order received from Example Gulf Contracting LLC for the supply of valves this year."
+  },
+  {
+    "id": "fx-06",
+    "url": "https://example.com/newsroom/tampen-gas-export-pipeline-award",
+    "publisher_key": "example-nordic-newsroom",
+    "source_name": "Example Nordic Energy newsroom (sample)",
+    "tier": "A",
+    "published_offset_days": -30,
+    "market": "NO",
+    "title": "Example Nordic Energy awards Tampen gas export pipeline contract",
+    "text": "Example Nordic Energy ASA has awarded Example Offshore Pipelines AS a contract for the Example Tampen Gas Export Pipeline in the Norwegian North Sea. The contract is worth NOK 2.1 billion and was signed on {{date:-31}}. The work covers engineering, procurement and installation of about 85 km of 16-inch API 5L X65 line pipe, with pipe to be delivered to Stavanger for coating before offshore installation. Project Director Kari Nordmann of Example Offshore Pipelines AS said line pipe procurement will start this quarter."
+  },
+  {
+    "id": "fx-07",
+    "url": "https://example.com/myprocurement/results/kimanis-gas-pipeline-replacement",
+    "publisher_key": "example-myprocurement",
+    "source_name": "Example MyProcurement results (sample)",
+    "tier": "A",
+    "published_offset_days": -40,
+    "market": "MY",
+    "title": "Keputusan tender / Tender result: Example Kimanis Gas Pipeline Replacement Project",
+    "text": "Keputusan tender (tender result): Example Petroleum Sabah Sdn Bhd has awarded the Example Kimanis Gas Pipeline Replacement Project to Example Borneo Engineering Sdn Bhd, valued at RM 265 million. The contract was awarded on {{date:-42}} in Sabah, Malaysia. The scope includes replacement of approximately 38 km of 20-inch API 5L X60 line pipe and associated pipeline valves. Tender contact: Siti Aminah binti Hassan, Head of Procurement at Example Petroleum Sabah Sdn Bhd."
+  },
+  {
+    "id": "fx-08",
+    "url": "https://example.org/reports/gcc-line-pipe-market-2026",
+    "publisher_key": "example-market-research",
+    "source_name": "Example Market Research (sample)",
+    "tier": "B",
+    "published_offset_days": -5,
+    "market": "AE",
+    "title": "GCC Line Pipe Market Report 2026: Size, Share and Forecast",
+    "text": "The GCC line pipe market size is estimated at USD 3.2 billion in 2026 and is expected to grow at a CAGR of 5.1% over the forecast period to 2031. Saudi Arabia and the UAE account for most demand as national oil companies award pipeline contracts. Leading suppliers profiled in this market report include Example Pipe Mills Co and Example Tubular Products LLC. Buy the full report for detailed tender pipeline analysis."
+  },
+  {
+    "id": "fx-09",
+    "url": "https://example.org/water-journal/yanbu-coastal-pipeline-five-years",
+    "publisher_key": "example-water-journal",
+    "source_name": "Example Water Journal (sample)",
+    "tier": "B",
+    "published_offset_days": -8,
+    "market": "SA",
+    "title": "Five years on: Example Yanbu Coastal Water Pipeline performance review",
+    "text": "Example Saudi Water Authority awarded the EPC contract for the Example Yanbu Coastal Water Pipeline Project to Example Arabian Contractors Co in March 2017. The 36-inch, 140 km pipeline was completed in 2019 and has operated at full capacity since, the authority said in its annual review. Example Arabian Contractors Co used API 5L X60 line pipe delivered to Yanbu port."
+  },
+  {
+    "id": "fx-10",
+    "url": "https://example.com/tenders/ae/ex-adp-7781",
+    "publisher_key": "example-tender-portal",
+    "source_name": "Example Tender Portal (sample)",
+    "tier": "A",
+    "published_offset_days": -4,
+    "market": "AE",
+    "title": "EPC tender: Example Habshan-Ruwais Crude Line Upgrade Project",
+    "text": "Example Abu Dhabi Pipelines Company has issued an EPC tender for the Example Habshan-Ruwais Crude Line Upgrade Project in Abu Dhabi, UAE. Tender reference EX-ADP-7781. The scope includes about 95 km of 30-inch API 5L X70 line pipe, block valve stations and tie-ins, with line pipe to be delivered to Jebel Ali port. The closing date for bids is {{date:+21}}. Head of Procurement Mariam Al Suwaidi of Example Abu Dhabi Pipelines Company is the tender contact."
+  },
+  {
+    "id": "fx-11",
+    "url": "https://example.com/cppp/tenders/mehsana-flowline-replacement",
+    "publisher_key": "example-cppp",
+    "source_name": "Example Central Procurement Portal (sample)",
+    "tier": "A",
+    "published_offset_days": -3,
+    "market": "IN",
+    "title": "e-Tender: Example Mehsana Field Flowline Replacement Project",
+    "text": "Example Oil and Natural Gas Corporation Ltd invites e-tenders for the Example Mehsana Field Flowline Replacement Project in Gujarat, India. Tender No. EX-ONGC-MEH-2026-031. The work requires supply and laying of about 60 km of 8-inch API 5L X52 line pipe, with delivery at Mundra port. Bid due date: {{date:+18}}. Tender contact: Anil Mehta, Contracts Manager, Example Oil and Natural Gas Corporation Ltd."
+  },
+  {
+    "id": "fx-12",
+    "url": "https://example.org/gulf-projects/jubail-utilities-piping-award",
+    "publisher_key": "example-gulf-projects",
+    "source_name": "Example Gulf Projects (sample)",
+    "tier": "B",
+    "published_offset_days": -18,
+    "market": "SA",
+    "title": "Example Gulf Mechanical Contractors wins Jubail utilities piping EPC",
+    "text": "Example Saudi Petrochemical Company has awarded Example Gulf Mechanical Contractors Co the EPC contract for the Example Jubail Utilities Piping Upgrade Project in Jubail Industrial City, Saudi Arabia. The contract is valued at SAR 540 million and was signed on {{date:-19}}. The scope includes about 18 km of 12-inch to 36-inch API 5L X52 line pipe for utility headers, process piping and valves, with materials delivered to Dammam port. Omar Haddad, Procurement Manager at Example Gulf Mechanical Contractors Co, said purchase requisitions for line pipe and valves will be issued within weeks."
+  },
+  {
+    "id": "fx-13",
+    "url": "https://example.com/exchange-filings/example-infra-projects-vadodara-cgd-order",
+    "publisher_key": "example-exchange",
+    "source_name": "Example Stock Exchange filings (sample)",
+    "tier": "A",
+    "published_offset_days": -300,
+    "market": "IN",
+    "title": "Example Infra Projects Ltd - Order win for city gas distribution network",
+    "text": "Example Infra Projects Ltd has secured a contract from Example City Gas Distribution Ltd for the Example Vadodara City Gas Network Project in Gujarat, India. The order, valued at Rs 380 crore, was received on {{date:-301}} and covers laying of about 260 km of steel and polyethylene pipeline. Example Infra Projects Ltd has subcontracted the pipeline laying works for the network to Example Western Pipeline Services Pvt Ltd."
+  }
+]
