@@ -32,7 +32,7 @@ export default async function CompanyPage({ params }: PageProps) {
   return (
     <AppShell>
       <div className="flex flex-col gap-5">
-        <Link href="/" className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-[#2563eb]">
+        <Link href="/legacy" className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-[#2563eb]">
           <ArrowLeft size={16} />
           Dashboard
         </Link>

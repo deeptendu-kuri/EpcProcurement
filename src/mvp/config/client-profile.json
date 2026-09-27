@@ -1,0 +1,63 @@
+{
+  "_note": "EXAMPLE - replace with client data. Fictional EPC / pipe-supply profile used for the showcase slice (docs/mvp/12 section 2).",
+  "is_example": true,
+  "company_name": "Example Pipeline & Piping Co (example - replace with client data)",
+  "markets": ["IN", "SA", "AE", "NO", "MY"],
+  "disciplines": ["pipeline", "piping", "static_equipment"],
+  "adjacent_disciplines": ["insulation_painting", "construction_services", "procurement_services"],
+  "sectors": ["oil_gas", "petrochemical", "water"],
+  "related_sectors": ["power", "infrastructure"],
+  "min_project_value_usd": 2000000,
+  "sweet_spot_min_usd": 5000000,
+  "sweet_spot_max_usd": 150000000,
+  "served_ports": ["Kandla", "Mundra", "Jebel Ali", "Dammam", "Jubail", "Port Klang", "Stavanger"],
+  "served_regions": ["Gujarat", "Maharashtra", "Eastern Province", "Abu Dhabi", "Dubai", "Johor", "Rogaland"],
+  "certifications": ["ISO 9001", "ISO 14001", "ISO 45001", "API Q1", "API 5L monogram", "API 6D monogram"],
+  "local_content": {
+    "IN": { "ppp_mii_class": "I" },
+    "SA": { "iktva_score": null },
+    "AE": { "icv_cert_valid_until": "2027-03-31" }
+  },
+  "registrations": {
+    "gem_cppp": true,
+    "etimad": false,
+    "aramco_ariba": false,
+    "adnoc_supplier_hub": true,
+    "adgpg_esupply": false,
+    "magnet_jqs": false,
+    "eperolehan": false,
+    "espd_ready": true
+  },
+  "excluded_company_names": ["Example Competitor Pipes Ltd"],
+  "existing_customer_names": [],
+  "products": [
+    {
+      "id": "prod-line-pipe",
+      "name": "Carbon steel line pipe (API 5L)",
+      "discipline": "pipeline",
+      "hs_codes": ["7304", "7305", "7306"],
+      "keywords": ["line pipe", "linepipe", "API 5L", "LSAW", "ERW", "HSAW", "seamless pipe", "pipeline pipe", "X52", "X60", "X65", "X70"],
+      "spec_ranges": { "standard": ["API 5L"], "grade": ["X52", "X56", "X60", "X65", "X70"], "od_in": [4, 48] },
+      "active": true
+    },
+    {
+      "id": "prod-valves",
+      "name": "Pipeline and process valves",
+      "discipline": "piping",
+      "hs_codes": ["8481"],
+      "keywords": ["valve", "valves", "ball valve", "gate valve", "check valve", "API 6D", "pipeline valves"],
+      "spec_ranges": { "standard": ["API 6D", "API 600"], "od_in": [2, 48] },
+      "active": true
+    },
+    {
+      "id": "prod-piping-works",
+      "name": "Mechanical and piping works (fabrication and erection)",
+      "discipline": "piping",
+      "hs_codes": [],
+      "keywords": ["piping works", "mechanical and piping", "piping fabrication", "spool fabrication", "piping erection", "static equipment erection"],
+      "spec_ranges": {},
+      "active": true
+    }
+  ],
+  "updated_at": "2026-09-27T00:00:00.000Z"
+}

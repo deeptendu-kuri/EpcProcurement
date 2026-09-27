@@ -583,7 +583,7 @@ export function LeadCrm({ opportunities }: LeadCrmProps) {
                         {person.sourceUrl ? <a href={person.sourceUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-bold text-[#2563eb]">Evidence</a> : null}
                       </td>
                       <td className="px-3 py-3">
-                        <Link href={`/discovery/leads/${person.leadId}`} className="focus-ring inline-flex h-8 items-center gap-1 rounded-md bg-[#2563eb] px-2 text-xs font-bold text-white hover:bg-[#1d4ed8]">
+                        <Link href={`/legacy/discovery/leads/${person.leadId}`} className="focus-ring inline-flex h-8 items-center gap-1 rounded-md bg-[#2563eb] px-2 text-xs font-bold text-white hover:bg-[#1d4ed8]">
                           <ExternalLink size={13} />
                           View
                         </Link>
@@ -653,7 +653,7 @@ export function LeadCrm({ opportunities }: LeadCrmProps) {
                     <td className="px-3 py-3"><Badge tone={lead.emailStatus === "Verified" ? "green" : lead.emailStatus === "Risky" ? "red" : "neutral"}>{lead.emailStatus}</Badge></td>
                     <td className="max-w-[220px] px-3 py-3 text-[#344054]">{lead.requirementSummary}</td>
                     <td className="px-3 py-3">
-                      <Link href={`/discovery/leads/${lead.id}`} className="btn-primary focus-ring inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-bold">
+                      <Link href={`/legacy/discovery/leads/${lead.id}`} className="btn-primary focus-ring inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-bold">
                         <ExternalLink size={13} />
                         View
                       </Link>
@@ -829,7 +829,7 @@ export function LeadCrm({ opportunities }: LeadCrmProps) {
                         <select value={crmStatus} onChange={(event) => updateStatus(contact.id, event.target.value as CrmStatus)} aria-label={`Update ${contact.name} stage`} className="control focus-ring h-9 min-w-[116px] px-2 text-xs font-bold">
                           {(["New", "Reviewed", "Qualified", "Contacted", "Replied", "Not Fit"] as CrmStatus[]).map((status) => <option key={status} value={status}>{status}</option>)}
                         </select>
-                        <Link className="btn-primary focus-ring inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md" title={`View ${contact.name}`} aria-label={`View ${contact.name}`} href={`/companies/${opportunity.company.id}`}><ExternalLink size={14} aria-hidden="true" /></Link>
+                        <Link className="btn-primary focus-ring inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md" title={`View ${contact.name}`} aria-label={`View ${contact.name}`} href={`/legacy/companies/${opportunity.company.id}`}><ExternalLink size={14} aria-hidden="true" /></Link>
                       </div>
                     </td>
                   </tr>

@@ -18,7 +18,7 @@ export default async function LeadListsPage() {
                 Build focused account and contact lists from discovered buyers, verified roles, and source-backed project evidence.
               </p>
             </div>
-            <Link href="/usage" className="btn-quiet focus-ring inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-semibold">
+            <Link href="/legacy/usage" className="btn-quiet focus-ring inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-semibold">
               Run health
             </Link>
           </div>

@@ -2,9 +2,9 @@ import Link from "next/link";
 
 export function ModuleAction({ label, moduleTitle }: { label: string; moduleTitle: string }) {
   const destination = label === "Export CSV"
-    ? { href: "/lead-lists", label: "Choose a list to export" }
+    ? { href: "/legacy/lead-lists", label: "Choose a list to export" }
     : label === "Queue Enrichment"
-      ? { href: "/leads", label: "Open lead pipeline" }
+      ? { href: "/legacy/leads", label: "Open lead pipeline" }
       : null;
 
   if (destination) return <Link href={destination.href} className="btn-primary focus-ring inline-flex min-h-10 w-fit items-center justify-center rounded-md px-4 text-sm font-semibold">{destination.label}</Link>;

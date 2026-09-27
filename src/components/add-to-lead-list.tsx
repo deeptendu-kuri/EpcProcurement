@@ -87,7 +87,7 @@ export function AddToLeadList({ contacts }: { contacts: { contactId: string; lea
         <p className="text-xs leading-5 text-[#667085]">Research contact memberships are stored in this browser. Database synchronization is not yet available for these contacts.</p>
         <button type="button" onClick={save} disabled={loading || !selected || !contacts.length} className="btn-primary focus-ring h-10 rounded-md px-4 text-sm font-semibold disabled:opacity-50">Save to list</button>
         {message ? <p role="status" className="text-sm text-[#344054]">{message}</p> : null}
-        <Link href="/lead-lists" className="focus-ring block text-sm font-semibold text-[#2563eb]">Open Lead Lists</Link>
+        <Link href="/legacy/lead-lists" className="focus-ring block text-sm font-semibold text-[#2563eb]">Open Lead Lists</Link>
       </div>
     </FilterDrawer>
   </>;

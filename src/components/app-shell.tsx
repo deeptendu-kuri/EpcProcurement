@@ -10,8 +10,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const navigationRef = useRef<HTMLDialogElement>(null);
   const isActive = (href: string) => pathname === href
-    || (href !== "/" && pathname.startsWith(`${href}/`))
-    || (href === "/leads" && pathname.startsWith("/companies/"));
+    || (href !== "/legacy" && pathname.startsWith(`${href}/`))
+    || (href === "/legacy/leads" && pathname.startsWith("/legacy/companies/"));
   useEffect(() => {
     const dialog = navigationRef.current;
     if (!mobileNavOpen || !dialog) return;
@@ -29,25 +29,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     {
       label: "Workspace",
       items: [
-        { href: "/", label: "Dashboard", icon: Gauge },
-        { href: "/discovery", label: "SuperSearch", icon: Search },
-        { href: "/leads", label: "Leads CRM", icon: UsersRound },
-        { href: "/lead-lists", label: "Lead Lists", icon: ListChecks },
+        { href: "/legacy", label: "Dashboard", icon: Gauge },
+        { href: "/legacy/discovery", label: "SuperSearch", icon: Search },
+        { href: "/legacy/leads", label: "Leads CRM", icon: UsersRound },
+        { href: "/legacy/lead-lists", label: "Lead Lists", icon: ListChecks },
       ],
     },
     {
       label: "Operations",
       items: [
-        { href: "/signals", label: "Signals", icon: Radio },
-        { href: "/enrichment", label: "Enrichment", icon: DatabaseZap },
-        { href: "/exports", label: "Exports", icon: Download },
+        { href: "/legacy/signals", label: "Signals", icon: Radio },
+        { href: "/legacy/enrichment", label: "Enrichment", icon: DatabaseZap },
+        { href: "/legacy/exports", label: "Exports", icon: Download },
       ],
     },
     {
       label: "System",
       items: [
-        { href: "/usage", label: "Run Health", icon: BarChart3 },
-        { href: "/settings", label: "Settings", icon: Settings },
+        { href: "/legacy/usage", label: "Run Health", icon: BarChart3 },
+        { href: "/legacy/settings", label: "Settings", icon: Settings },
       ],
     },
   ] as const;
@@ -56,7 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen overflow-x-hidden bg-[#f6f8fb]">
       <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:bg-white focus:p-3">Skip to content</a>
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[#e1e6ef] bg-white px-4 shadow-sm xl:hidden">
-        <Link href="/" className="flex min-w-0 items-center gap-2.5" aria-label="Industrial Buyer AI dashboard">
+        <Link href="/legacy" className="flex min-w-0 items-center gap-2.5" aria-label="Industrial Buyer AI dashboard">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#2563eb] text-white">
             <Building2 size={17} />
           </span>

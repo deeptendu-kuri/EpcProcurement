@@ -388,7 +388,7 @@ export function DiscoveryLeadDetail({ leadId }: { leadId: string }) {
         <p className="mt-2 text-sm text-[#667085]">
           {isLoadingDatabase ? "Checking the saved CRM workspace." : "Run discovery, save a candidate, then open the detail view from the saved candidates table."}
         </p>
-        <Link href="/discovery" className="focus-ring mt-5 inline-flex h-10 items-center gap-2 rounded-md bg-[#2563eb] px-4 text-sm font-bold text-white hover:bg-[#1d4ed8]">
+        <Link href="/legacy/discovery" className="focus-ring mt-5 inline-flex h-10 items-center gap-2 rounded-md bg-[#2563eb] px-4 text-sm font-bold text-white hover:bg-[#1d4ed8]">
           <ArrowLeft size={16} />
           Back to Discovery
         </Link>
@@ -811,7 +811,7 @@ export function DiscoveryLeadDetail({ leadId }: { leadId: string }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link href="/discovery" className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-[#2563eb]">
+      <Link href="/legacy/discovery" className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-[#2563eb]">
         <ArrowLeft size={16} />
         Discovery
       </Link>

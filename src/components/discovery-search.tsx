@@ -2738,7 +2738,7 @@ export function DiscoverySearch({ opportunities }: DiscoverySearchProps) {
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex flex-col gap-2">
-                          <Link href={`/discovery/leads/${candidate.id}`} className="focus-ring inline-flex h-8 min-w-[82px] items-center justify-center gap-1 rounded-md bg-[#2563eb] px-2 text-xs font-bold text-white hover:bg-[#1d4ed8] whitespace-nowrap">
+                          <Link href={`/legacy/discovery/leads/${candidate.id}`} className="focus-ring inline-flex h-8 min-w-[82px] items-center justify-center gap-1 rounded-md bg-[#2563eb] px-2 text-xs font-bold text-white hover:bg-[#1d4ed8] whitespace-nowrap">
                             <ExternalLink size={13} />
                             Detail
                           </Link>
@@ -2807,7 +2807,7 @@ export function DiscoverySearch({ opportunities }: DiscoverySearchProps) {
                         {formatDateTime(job.queuedAt)}
                       </td>
                       <td className="px-3 py-3">
-                        <Link href={`/discovery/leads/${job.leadId}`} className="focus-ring inline-flex h-8 min-w-[82px] items-center justify-center gap-1 rounded-md border border-[#bfdbfe] bg-white px-2 text-xs font-bold text-[#1d4ed8] hover:bg-[#eff6ff] whitespace-nowrap">
+                        <Link href={`/legacy/discovery/leads/${job.leadId}`} className="focus-ring inline-flex h-8 min-w-[82px] items-center justify-center gap-1 rounded-md border border-[#bfdbfe] bg-white px-2 text-xs font-bold text-[#1d4ed8] hover:bg-[#eff6ff] whitespace-nowrap">
                           <ExternalLink size={13} />
                           Detail
                         </Link>
@@ -2921,7 +2921,7 @@ export function DiscoverySearch({ opportunities }: DiscoverySearchProps) {
                       <td className="max-w-[220px] px-3 py-3 text-[#344054]">{lead.requirementSummary}</td>
                       <td className="px-3 py-3">
                         <div className="flex flex-col gap-2">
-                          <Link href={`/discovery/leads/${lead.id}`} className="focus-ring inline-flex h-8 min-w-[82px] items-center justify-center gap-1 rounded-md bg-[#2563eb] px-2 text-xs font-bold text-white hover:bg-[#1d4ed8] whitespace-nowrap">
+                          <Link href={`/legacy/discovery/leads/${lead.id}`} className="focus-ring inline-flex h-8 min-w-[82px] items-center justify-center gap-1 rounded-md bg-[#2563eb] px-2 text-xs font-bold text-white hover:bg-[#1d4ed8] whitespace-nowrap">
                             <ExternalLink size={13} />
                             Detail
                           </Link>
@@ -3047,7 +3047,7 @@ export function DiscoverySearch({ opportunities }: DiscoverySearchProps) {
                           </div>
                         </td>
                         <td className="px-3 py-3" onClick={(event) => event.stopPropagation()}>
-                          <Link className="btn-primary focus-ring inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-bold" href={`/companies/${opportunity.company.id}`}>
+                          <Link className="btn-primary focus-ring inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-bold" href={`/legacy/companies/${opportunity.company.id}`}>
                             <ExternalLink size={13} />
                             View
                           </Link>
@@ -3252,7 +3252,7 @@ function LeadListWorkspace({
                       <div className="mt-0.5 line-clamp-2 text-xs leading-5 text-[#667085]">{opportunity.matchedQuery}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <Link className="btn-primary focus-ring inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-bold" href={`/companies/${opportunity.company.id}`}>
+                      <Link className="btn-primary focus-ring inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-bold" href={`/legacy/companies/${opportunity.company.id}`}>
                         <ExternalLink size={13} />
                         View
                       </Link>

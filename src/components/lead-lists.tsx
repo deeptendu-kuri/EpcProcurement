@@ -580,7 +580,7 @@ export function LeadLists({ opportunities, listId }: LeadListsProps) {
 
   function selectList(id: string) {
     setSelectedListId(id);
-    if (listMode) router.push(`/lead-lists/${id}`);
+    if (listMode) router.push(`/legacy/lead-lists/${id}`);
   }
 
   function removeCompanyMember(leadId: string) {
@@ -620,7 +620,7 @@ export function LeadLists({ opportunities, listId }: LeadListsProps) {
                       <span>{stats.contacts} contacts</span>
                       <span>{stats.verifiedEmails} verified</span>
                     </div>
-                    <Link href={`/lead-lists/${list.id}`} className="btn-quiet focus-ring inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs font-bold">
+                    <Link href={`/legacy/lead-lists/${list.id}`} className="btn-quiet focus-ring inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs font-bold">
                       <ExternalLink size={14} />
                       Detail
                     </Link>
@@ -665,12 +665,12 @@ export function LeadLists({ opportunities, listId }: LeadListsProps) {
             </div>
             <div className="flex flex-wrap gap-2">
               {!listMode ? (
-                <Link href={`/lead-lists/${activeListId}`} className="btn-quiet focus-ring inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-semibold">
+                <Link href={`/legacy/lead-lists/${activeListId}`} className="btn-quiet focus-ring inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-semibold">
                   <ExternalLink size={15} />
                   Open Detail
                 </Link>
               ) : (
-                <Link href="/lead-lists" className="btn-quiet focus-ring inline-flex h-9 items-center rounded-md px-3 text-sm font-semibold">All Lists</Link>
+                <Link href="/legacy/lead-lists" className="btn-quiet focus-ring inline-flex h-9 items-center rounded-md px-3 text-sm font-semibold">All Lists</Link>
               )}
               <button type="button" onClick={exportSelectedList} disabled={!canExportSelectedList} title={canExportSelectedList ? "Export this campaign list" : "Add at least one member before exporting"} className="btn-primary focus-ring inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50">
                 <Download size={15} />
