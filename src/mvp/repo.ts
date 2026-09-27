@@ -5,6 +5,7 @@
 import { getDb, type Queryable } from "@/mvp/db";
 import { getProductById } from "@/mvp/config/profile";
 import { bidChecklist, contactCountry, outreachRules } from "@/mvp/compliance";
+import { failStaleRuns } from "@/mvp/pipeline/active-runs";
 import { getCompanyInsights } from "@/mvp/scoring/graph";
 import type {
   ActivityRow,
@@ -507,6 +508,7 @@ export class DraftBlockedError extends Error {
 export async function getRun(id: string, afterEventId?: number): Promise<RunWithEvents | null> {
   if (!isUuid(id)) return null;
   const db = getDb();
+  await failStaleRuns(db); // a run left running by a stopped process reads as failed, so polling ends
   const run = (await db.query<RunRow>("select * from runs where id = $1", [id])).rows[0];
   if (!run) return null;
   const events = await db.query<RunEventRow>(
@@ -518,6 +520,7 @@ export async function getRun(id: string, afterEventId?: number): Promise<RunWith
 
 /** Most recent runs first. */
 export async function listRecentRuns(limit = 10): Promise<RunRow[]> {
+  await failStaleRuns(getDb());
   const { rows } = await getDb().query<RunRow>("select * from runs order by created_at desc limit $1", [
     Math.min(Math.max(1, Math.floor(limit)), 100),
   ]);

@@ -107,9 +107,22 @@ export function isPublicPath(pathname: string): boolean {
   return pathname === "/login" || pathname === "/api/mvp/login";
 }
 
-/** Only allow same-site relative redirect targets after login. */
+/**
+ * Only allow same-site relative redirect targets after login. Rejects control characters, whitespace
+ * and backslashes first (the URL parser strips tab/CR/LF, so `/<TAB>/evil.com` would become `//evil.com`),
+ * then resolves against a dummy origin and requires the origin to be unchanged.
+ */
 export function safeNextPath(next: string | null | undefined, fallback = "/find"): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return fallback;
-  if (next === "/login" || next.startsWith("/api/")) return fallback;
-  return next;
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return fallback;
+  if (/[\x00-\x1f\x7f\s\\]/.test(next)) return fallback;
+  let resolved: URL;
+  try {
+    resolved = new URL(next, "http://x");
+  } catch {
+    return fallback;
+  }
+  if (resolved.origin !== "http://x") return fallback;
+  const path = resolved.pathname + resolved.search + resolved.hash;
+  if (resolved.pathname === "/login" || resolved.pathname.startsWith("/api/")) return fallback;
+  return path;
 }

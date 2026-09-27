@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { z } from "zod";
-import { startRun } from "@/mvp/pipeline";
+import { startRun, waitForRun } from "@/mvp/pipeline";
 import { listRecentRuns } from "@/mvp/repo";
 import { MARKET_CODES } from "@/mvp/types";
 import { NO_STORE, readJson, serverError } from "../_shared/http";
@@ -24,6 +24,8 @@ export async function POST(request: Request) {
   if (body.response) return body.response;
   try {
     const runId = await startRun(body.data);
+    // Keep the background run alive after the 202 on hosts that end work with the response.
+    after(() => waitForRun(runId));
     return NextResponse.json({ runId }, { status: 202, headers: NO_STORE });
   } catch (error) {
     return serverError("start run", error, "The search could not start. Try again in a moment.");

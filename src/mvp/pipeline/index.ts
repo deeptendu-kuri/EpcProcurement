@@ -3,6 +3,7 @@ import { getClientProfile } from "@/mvp/config/profile";
 import { getDb, type Db } from "@/mvp/db";
 import { buildSignalsAndScore } from "@/mvp/scoring";
 import type { RunCounters, RunInput, RunStage } from "@/mvp/types";
+import { activeRuns, failStaleRuns } from "./active-runs";
 import type { RawDoc, Source, SourceContext } from "./contracts";
 import { ensureMockExtractor, extractDocument, triage } from "./extract";
 import { detectMarkets, filterDocument, queryTerms } from "./filter";
@@ -15,6 +16,7 @@ import { tedSource } from "./sources/ted";
 import { publisherKeyFor } from "./text";
 
 export { fixtureDocs } from "./sources/fixtures";
+export { failStaleRuns } from "./active-runs";
 
 /** Documents read per run at most (keeps a "Search now" run to a few minutes on free quotas). */
 export const MAX_DOCS_PER_RUN = 40;
@@ -32,13 +34,17 @@ export function liveSources(): Source[] {
  * background: collect (TED, GDELT, RSS; fixtures when MVP_OFFLINE=1 or a source fails) → read → filter →
  * extract (getLLM('extract_a'/'extract_b'), mock in demo mode) → quote check → agreement → resolve →
  * graph, then calls `buildSignalsAndScore(runId)`. Progress is appended to `run_events` with
- * `RunCounters`; `runs.status` ends as 'done' or 'failed'. A failing source never stops the run.
+ * `RunCounters`; `runs.status` ends as 'done' or 'failed' (a scoring failure also ends as 'failed').
+ * A failing source never stops the run. Runs left 'queued'/'running' by a stopped process are marked
+ * failed later by `failStaleRuns` (called here and on every run read). Callers inside a request should
+ * keep the background work alive with next/server `after(() => waitForRun(runId))`.
  *
  * @param input query text, market codes (e.g. ["IN","SA"]) and lead kinds.
  * @returns the new run id (uuid).
  */
 export async function startRun(input: RunInput): Promise<string> {
   const db = getDb();
+  await failStaleRuns(db);
   const clean: RunInput = {
     query: String(input.query ?? "").trim().slice(0, 300),
     markets: [...new Set((input.markets ?? []).map((m) => String(m).trim().toUpperCase()).filter(Boolean))],
@@ -55,12 +61,6 @@ export async function startRun(input: RunInput): Promise<string> {
   activeRuns().set(runId, pending);
   void pending.finally(() => activeRuns().delete(runId));
   return runId;
-}
-
-/** In-flight runs (tests and the API can await them). */
-function activeRuns(): Map<string, Promise<void>> {
-  const g = globalThis as unknown as { __mvpActiveRuns?: Map<string, Promise<void>> };
-  return (g.__mvpActiveRuns ??= new Map());
 }
 
 /** Resolves when the run started in this process finishes (immediately if unknown). */
@@ -278,7 +278,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     }
     if (relevant.length) await progress.emit("resolve", `Linked companies, projects and people from ${relevant.length} documents`);
 
-    // ── signals + score ──
+    // ── signals + score ── (a scoring failure fails the run: 0 leads must not look like a clean finish)
     await progress.emit("score", "Scoring…");
     try {
       const result = await buildSignalsAndScore(runId);
@@ -286,7 +286,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
       progress.counters.updatedLeads = result.updated;
     } catch (error) {
       console.error("[pipeline] scoring failed", error);
-      await progress.emit("error", `Scoring failed: ${errorText(error)}`);
+      throw new Error(`Scoring failed: ${errorText(error)}`);
     }
 
     // ── done ──
@@ -296,7 +296,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     console.error("[pipeline] run failed", error);
     await progress.emit("error", `Run failed: ${errorText(error)}`).catch(() => undefined);
     await db
-      .query("update runs set status = 'failed', finished_at = now(), error = $2, counters = $3::jsonb where id = $1", [runId, errorText(error).slice(0, 1000), JSON.stringify(progress.counters)])
+      .query("update runs set status = 'failed', finished_at = now(), error = $2, counters = $3::jsonb where id = $1 and status <> 'cancelled'", [runId, errorText(error).slice(0, 1000), JSON.stringify(progress.counters)])
       .catch(() => undefined);
   }
 }

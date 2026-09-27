@@ -11,6 +11,7 @@
  */
 import type { Queryable } from "@/mvp/db";
 import type { RawDoc } from "./contracts";
+import { BlockedUrlError, assertPublicHttpUrl, guardedLookup } from "./net-guard";
 import { canonicalUrl, cleanText, hostOf, publisherKeyFor, sha256 } from "./text";
 
 export const FETCH_TIMEOUT_MS = 20_000;
@@ -77,43 +78,89 @@ async function readCapped(res: Response, maxBytes: number): Promise<{ text: stri
   }
 }
 
+/** Most redirect hops we follow. Each hop is re-checked by the SSRF guard (and `beforeHop`). */
+export const MAX_REDIRECTS = 5;
+
+export interface FetchGuardOptions {
+  /** Called before every hop after the first (e.g. robots.txt + politeness for the new URL). Throw to stop. */
+  beforeHop?: (url: string) => Promise<void>;
+}
+
+function timeoutError(timeoutMs: number, url: string): Error {
+  return Object.assign(new Error(`timeout after ${timeoutMs} ms: ${url}`), { name: "AbortError" });
+}
+
 /**
- * fetch() with our User-Agent and ONE deadline that covers connect, headers and the whole body,
- * which is read with a byte cap. A slow-drip or endless body aborts at the deadline instead of
- * hanging the run.
+ * fetch() with our User-Agent and ONE deadline that covers connect, headers, every redirect hop and
+ * the whole body, which is read with a byte cap. Redirects are followed by hand (max MAX_REDIRECTS):
+ * every hop must pass the SSRF guard (public http(s) only) and `beforeHop`.
  */
 export async function timedFetch(
   url: string,
   init: RequestInit = {},
   timeoutMs = FETCH_TIMEOUT_MS,
   maxBytes = MAX_BODY_BYTES,
+  options: FetchGuardOptions = {},
 ): Promise<SimpleResponse> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(Object.assign(new Error("timeout"), { name: "AbortError" })), timeoutMs);
+  let current = url;
+  let method = (init.method ?? "GET").toUpperCase();
+  let body = init.body;
   try {
-    const res = await fetch(url, {
-      ...init,
-      signal: controller.signal,
-      redirect: "follow",
-      headers: { "User-Agent": userAgent(), Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5", ...(init.headers ?? {}) },
-    });
-    const body = await readCapped(res, maxBytes);
-    return { status: res.status, ok: res.ok, url: res.url || url, contentType: res.headers.get("content-type") ?? "", ...body };
+    for (let hop = 0; ; hop += 1) {
+      await assertPublicHttpUrl(current);
+      if (hop > 0) await options.beforeHop?.(current);
+      const res = await fetch(current, {
+        ...init,
+        method,
+        body,
+        signal: controller.signal,
+        redirect: "manual",
+        headers: { "User-Agent": userAgent(), Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5", ...(init.headers ?? {}) },
+      });
+      const location = res.headers.get("location");
+      if (res.status >= 300 && res.status < 400 && location) {
+        await res.body?.cancel().catch(() => undefined);
+        if (hop >= MAX_REDIRECTS) throw new Error(`too many redirects: ${url}`);
+        current = new URL(location, current).toString();
+        if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) {
+          method = "GET";
+          body = undefined;
+        }
+        continue;
+      }
+      const capped = await readCapped(res, maxBytes);
+      return { status: res.status, ok: res.ok, url: current, contentType: res.headers.get("content-type") ?? "", ...capped };
+    }
   } catch (error) {
-    if (controller.signal.aborted) throw Object.assign(new Error(`timeout after ${timeoutMs} ms: ${url}`), { name: "AbortError" });
+    if (controller.signal.aborted) throw timeoutError(timeoutMs, current);
     throw error;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** GET over node:https/http (follows up to 5 redirects). Used when fetch() fails to connect. */
-async function nodeGet(url: string, timeoutMs: number, accept: string, redirects = 5, deadline = Date.now() + timeoutMs): Promise<SimpleResponse> {
+/**
+ * GET over node:https/http, used when fetch() fails to connect. Follows up to MAX_REDIRECTS redirects,
+ * re-checking every hop with the SSRF guard and `beforeHop`; DNS answers are checked again at
+ * connect time (guardedLookup), so a rebinding host cannot reach a private address.
+ */
+async function nodeGet(
+  url: string,
+  timeoutMs: number,
+  accept: string,
+  options: FetchGuardOptions = {},
+  hop = 0,
+  deadline = Date.now() + timeoutMs,
+): Promise<SimpleResponse> {
+  await assertPublicHttpUrl(url);
+  if (hop > 0) await options.beforeHop?.(url);
   const { request } = url.startsWith("https:") ? await import("node:https") : await import("node:http");
   return new Promise<SimpleResponse>((resolve, reject) => {
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
-      reject(Object.assign(new Error(`timeout after ${timeoutMs} ms: ${url}`), { name: "AbortError" }));
+      reject(timeoutError(timeoutMs, url));
       return;
     }
     let settled = false;
@@ -123,39 +170,48 @@ async function nodeGet(url: string, timeoutMs: number, accept: string, redirects
       clearTimeout(total);
       fn();
     };
-    const req = request(url, { method: "GET", headers: { "User-Agent": userAgent(), Accept: accept }, timeout: remaining }, (res) => {
-      const status = res.statusCode ?? 0;
-      if (status >= 300 && status < 400 && res.headers.location && redirects > 0) {
-        res.resume();
-        finish(() => nodeGet(new URL(res.headers.location!, url).toString(), timeoutMs, accept, redirects - 1, deadline).then(resolve, reject));
-        return;
-      }
-      const chunks: Buffer[] = [];
-      let size = 0;
-      let truncated = false;
-      const done = () =>
-        finish(() =>
-          resolve({ status, ok: status >= 200 && status < 300, url, contentType: String(res.headers["content-type"] ?? ""), text: Buffer.concat(chunks).toString("utf8"), truncated }),
-        );
-      res.on("data", (chunk: Buffer) => {
-        if (truncated) return;
-        const left = MAX_BODY_BYTES - size;
-        if (chunk.length > left) {
-          chunks.push(chunk.subarray(0, Math.max(0, left)));
-          truncated = true;
-          done();
-          req.destroy();
+    const req = request(
+      url,
+      { method: "GET", headers: { "User-Agent": userAgent(), Accept: accept }, timeout: remaining, lookup: guardedLookup },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400 && res.headers.location) {
+          res.resume();
+          if (hop >= MAX_REDIRECTS) {
+            finish(() => reject(new Error(`too many redirects: ${url}`)));
+            return;
+          }
+          const next = new URL(res.headers.location, url).toString();
+          finish(() => nodeGet(next, timeoutMs, accept, options, hop + 1, deadline).then(resolve, reject));
           return;
         }
-        size += chunk.length;
-        chunks.push(chunk);
-      });
-      res.on("end", done);
-      res.on("error", (error) => finish(() => reject(error)));
-    });
+        const chunks: Buffer[] = [];
+        let size = 0;
+        let truncated = false;
+        const done = () =>
+          finish(() =>
+            resolve({ status, ok: status >= 200 && status < 300, url, contentType: String(res.headers["content-type"] ?? ""), text: Buffer.concat(chunks).toString("utf8"), truncated }),
+          );
+        res.on("data", (chunk: Buffer) => {
+          if (truncated) return;
+          const left = MAX_BODY_BYTES - size;
+          if (chunk.length > left) {
+            chunks.push(chunk.subarray(0, Math.max(0, left)));
+            truncated = true;
+            done();
+            req.destroy();
+            return;
+          }
+          size += chunk.length;
+          chunks.push(chunk);
+        });
+        res.on("end", done);
+        res.on("error", (error) => finish(() => reject(error)));
+      },
+    );
     // Total deadline (the socket `timeout` option is only an idle timeout).
     const total = setTimeout(() => {
-      const error = Object.assign(new Error(`timeout after ${timeoutMs} ms: ${url}`), { name: "AbortError" });
+      const error = timeoutError(timeoutMs, url);
       finish(() => reject(error));
       req.destroy(error);
     }, remaining);
@@ -167,15 +223,22 @@ async function nodeGet(url: string, timeoutMs: number, accept: string, redirects
 
 /**
  * GET a URL as text: fetch() first, then node:https when fetch cannot connect (seen on some networks
- * where undici's 10 s connect timeout trips). Throws on network failure of both. The deadline covers
- * the whole body; bodies are capped at MAX_BODY_BYTES.
+ * where undici's 10 s connect timeout trips). Throws on network failure of both, on a timeout, and
+ * on a URL (or redirect hop) blocked by the SSRF guard. The deadline covers the whole body; bodies
+ * are capped at MAX_BODY_BYTES.
  */
-export async function getText(url: string, accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5", timeoutMs = FETCH_TIMEOUT_MS): Promise<SimpleResponse> {
+export async function getText(
+  url: string,
+  accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5",
+  timeoutMs = FETCH_TIMEOUT_MS,
+  options: FetchGuardOptions = {},
+): Promise<SimpleResponse> {
   try {
-    return await timedFetch(url, { headers: { Accept: accept } }, timeoutMs);
+    return await timedFetch(url, { headers: { Accept: accept } }, timeoutMs, MAX_BODY_BYTES, options);
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw error;
-    return nodeGet(url, timeoutMs, accept);
+    if (error instanceof Error && (error.name === "AbortError" || error instanceof BlockedUrlError)) throw error;
+    if (error instanceof RobotsDisallowedError || (error instanceof Error && /too many redirects/.test(error.message))) throw error;
+    return nodeGet(url, timeoutMs, accept, options);
   }
 }
 
@@ -285,15 +348,34 @@ export type FetchOutcome =
   | { ok: true; title: string | null; text: string }
   | { ok: false; reason: "robots" | "pdf" | "http" | "timeout" | "empty" | "error"; detail?: string };
 
-/** Politely fetch a page and return its cleaned main text. Never throws. */
+/** Thrown by fetchPageText's redirect hook when robots.txt disallows a redirect target. */
+export class RobotsDisallowedError extends Error {
+  constructor(url: string) {
+    super(`disallowed by robots.txt: ${url}`);
+    this.name = "RobotsDisallowedError";
+  }
+}
+
+/**
+ * Politely fetch a page and return its cleaned main text. Never throws. Only public http(s) URLs are
+ * fetched (SSRF guard), and every redirect hop is re-checked against the guard, robots.txt and the
+ * per-host politeness delay.
+ */
 export async function fetchPageText(url: string): Promise<FetchOutcome> {
   if (/\.pdf(?:$|\?)/i.test(url)) return { ok: false, reason: "pdf", detail: "PDFs are skipped in the slice" };
   const host = hostOf(url);
   if (!host) return { ok: false, reason: "error", detail: "bad url" };
   try {
+    await assertPublicHttpUrl(url);
     if (!(await robotsAllowed(url))) return { ok: false, reason: "robots", detail: "disallowed by robots.txt" };
     await politeWait(host);
-    const res = await getText(url);
+    const res = await getText(url, undefined, FETCH_TIMEOUT_MS, {
+      beforeHop: async (next) => {
+        if (!(await robotsAllowed(next))) throw new RobotsDisallowedError(next);
+        const nextHost = hostOf(next);
+        if (nextHost && nextHost !== host) await politeWait(nextHost);
+      },
+    });
     if (!res.ok) return { ok: false, reason: "http", detail: `HTTP ${res.status}` };
     const type = res.contentType;
     if (/pdf/i.test(type)) return { ok: false, reason: "pdf", detail: "PDFs are skipped in the slice" };
@@ -302,6 +384,8 @@ export async function fetchPageText(url: string): Promise<FetchOutcome> {
     if (text.length < 200) return { ok: false, reason: "empty", detail: "too little text" };
     return { ok: true, title, text: text.slice(0, MAX_TEXT_CHARS) };
   } catch (error) {
+    if (error instanceof RobotsDisallowedError) return { ok: false, reason: "robots", detail: error.message };
+    if (error instanceof BlockedUrlError) return { ok: false, reason: "error", detail: error.message };
     const aborted = error instanceof Error && error.name === "AbortError";
     return { ok: false, reason: aborted ? "timeout" : "error", detail: error instanceof Error ? error.message : String(error) };
   }

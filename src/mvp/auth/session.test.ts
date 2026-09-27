@@ -72,5 +72,11 @@ describe("auth config", () => {
     expect(safeNextPath("/\\evil.example")).toBe("/find");
     expect(safeNextPath(null)).toBe("/find");
     expect(safeNextPath("/api/mvp/leads")).toBe("/find");
+    expect(safeNextPath(decodeURIComponent("%2F%09%2Fevil.com"))).toBe("/find");
+    expect(safeNextPath(decodeURIComponent("%2F%0A%2Fevil.com"))).toBe("/find");
+    expect(safeNextPath(decodeURIComponent("%2F%0D%2Fevil.com"))).toBe("/find");
+    expect(safeNextPath("/ /evil.com")).toBe("/find");
+    expect(safeNextPath("/login?x=1")).toBe("/find");
+    expect(safeNextPath("/leads/abc#gates")).toBe("/leads/abc#gates");
   });
 });

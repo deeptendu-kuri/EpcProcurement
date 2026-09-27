@@ -109,8 +109,9 @@ function g4(ctx: ScoringContext): GateResult {
       : { id: "G4", pass: false, why: `No closing date and no signal in the last ${G.bidMaxSignalAgeDaysWithoutClose} days` };
   }
 
-  const award = awardDate(ctx) ?? latestSignalDate(ctx);
-  if (!award) return { id: "G4", pass: false, why: "No award or signal date" };
+  // 07 §3 G4: a supply lead needs an award under 18 months old; other signals alone do not count.
+  const award = awardDate(ctx);
+  if (!award) return { id: "G4", pass: false, why: "No award date found" };
   const months = monthsBetween(award, ctx.now);
   return months < G.supplyMaxAwardAgeMonths
     ? { id: "G4", pass: true, why: `Awarded ${formatDay(award)} (${Math.max(0, Math.round(months))} months ago)` }

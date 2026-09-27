@@ -1,14 +1,25 @@
 // @vitest-environment node
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MAX_BODY_BYTES, getText, timedFetch } from "./read";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { BlockedUrlError, allowLocalFetchForTests, assertPublicHttpUrl, isPublicIp } from "./net-guard";
+import { MAX_BODY_BYTES, fetchPageText, getText, timedFetch } from "./read";
 
 let server: Server;
 let base = "";
 
 beforeAll(async () => {
   server = createServer((req, res) => {
+    if (req.url === "/to-metadata") {
+      res.writeHead(302, { location: "http://169.254.169.254/latest/meta-data/" });
+      res.end();
+      return;
+    }
+    if (req.url === "/loop") {
+      res.writeHead(302, { location: "/loop" });
+      res.end();
+      return;
+    }
     if (req.url === "/drip") {
       // Headers arrive at once, then the body drips forever.
       res.writeHead(200, { "content-type": "text/html" });
@@ -40,11 +51,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  allowLocalFetchForTests(false);
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
 });
 
 describe("timedFetch / getText", () => {
+  beforeAll(() => allowLocalFetchForTests(true));
   it("reads a normal body", async () => {
     const res = await getText(`${base}/ok`);
     expect(res.ok).toBe(true);
@@ -62,5 +75,60 @@ describe("timedFetch / getText", () => {
     const res = await timedFetch(`${base}/huge`, {}, 10_000);
     expect(res.truncated).toBe(true);
     expect(res.text.length).toBe(MAX_BODY_BYTES);
+  });
+});
+
+describe("SSRF guard", () => {
+  it("classifies addresses", () => {
+    for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "::1", "::", "fc00::1", "fd12::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "64:ff9b::a9fe:a9fe"])
+      expect(isPublicIp(ip), ip).toBe(false);
+    for (const ip of ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111", "::ffff:8.8.8.8"]) expect(isPublicIp(ip), ip).toBe(true);
+  });
+
+  it("rejects non-http schemes, odd ports, loopback and private hosts", async () => {
+    allowLocalFetchForTests(false);
+    for (const url of ["file:///etc/passwd", "ftp://example.com/", "http://example.com:8080/", "http://127.0.0.1/", "http://[::1]/", "http://169.254.169.254/latest/", "http://10.0.0.5/", "http://localhost/"])
+      await expect(assertPublicHttpUrl(url), url).rejects.toBeInstanceOf(BlockedUrlError);
+  });
+
+  it("fetchPageText refuses a loopback URL without requesting it", async () => {
+    allowLocalFetchForTests(false);
+    const out = await fetchPageText(`${base}/ok`);
+    expect(out.ok).toBe(false);
+  });
+
+  it("re-checks every redirect hop (redirect to cloud metadata is blocked)", async () => {
+    // Allow the local test server itself, but the redirect target is checked by isPublicIp via the hop guard.
+    allowLocalFetchForTests(true);
+    const hops: string[] = [];
+    await expect(
+      timedFetch(`${base}/to-metadata`, {}, 5_000, MAX_BODY_BYTES, {
+        beforeHop: async (url) => {
+          hops.push(url);
+          if (!isPublicIp(new URL(url).hostname)) throw new BlockedUrlError(`blocked ${url}`);
+        },
+      }),
+    ).rejects.toBeInstanceOf(BlockedUrlError);
+    expect(hops).toEqual(["http://169.254.169.254/latest/meta-data/"]);
+  });
+
+  it("the guard itself blocks a public URL that redirects to a private address", async () => {
+    allowLocalFetchForTests(false);
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      calls.push(url);
+      return new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data/" } });
+    });
+    try {
+      await expect(timedFetch("http://8.8.8.8/article", {}, 5_000)).rejects.toBeInstanceOf(BlockedUrlError);
+      expect(calls).toEqual(["http://8.8.8.8/article"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("stops after too many redirects", async () => {
+    allowLocalFetchForTests(true);
+    await expect(getText(`${base}/loop`, undefined, 5_000)).rejects.toThrow(/too many redirects/);
   });
 });

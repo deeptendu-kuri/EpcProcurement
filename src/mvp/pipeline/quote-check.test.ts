@@ -28,11 +28,45 @@ describe("quote check (06 §5)", () => {
     expect(verifyQuote("X70", "API 5L X65 line pipe", DOC)).toMatchObject({ ok: false, reason: "value_not_in_quote" });
   });
 
-  it("accepts numerically equivalent values", () => {
+  it("accepts numerically equivalent values for number fields only", () => {
     expect(numericEquivalent("14500000000", "Rs 1,450 crore")).toBe(true);
-    expect(verifyQuote("14,500,000,000", "valued at Rs 1,450 crore", DOC).ok).toBe(true);
+    expect(verifyQuote("14,500,000,000", "valued at Rs 1,450 crore", DOC, "number").ok).toBe(true);
+    expect(verifyQuote("24", "120 km of 24-inch", DOC, "number").ok).toBe(true);
     expect(numericEquivalent("24", "24-inch")).toBe(true);
     expect(numericEquivalent("25", "24-inch")).toBe(false);
+    // Text / name fields get no numeric fallback.
+    expect(verifyQuote("14,500,000,000", "valued at Rs 1,450 crore", DOC, "text")).toMatchObject({ ok: false, reason: "value_not_in_quote" });
+  });
+
+  it("number fields need every scaled amount in the quote, and the same currency", () => {
+    expect(numericEquivalent("USD 1.2 billion", "1.2 km of pipe")).toBe(false);
+    expect(numericEquivalent("USD 1.2 billion", "a USD 1.2 billion order")).toBe(true);
+    expect(numericEquivalent("USD 1,200 million", "a USD 1.2 billion order")).toBe(true);
+    expect(numericEquivalent("EUR 1.2 billion", "a USD 1.2 billion order")).toBe(false);
+    expect(numericEquivalent("120 km 36-inch", "120 km of 24-inch")).toBe(false);
+  });
+
+  it("names with a digit need a substring match (no numeric fallback)", () => {
+    const doc = "The contract went to Example Pipes 2 Ltd for 2 pump stations.";
+    expect(verifyQuote("Example Pipes 3 Ltd", "for 2 pump stations", doc, "name").ok).toBe(false);
+    expect(verifyQuote("Example Pipes 2 Ltd", "went to Example Pipes 2 Ltd", doc, "name").ok).toBe(true);
+  });
+
+  it("date fields need the same day, or the same month when the quote has no day", () => {
+    const doc = "Bids are due by 15 March 2026. The tender closes in March 2026, per the notice issued on 2026-01-10.";
+    // A month-only quote backs a month-precision value, never an invented day.
+    expect(verifyQuote("15 March 2026", "The tender closes in March 2026", doc, "date").ok).toBe(false);
+    expect(verifyQuote("2026-03-15", "The tender closes in March 2026", doc, "date").ok).toBe(false);
+    expect(verifyQuote("March 2026", "The tender closes in March 2026", doc, "date").ok).toBe(true);
+    expect(verifyQuote("2026-03", "The tender closes in March 2026", doc, "date").ok).toBe(true);
+    expect(verifyQuote("April 2026", "The tender closes in March 2026", doc, "date").ok).toBe(false);
+    expect(verifyQuote("2026-03-15", "Bids are due by 15 March 2026", doc, "date").ok).toBe(true);
+    expect(verifyQuote("2026-03-16", "Bids are due by 15 March 2026", doc, "date").ok).toBe(false);
+    expect(verifyQuote("5 March 2026", "Bids are due by 15 March 2026", doc, "date").ok).toBe(false);
+    expect(verifyQuote("March 2026", "Bids are due by 15 March 2026", doc, "date").ok).toBe(true);
+    expect(verifyQuote("2026-01-10", "per the notice issued on 2026-01-10", doc, "date").ok).toBe(true);
+    // A bare year in the quote never backs a full date.
+    expect(verifyQuote("2026-03-15", "notice issued on 2026", "notice issued on 2026", "date").ok).toBe(false);
   });
 
   it("normalises Arabic alef variants, tatweel and diacritics", () => {

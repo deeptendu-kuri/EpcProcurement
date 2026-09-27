@@ -313,7 +313,7 @@ class Checker {
   /** Quote-check a fact and label its agreement; null when dropped or absent. */
   fact(raw: RawFact | undefined, kind: ValueKind, bValues: (string | null | undefined)[] = [], scalar = true, label = "fact"): VerifiedFact | null {
     if (!raw) return null;
-    const check = verifyQuote(raw.value, raw.quote, this.text);
+    const check = verifyQuote(raw.value, raw.quote, this.text, kind);
     if (!check.ok) {
       this.drop(`${label}: ${check.reason} (${raw.value.slice(0, 40)})`);
       return null;

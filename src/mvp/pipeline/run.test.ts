@@ -8,6 +8,7 @@ import { createTestDb, setDbForTests, type Db } from "@/mvp/db";
 import { buildSignalsAndScore } from "@/mvp/scoring";
 import type { RunEventRow, RunRow } from "@/mvp/types";
 import { extractDocument } from "./extract";
+import { INTERRUPTED_ERROR, failStaleRuns } from "./active-runs";
 import { executeRun, startRun, waitForRun } from "./index";
 import { resolveDocument } from "./resolve";
 import { fixtureDocs } from "./sources/fixtures";
@@ -208,5 +209,31 @@ describe("offline run over fixtures", () => {
     const { rows } = await db.query<{ id: string }>("insert into runs (status) values ('queued') returning id");
     const broken = { ...db, query: async () => { throw new Error("db down"); } } as unknown as Db;
     await expect(executeRun(rows[0].id, { query: "x", markets: ["IN"], leadKinds: ["bid"] }, broken)).resolves.toBeUndefined();
+  });
+
+  it("ends as failed with the error when scoring fails", async () => {
+    vi.mocked(buildSignalsAndScore).mockRejectedValueOnce(new Error("scoring exploded"));
+    const runId = await startRun({ query: "line pipe", markets: ["IN"], leadKinds: ["bid"] });
+    await waitForRun(runId);
+    const run = (await db.query<RunRow>("select * from runs where id = $1", [runId])).rows[0];
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("Scoring failed: scoring exploded");
+    const events = (await db.query<RunEventRow>("select * from run_events where run_id = $1 order by id", [runId])).rows;
+    expect(events.map((e) => e.stage)).not.toContain("done");
+    expect(events.at(-1)!.stage).toBe("error");
+  }, 60_000);
+
+  it("marks runs left running by a stopped process as failed (interrupted)", async () => {
+    const old = await db.query<{ id: string }>(
+      "insert into runs (status, started_at, created_at) values ('running', now() - interval '1 hour', now() - interval '1 hour') returning id",
+    );
+    const fresh = await db.query<{ id: string }>("insert into runs (status, started_at) values ('running', now()) returning id");
+    expect(await failStaleRuns(db)).toBe(1);
+    const rows = (await db.query<RunRow>("select * from runs where id = any($1::uuid[])", [[old.rows[0].id, fresh.rows[0].id]])).rows;
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(byId[old.rows[0].id]).toMatchObject({ status: "failed", error: INTERRUPTED_ERROR });
+    expect(byId[fresh.rows[0].id].status).toBe("running");
+    const events = (await db.query<RunEventRow>("select * from run_events where run_id = $1", [old.rows[0].id])).rows;
+    expect(events).toEqual([expect.objectContaining({ stage: "error", message: INTERRUPTED_ERROR })]);
   });
 });

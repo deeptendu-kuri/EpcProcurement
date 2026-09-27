@@ -9,6 +9,7 @@
 import { MARKET_NAMES } from "@/mvp/config/markets";
 import type { MarketCode } from "@/mvp/types";
 import type { RawDoc, Source, SourceContext } from "../contracts";
+import { isHttpUrl } from "../net-guard";
 import { getText, politeWait } from "../read";
 
 export const GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc";
@@ -81,7 +82,7 @@ export const gdeltSource: Source = {
     const seenDomains = new Map<string, number>();
     const docs: RawDoc[] = [];
     for (const article of result.articles ?? []) {
-      if (!article.url || !article.title) continue;
+      if (!isHttpUrl(article.url) || !article.title) continue; // third-party URL: http(s) only (read step re-checks)
       if (article.language && !/english/i.test(article.language)) continue;
       const domain = article.domain ?? "";
       const count = seenDomains.get(domain) ?? 0;

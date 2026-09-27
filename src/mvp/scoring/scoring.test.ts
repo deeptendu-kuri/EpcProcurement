@@ -190,6 +190,15 @@ describe("gates (07 §3)", () => {
     expect(gate(ctx3, "G4").pass).toBe(false);
   });
 
+  it("G4 supply: fails without an award date even with a recent non-award signal", () => {
+    const ctx = workedExample();
+    ctx.triggerSignals = ctx.triggerSignals.map((s) => ({ ...s, type: "hiring_project_roles" as typeof s.type, signal_date: "2026-09-20" }));
+    ctx.parties = ctx.parties.map((p) => ({ ...p, award_date: null }));
+    const g4 = gate(ctx, "G4");
+    expect(g4.pass).toBe(false);
+    expect(g4.why).toBe("No award date found");
+  });
+
   it("G4 bid: closing ≥ 3 days away, or no date and a signal under 60 days", () => {
     const ctx = workedExample();
     ctx.kind = "bid";

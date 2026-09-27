@@ -9,6 +9,7 @@ import { mvpEnv } from "@/mvp/config/env";
 import type { RawDoc, Source, SourceContext } from "../contracts";
 import { ACTION_TERMS, SCOPE_TERMS, hasTerm } from "../filter";
 import { hostOf, publisherKeyFor } from "../text";
+import { isHttpUrl } from "../net-guard";
 import { getText, politeWait, stripHtml } from "../read";
 
 export const DEFAULT_RSS_FEEDS = [
@@ -22,7 +23,7 @@ export const RSS_MAX_ITEMS = 12;
 
 export function feedUrls(): string[] {
   const configured = mvpEnv.rssFeeds();
-  return configured.length ? configured : DEFAULT_RSS_FEEDS;
+  return (configured.length ? configured : DEFAULT_RSS_FEEDS).filter((url) => isHttpUrl(url));
 }
 
 interface FeedItem {
@@ -66,7 +67,7 @@ export function parseFeed(xml: string): FeedItem[] {
         published: date && !Number.isNaN(date.getTime()) ? date.toISOString() : null,
       };
     })
-    .filter((item) => item.link && item.title);
+    .filter((item) => isHttpUrl(item.link) && item.title); // third-party link: http(s) only
 }
 
 export const rssSource: Source = {
