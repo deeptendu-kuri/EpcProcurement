@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
-import { listLeads } from "@/mvp/repo";
-import { NO_STORE, jsonError, serverError } from "../_shared/http";
+import { leadFacets, listLeads } from "@/mvp/repo";
+import { NO_STORE, serverError } from "../_shared/http";
 import { parseLeadQuery } from "./filter";
 
 /**
- * GET /api/mvp/leads?class=&market=&product=&kind=&status=&run=&limit=&offset=
- * → { items, counts }, sorted by score then newest. `status` defaults to "open".
+ * GET /api/mvp/leads?tab=&q=&category=&market=&kind=&stage=&status=&added=&conf=&min=&product=&source=&sort=&page=&size=&run=
+ * → { items, counts, total } (+ `facets` when `facets=1`). `status` defaults to open leads, `sort` to latest.
  */
 export async function GET(request: Request) {
-  const parsed = parseLeadQuery(request.url);
-  if ("error" in parsed) return jsonError(400, parsed.error);
+  const { filter } = parseLeadQuery(request.url);
+  const withFacets = new URL(request.url).searchParams.get("facets") === "1";
   try {
-    return NextResponse.json(await listLeads(parsed.filter), { headers: NO_STORE });
+    const [result, facets] = await Promise.all([listLeads(filter), withFacets ? leadFacets(filter) : Promise.resolve(undefined)]);
+    return NextResponse.json(facets ? { ...result, facets } : result, { headers: NO_STORE });
   } catch (error) {
     return serverError("list leads", error);
   }

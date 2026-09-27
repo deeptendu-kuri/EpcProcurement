@@ -26,11 +26,16 @@ describe("leads CSV", () => {
     expect(row).toContain("https://a.example/1 https://b.example/2");
   });
 
-  it("parses inbox filters (tab alias, default open status) and rejects bad ones", () => {
-    expect(parseLeadQuery("http://x/api/mvp/leads?tab=research&market=in&kind=bid")).toEqual({
-      filter: { class: "research", market: "IN", productId: undefined, kind: "bid", status: "open", runId: undefined, limit: undefined, offset: undefined },
-    });
-    expect("error" in parseLeadQuery("http://x/api/mvp/leads?status=nope")).toBe(true);
-    expect("error" in parseLeadQuery("http://x/api/mvp/leads?run=not-a-uuid")).toBe(true);
+  it("parses inbox filters (tab alias, defaults) and ignores bad values", () => {
+    const { filter, state } = parseLeadQuery("http://x/api/mvp/leads?class=research&market=in&kind=bid&page=2&size=10");
+    expect(state.tab).toBe("research");
+    expect(filter).toMatchObject({ class: "research", market: "IN", kind: "bid", status: "open", sort: "latest", limit: 10, offset: 10 });
+    // API callers without a tab get every class.
+    expect(parseLeadQuery("http://x/api/mvp/leads").filter.class).toBeUndefined();
+    // Invalid values fall back to the defaults instead of reaching SQL.
+    const bad = parseLeadQuery("http://x/api/mvp/leads?status=nope&run=not-a-uuid&sort=drop&category=x;y");
+    expect(bad.filter).toMatchObject({ status: "open", runId: undefined, sort: "latest", discipline: undefined });
+    // limit / offset override page and size for API callers (export batches).
+    expect(parseLeadQuery("http://x/api/mvp/leads?limit=500&offset=1000").filter).toMatchObject({ limit: 500, offset: 1000 });
   });
 });

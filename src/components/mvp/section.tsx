@@ -13,7 +13,7 @@ export function Section({
   children: React.ReactNode;
 }) {
   return (
-    <details id={id} open={defaultOpen} className="surface group scroll-mt-40 rounded-xl">
+    <details id={id} open={defaultOpen} className="surface group scroll-mt-56 rounded-xl">
       <summary className="focus-ring flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 rounded-xl px-4 py-3 [&::-webkit-details-marker]:hidden">
         <h2 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#475467]">
           <span aria-hidden className="inline-block transition-transform group-open:rotate-90">▸</span>

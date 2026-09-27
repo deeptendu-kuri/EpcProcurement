@@ -1,11 +1,13 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useState, useTransition } from "react";
-import { Check, Search } from "lucide-react";
+import { useCallback, useEffect, useState, useTransition } from "react";
+import { Bookmark, Check, Loader2, Search } from "lucide-react";
 import type { LeadKind } from "@/mvp/types";
 import { apiJson } from "./api-client";
 import { RunProgress } from "./run-progress";
+import { EVENTS, emit } from "./shell/events";
+import { useToast } from "./shell/toast";
 
 type KindChoice = "both" | LeadKind;
 
@@ -15,49 +17,118 @@ const KIND_OPTIONS: { value: KindChoice; label: string }[] = [
   { value: "supply_subcontract", label: "Supply / subcontract" },
 ];
 
+interface TicketBody {
+  ticketId: string;
+  runId: string | null;
+  state: string;
+  position: number;
+  error: string | null;
+}
+
 export interface FindFormProps {
   markets: { code: string; name: string }[];
   /** Product names and keywords offered as quick-fill chips. */
   suggestions: string[];
   /** A run to show progress for on load (e.g. /find?run=…). */
   initialRunId?: string | null;
+  /** A queued search to follow on load (e.g. /find?ticket=…). */
+  initialTicketId?: string | null;
 }
 
-/** Find (09 §4.1): what you offer + markets + lead type → Search now → live progress. */
-export function FindForm({ markets, suggestions, initialRunId = null }: FindFormProps) {
+/** Find (09 §4.1, 13 §7): what you offer + markets + lead type → Search now (queued) → live progress; Save this search. */
+export function FindForm({ markets, suggestions, initialRunId = null, initialTicketId = null }: FindFormProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const toast = useToast();
   const [, startTransition] = useTransition();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>(markets.map((market) => market.code));
   const [kind, setKind] = useState<KindChoice>("both");
   const [runId, setRunId] = useState<string | null>(initialRunId);
+  const [ticketId, setTicketId] = useState<string | null>(initialRunId ? null : initialTicketId);
+  const [position, setPosition] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Follow ?run=… when the user opens another run's progress from the recent list.
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [refreshHours, setRefreshHours] = useState<string>("6");
+  const [saving, setSaving] = useState(false);
   const [seenInitial, setSeenInitial] = useState(initialRunId);
   if (initialRunId !== seenInitial) {
     setSeenInitial(initialRunId);
     if (initialRunId) setRunId(initialRunId);
   }
 
+  // Waiting in line: poll the queue until the search has a run id.
+  useEffect(() => {
+    if (!ticketId || runId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const ticket = await apiJson<TicketBody>(`/api/mvp/queue/${encodeURIComponent(ticketId)}`);
+        if (cancelled) return;
+        setPosition(ticket.position);
+        if (ticket.runId) {
+          setRunId(ticket.runId);
+          setTicketId(null);
+          window.history.replaceState(null, "", `${pathname}?run=${ticket.runId}`);
+          return;
+        }
+        if (ticket.state === "failed") {
+          setError(ticket.error ?? "The search could not start.");
+          setTicketId(null);
+          return;
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Lost the queued search.");
+          setTicketId(null);
+        }
+        return;
+      }
+      if (!cancelled) timer = setTimeout(poll, 2000);
+    };
+    let timer = setTimeout(poll, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [ticketId, runId, pathname]);
+
   const toggleMarket = (code: string) =>
     setSelected((current) => (current.includes(code) ? current.filter((value) => value !== code) : [...current, code]));
+
+  const leadKinds = (): LeadKind[] => (kind === "both" ? ["bid", "supply_subcontract"] : [kind]);
+
+  const validate = (): boolean => {
+    if (query.trim().length < 2) {
+      setError("Type what you offer, e.g. “line pipe”.");
+      return false;
+    }
+    if (!selected.length) {
+      setError("Pick at least one market.");
+      return false;
+    }
+    return true;
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
-    if (query.trim().length < 2) return setError("Type what you offer, e.g. “line pipe”.");
-    if (!selected.length) return setError("Pick at least one market.");
+    if (!validate()) return;
     setSubmitting(true);
     try {
-      const leadKinds: LeadKind[] = kind === "both" ? ["bid", "supply_subcontract"] : [kind];
-      const { runId: id } = await apiJson<{ runId: string }>("/api/mvp/runs", {
-        method: "POST",
-        body: { query: query.trim(), markets: selected, leadKinds },
-      });
-      setRunId(id);
-      window.history.replaceState(null, "", `${pathname}?run=${id}`);
+      const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), markets: selected, leadKinds: leadKinds() } });
+      emit(EVENTS.refreshStatus);
+      if (ticket.runId) {
+        setRunId(ticket.runId);
+        window.history.replaceState(null, "", `${pathname}?run=${ticket.runId}`);
+      } else {
+        setRunId(null);
+        setTicketId(ticket.ticketId);
+        setPosition(ticket.position);
+        toast.show({ message: "Another search is running. Yours starts right after it." });
+      }
       startTransition(() => router.refresh());
     } catch (err) {
       setError(err instanceof Error ? err.message : "The search could not start.");
@@ -66,12 +137,43 @@ export function FindForm({ markets, suggestions, initialRunId = null }: FindForm
     }
   };
 
-  const onFinished = useCallback(() => startTransition(() => router.refresh()), [router]);
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    if (!validate()) return;
+    setSaving(true);
+    try {
+      await apiJson("/api/mvp/saved-searches", {
+        method: "POST",
+        body: {
+          name: saveName.trim() || query.trim(),
+          query: query.trim(),
+          markets: selected,
+          leadKinds: leadKinds(),
+          refreshHours: refreshHours === "manual" ? null : Number(refreshHours),
+          lastRunId: runId,
+        },
+      });
+      toast.show({ message: refreshHours === "manual" ? "Search saved." : `Search saved. It refreshes every ${refreshHours} h while the app runs.`, tone: "success" });
+      setSaveOpen(false);
+      setSaveName("");
+      startTransition(() => router.refresh());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The search could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onFinished = useCallback(() => {
+    emit(EVENTS.refreshStatus);
+    startTransition(() => router.refresh());
+  }, [router]);
 
   return (
     <div className="flex flex-col gap-4">
-      <form onSubmit={submit} className="surface flex flex-col gap-4 rounded-xl p-4" aria-label="Search for opportunities">
-        <div className="flex flex-col gap-2 sm:flex-row">
+      <form onSubmit={submit} className="card flex flex-col gap-4 p-4 sm:p-5" aria-label="Search for opportunities">
+        <div className="flex flex-col gap-2 sm:flex-row" data-tour="find-query">
           <label htmlFor="find-query" className="sr-only">What do you offer?</label>
           <input
             id="find-query"
@@ -79,76 +181,101 @@ export function FindForm({ markets, suggestions, initialRunId = null }: FindForm
             onChange={(event) => setQuery(event.target.value)}
             placeholder='What do you offer? e.g. "line pipe", "piping"'
             maxLength={200}
-            className="control focus-ring h-11 min-w-0 flex-1 px-3 text-base"
+            className="input h-11 min-w-0 flex-1 px-3 text-base"
           />
-          <button
-            type="submit"
-            disabled={submitting}
-            className="btn-primary focus-ring inline-flex h-11 items-center justify-center gap-2 rounded-lg px-5 text-sm font-bold disabled:opacity-60"
-          >
-            <Search size={17} aria-hidden />
+          <button type="submit" disabled={submitting} className="btn btn-primary h-11 px-5" data-tour="find-search-now">
+            {submitting ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Search size={16} aria-hidden />}
             {submitting ? "Starting…" : "Search now"}
           </button>
         </div>
 
         {suggestions.length ? (
-          <div className="flex flex-wrap items-center gap-2" aria-label="Suggestions from your products">
+          <div className="flex flex-wrap items-center gap-1.5" aria-label="Suggestions from your products">
             {suggestions.map((text) => (
-              <button
-                key={text}
-                type="button"
-                onClick={() => setQuery(text)}
-                className="quiet-chip focus-ring px-2.5 py-1 text-xs font-semibold hover:border-[#b8c2d2]"
-              >
+              <button key={text} type="button" onClick={() => setQuery(text)} className="chip hover:border-[var(--line-strong)]">
                 {text}
               </button>
             ))}
           </div>
         ) : null}
 
-        <fieldset className="flex flex-wrap items-center gap-2">
-          <legend className="mb-2 text-sm font-semibold text-[#344054]">Markets</legend>
-          {markets.map((market) => {
-            const on = selected.includes(market.code);
-            return (
-              <button
-                key={market.code}
-                type="button"
-                aria-pressed={on}
-                onClick={() => toggleMarket(market.code)}
-                className={`focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm font-semibold ${
-                  on ? "border-[#2563eb] bg-[#eef4ff] text-[#1d4ed8]" : "border-[#d0d5dd] bg-white text-[#475467] hover:border-[#b8c2d2]"
-                }`}
-              >
-                {on ? <Check size={14} aria-hidden /> : null}
-                {market.name}
-              </button>
-            );
-          })}
-        </fieldset>
+        <div className="flex flex-col gap-4" data-tour="find-markets">
+          <fieldset className="flex flex-wrap items-center gap-2">
+            <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6b7280]">Markets</legend>
+            {markets.map((market) => {
+              const on = selected.includes(market.code);
+              return (
+                <button
+                  key={market.code}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => toggleMarket(market.code)}
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors ${
+                    on ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-2)]" : "border-[var(--line-strong)] bg-white text-[#4b5563] hover:border-[#b9bdc6]"
+                  }`}
+                >
+                  {on ? <Check size={13} aria-hidden /> : null}
+                  {market.name}
+                </button>
+              );
+            })}
+          </fieldset>
 
-        <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <legend className="mb-2 text-sm font-semibold text-[#344054]">Looking for</legend>
-          {KIND_OPTIONS.map((option) => (
-            <label key={option.value} className="inline-flex items-center gap-2 text-sm text-[#344054]">
-              <input
-                type="radio"
-                name="lead-kind"
-                value={option.value}
-                checked={kind === option.value}
-                onChange={() => setKind(option.value)}
-                className="h-4 w-4 accent-[#2563eb]"
-              />
-              {option.label}
-            </label>
-          ))}
-        </fieldset>
+          <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6b7280]">Looking for</legend>
+            {KIND_OPTIONS.map((option) => (
+              <label key={option.value} className="inline-flex items-center gap-2 text-sm text-[#374151]">
+                <input type="radio" name="lead-kind" value={option.value} checked={kind === option.value} onChange={() => setKind(option.value)} className="h-4 w-4 accent-[var(--accent)]" />
+                {option.label}
+              </label>
+            ))}
+          </fieldset>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-3" data-tour="find-save">
+          {saveOpen ? (
+            <div className="flex w-full flex-wrap items-end gap-2">
+              <label className="flex min-w-0 flex-[1_1_200px] flex-col gap-1 text-xs font-semibold text-[#6b7280]">
+                Name
+                <input value={saveName} onChange={(event) => setSaveName(event.target.value)} placeholder={query || "e.g. Line pipe, Gulf"} maxLength={120} className="input h-9 px-2 text-sm font-normal text-[#111827]" />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-[#6b7280]">
+                Refresh
+                <select value={refreshHours} onChange={(event) => setRefreshHours(event.target.value)} className="control h-9 px-2 text-sm font-normal text-[#111827]">
+                  <option value="6">Every 6 hours</option>
+                  <option value="12">Every 12 hours</option>
+                  <option value="24">Every 24 hours</option>
+                  <option value="manual">Manual only</option>
+                </select>
+              </label>
+              <button type="button" onClick={save} disabled={saving} className="btn btn-primary">
+                {saving ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <Bookmark size={15} aria-hidden />}
+                Save
+              </button>
+              <button type="button" onClick={() => setSaveOpen(false)} className="btn btn-ghost">Cancel</button>
+            </div>
+          ) : (
+            <>
+              <button type="button" onClick={() => setSaveOpen(true)} className="btn btn-secondary">
+                <Bookmark size={15} aria-hidden />
+                Save this search
+              </button>
+              <span className="text-xs text-[#6b7280]">Saved searches refresh by themselves every 6, 12 or 24 hours while the app runs.</span>
+            </>
+          )}
+        </div>
 
         {error ? (
-          <p role="alert" className="rounded-md border border-[#fecdca] bg-[#fef3f2] px-3 py-2 text-sm font-semibold text-[#b42318]">{error}</p>
+          <p role="alert" className="rounded-lg border border-[#fecdca] bg-[#fef3f2] px-3 py-2 text-sm font-semibold text-[#b42318]">{error}</p>
         ) : null}
       </form>
 
+      {ticketId && !runId ? (
+        <section aria-label="Search progress" className="card flex items-center gap-2 p-4 text-sm text-[#374151]">
+          <Loader2 size={16} className="animate-spin text-[var(--accent)]" aria-hidden />
+          Waiting in line{position > 0 ? ` (number ${position})` : ""}: another search is running. Yours starts right after it.
+        </section>
+      ) : null}
       {runId ? <RunProgress key={runId} runId={runId} onFinished={onFinished} /> : null}
     </div>
   );

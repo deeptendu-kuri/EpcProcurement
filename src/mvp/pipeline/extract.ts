@@ -14,10 +14,11 @@ import { EXTRACT_PASS_MODELS, getLLM, setMockExtractor, type LLMProvider, type L
 import type { Queryable } from "@/mvp/db";
 import type { Discipline, PartyRole, ProcurementRoute, ProjectStage } from "@/mvp/types";
 import { DISCIPLINES, PARTY_ROLES } from "@/mvp/types";
-import { agreementFor, type AgreementLabel, type ValueKind } from "./agreement";
+import { agreementFor, valuesAgree, type AgreementLabel, type ValueKind } from "./agreement";
 import type { StructuredFacts } from "./contracts";
 import { verifyQuote } from "./quote-check";
-import { rulesP1, rulesP2, rulesP3 } from "./rules-extract";
+import { classifyAward, disciplineIn, isParentMention, rulesP1, rulesP2, rulesP3, splitSentences } from "./rules-extract";
+import { tidyCompanyName } from "./text";
 import {
   EMPTY_P1, EMPTY_P2, EMPTY_P3, P0Schema, P1Schema, P2Schema, P3Schema, parseJsonLoose,
   type P1Output, type P2Output, type P3Output, type PassName, type RawFact,
@@ -246,11 +247,11 @@ interface PassResults {
   extractedBy: string;
 }
 
-async function runModels(text: string, url: string, db: Queryable | undefined, runId: string | undefined, onNote?: (msg: string) => Promise<void>): Promise<PassResults> {
+async function runModels(text: string, url: string, db: Queryable | undefined, runId: string | undefined, onNote?: (msg: string) => Promise<void>, forceRules = false): Promise<PassResults> {
   ensureMockExtractor();
   const llmA = getLLM("extract_a", db);
   const llmB = getLLM("extract_b", db);
-  const rulesMode = llmA.name === "mock";
+  const rulesMode = forceRules || llmA.name === "mock";
   const chunks = rulesMode ? relevanceChunks(text) : relevanceChunks(text, LIVE_CHUNK_CHARS, 1);
   const wantP2 = SCOPE_HINT.test(text);
   const wantP3 = PERSON_HINT.test(text);
@@ -275,7 +276,14 @@ async function runModels(text: string, url: string, db: Queryable | undefined, r
     return { p1: mergeP1(p1s), p2: mergeP2(p2s), p3: mergeP3(p3s) };
   };
 
-  if (rulesMode) return { a: await runAll(() => llmA), b: null, mode: "rule", extractedBy: "rule:mock-rules" };
+  if (rulesMode) {
+    if (llmA.name !== "mock") {
+      // Sample data run with live keys: answer with the rules extractor, spend no AI quota.
+      const p1 = rulesP1(text);
+      return { a: { p1, p2: rulesP2(text, p1), p3: rulesP3(text) }, b: null, mode: "rule", extractedBy: "rule:mock-rules" };
+    }
+    return { a: await runAll(() => llmA), b: null, mode: "rule", extractedBy: "rule:mock-rules" };
+  }
 
   const useB = llmB.name !== "mock" && llmB.name !== llmA.name;
   const [aResult, bResult] = await Promise.allSettled([runAll(passLLM), useB ? runAll(() => llmB) : Promise.resolve(null)]);
@@ -380,6 +388,16 @@ class Checker {
 
 const vals = (facts: (RawFact | undefined)[]) => facts.map((f) => f?.value ?? null);
 
+export { tidyCompanyName };
+
+/** A verified company-name fact after name hygiene (tidyCompanyName), or null when it is not a company. */
+function tidyNameFact(fact: VerifiedFact | null): VerifiedFact | null {
+  if (!fact) return null;
+  const tidy = tidyCompanyName(fact.value);
+  if (!tidy) return null;
+  return tidy === fact.value ? fact : { ...fact, value: tidy };
+}
+
 /** Apply the quote check and agreement to model A's output (compared with B's) → ExtractedDoc. */
 export function checkAndAgree(text: string, results: PassResults): ExtractedDoc {
   const { a, b, mode, extractedBy } = results;
@@ -388,14 +406,24 @@ export function checkAndAgree(text: string, results: PassResults): ExtractedDoc 
   const bCompanies = b?.p1.companies ?? [];
   const companies: ExtractedCompany[] = [];
   for (const company of a.p1.companies) {
-    const name = c.fact(company.name, "name", vals(bCompanies.map((x) => x.name)), false, "company");
+    const name = tidyNameFact(c.fact(company.name, "name", vals(bCompanies.map((x) => x.name)), false, "company"));
     if (!name) continue;
-    const role = (PARTY_ROLES as readonly string[]).includes(company.role) ? (company.role as PartyRole) : "unknown";
+    let role: PartyRole | "unknown" = (PARTY_ROLES as readonly string[]).includes(company.role) ? (company.role as PartyRole) : "unknown";
     let roleFact: VerifiedFact | null = null;
     if (role !== "unknown" && company.role_quote) {
       // B's role for the same company (matched by name) — a different role is a dispute.
       const bMatch = bCompanies.find((x) => x.name && agreementFor("compare", "name", name.value, [x.name.value], true) === "both");
-      roleFact = c.role(role, company.role_quote, bMatch?.role && bMatch.role !== "unknown" ? bMatch.role : null);
+      let bRole: string | null = bMatch?.role && bMatch.role !== "unknown" ? bMatch.role : null;
+      // Both models say this company won the work but name the role differently (supplier vs main_epc):
+      // the award sentence decides, by the same rules as the rules extractor (07 §2).
+      if (bRole && bRole !== role && AWARDEE_ROLES.includes(role as PartyRole) && AWARDEE_ROLES.includes(bRole as PartyRole)) {
+        const settled = classifyAward(company.role_quote).awardee as PartyRole;
+        if (settled === role || settled === bRole) {
+          role = settled;
+          bRole = settled;
+        }
+      }
+      roleFact = c.role(role, company.role_quote, bRole);
     }
     const country = c.fact(company.country ?? null, "enum", [], false, "company country");
     companies.push({ name, role: roleFact ? role : "unknown", roleFact, country });
@@ -426,7 +454,7 @@ export function checkAndAgree(text: string, results: PassResults): ExtractedDoc 
       discipline: pkg.discipline,
       name,
       scope: c.fact(pkg.scope ?? null, "text", vals(bSame.map((x) => x.scope)), false, "package scope"),
-      owner: c.fact(pkg.owner ?? null, "name", vals(bSame.map((x) => x.owner)), bSame.length > 0, "package owner"),
+      owner: tidyNameFact(c.fact(pkg.owner ?? null, "name", vals(bSame.map((x) => x.owner)), bSame.length > 0, "package owner")),
       route: pkg.procurement_route,
     });
   }
@@ -461,11 +489,228 @@ export function checkAndAgree(text: string, results: PassResults): ExtractedDoc 
     people.push({
       name,
       title: c.fact(person.title ?? null, "name", [bMatch?.title?.value], false, "title"),
-      company: c.fact(person.company ?? null, "name", [bMatch?.company?.value], false, "person company"),
+      company: tidyNameFact(c.fact(person.company ?? null, "name", [bMatch?.company?.value], false, "person company")),
     });
   }
 
   return { project, companies, packages, requirements, people, stats: { kept: c.kept, dropped: c.dropped, dropReasons: c.reasons }, extractedBy };
+}
+
+// ───────────────────────── news awards → project / package / stage (07 §1, §2) ─────────────────────────
+
+/** Roles of a company that won work in the document. */
+export const AWARDEE_ROLES: readonly PartyRole[] = ["main_epc", "consortium_member", "subcontractor", "supplier"];
+
+const AWARD_WORDS = STAGE_WORDS.awarded!;
+const PACKAGE_LABEL: Partial<Record<Discipline, string>> = {
+  pipeline: "pipeline",
+  piping: "piping",
+  static_equipment: "static equipment",
+};
+
+/**
+ * Model facts that the deterministic rules extractor also found are upgraded from `single` to `both`
+ * (two independent extractors agree, 06 §4): company names, roles, project name, value and award date.
+ * Nothing is added and nothing is downgraded. Exported for tests.
+ */
+export function corroborateWithRules(ex: ExtractedDoc, rules: P1Output): ExtractedDoc {
+  const up = (fact: VerifiedFact | null, kind: ValueKind, ruleValue: string | null | undefined): VerifiedFact | null =>
+    fact && fact.agreement === "single" && ruleValue && valuesAgree(kind, fact.value, ruleValue) ? { ...fact, agreement: "both" } : fact;
+  const companies = ex.companies.map((company) => {
+    const rule = rules.companies.find((r) => r.name && valuesAgree("name", company.name.value, r.name.value));
+    if (!rule?.name) return company;
+    const sameRole =
+      company.role !== "unknown" &&
+      (rule.role === company.role ||
+        (AWARDEE_ROLES.includes(company.role) && AWARDEE_ROLES.includes(rule.role as PartyRole) && classifyAward(company.roleFact?.quote ?? "").awardee === company.role));
+    return {
+      ...company,
+      name: up(company.name, "name", rule.name.value)!,
+      roleFact: sameRole ? up(company.roleFact, "enum", company.role) : company.roleFact,
+    };
+  });
+  return {
+    ...ex,
+    companies,
+    project: {
+      ...ex.project,
+      name: up(ex.project.name, "name", rules.project_name?.value),
+      value: up(ex.project.value, "number", rules.contract_value?.value),
+      awardDate: up(ex.project.awardDate, "date", rules.award_date?.value),
+    },
+  };
+}
+
+/**
+ * Rules first (06 §1): what the deterministic rules extractor finds and the models missed or lost in
+ * the quote check (a truncated quote, a title-case headline, no role given) is added, labelled `rule`:
+ * - companies the models did not name (name + role);
+ * - a role for a company the models named without one (or whose role quote failed);
+ * - the stage, project name, value and award date when the models gave none.
+ * Model facts are never replaced. Every rule quote is a sentence of the text (verified again here).
+ * Exported for tests.
+ */
+export function adoptRuleFacts(ex: ExtractedDoc, rules: P1Output, text: string): ExtractedDoc {
+  const ruleFact = (value: string, quote: string, kind: ValueKind = "text"): VerifiedFact | null => {
+    const check = verifyQuote(value, quote, text, kind);
+    if (!check.ok) return null;
+    return { value: value.trim(), quote: quote.trim(), start: check.start, end: check.end, agreement: "rule", extractedBy: "rule:regex" };
+  };
+  const roleFact = (role: string, quote: string): VerifiedFact | null => {
+    const check = verifyQuote(quote, quote, text);
+    return check.ok ? { value: role, quote: quote.trim(), start: check.start, end: check.end, agreement: "rule", extractedBy: "rule:regex" } : null;
+  };
+  const companies = ex.companies.map((c) => ({ ...c }));
+  let kept = 0;
+  for (const rule of rules.companies) {
+    if (!rule.name) continue;
+    const role = (PARTY_ROLES as readonly string[]).includes(rule.role) ? (rule.role as PartyRole) : null;
+    const known = companies.find((c) => valuesAgree("name", c.name.value, rule.name!.value));
+    if (known) {
+      if (known.role === "unknown" && role && rule.role_quote) {
+        const fact = roleFact(role, rule.role_quote);
+        if (fact) {
+          known.role = role;
+          known.roleFact = fact;
+          kept++;
+        }
+      }
+      continue;
+    }
+    const name = tidyNameFact(ruleFact(rule.name.value, rule.name.quote, "name"));
+    if (!name) continue;
+    const fact = role && rule.role_quote ? roleFact(role, rule.role_quote) : null;
+    companies.push({ name, role: fact ? role! : "unknown", roleFact: fact, country: null });
+    kept += fact ? 2 : 1;
+  }
+  const project = { ...ex.project };
+  if (!project.stage && rules.stage !== "unknown" && rules.stage_quote) {
+    const fact = roleFact(rules.stage, rules.stage_quote);
+    if (fact) {
+      project.stage = rules.stage as ProjectStage;
+      project.stageFact = fact;
+      kept++;
+    }
+  }
+  const fill = (current: VerifiedFact | null, raw: { value: string; quote: string } | null | undefined, kind: ValueKind) => {
+    if (current || !raw) return current;
+    const fact = ruleFact(raw.value, raw.quote, kind);
+    if (fact) kept++;
+    return fact;
+  };
+  project.name = fill(project.name, rules.project_name, "name");
+  project.value = fill(project.value, rules.contract_value, "number");
+  project.awardDate = fill(project.awardDate, rules.award_date, "date");
+  if (!kept) return ex;
+  return { ...ex, companies, project, stats: { ...ex.stats, kept: ex.stats.kept + kept } };
+}
+
+/** The sentence of `text` containing `phrase` (verbatim), or null. */
+function sentenceWith(text: string, phrase: RegExp): { sentence: string; start: number } | null {
+  for (const sentence of splitSentences(text.slice(0, 6000))) {
+    if (phrase.test(sentence)) return { sentence, start: text.indexOf(sentence) };
+  }
+  return null;
+}
+
+/**
+ * Complete an award or tender article so that it can become a lead (07 §1/§2):
+ * - stage: an awardee whose role quote is an award sentence ("X bags order from Y", "Y awarded the EPC
+ *   contract to Z") makes the stage `awarded` when the models gave none;
+ * - project: when the article names no project, one is named from the buyer, the scope and the
+ *   awardee ("Aramco pipeline contract – Welspun Corp"), quoting the award sentence;
+ * - package: when no package was extracted in the award's discipline, one is created from the scope
+ *   phrase of the award sentence (or headline), owned by the awardee (EPC / subcontractor) or, for a
+ *   supply order, by the buyer that placed it.
+ * Derived facts are labelled `rule` with extractedBy "rule:derived"; their quotes are verified substrings.
+ * Exported for tests.
+ */
+export function deriveFromAward(input: ExtractedDoc, text: string): ExtractedDoc {
+  // A pipe or valve order is a supply order even when the models call the winner an EPC contractor
+  // ("Welspun wins steel pipe contract"): the award sentence decides supply vs EPC (07 §2).
+  const ex: ExtractedDoc = {
+    ...input,
+    companies: input.companies.map((c) =>
+      (c.role === "main_epc" || c.role === "consortium_member") && c.roleFact && classifyAward(c.roleFact.quote).awardee === "supplier" && !/\bEPC\b/.test(c.roleFact.quote)
+        ? { ...c, role: "supplier" as const, roleFact: { ...c.roleFact, value: "supplier" } }
+        : c,
+    ),
+  };
+  const awardees = ex.companies.filter((c) => AWARDEE_ROLES.includes(c.role as PartyRole) && c.roleFact && AWARD_WORDS.test(c.roleFact.quote));
+  const tendering = ex.project.stage === "epc_tender" || ex.project.stage === "prequalification";
+  const owner = ex.companies.find((c) => c.role === "owner") ?? null;
+  if (!awardees.length && !(tendering && owner)) return ex;
+  const priority: PartyRole[] = ["main_epc", "consortium_member", "subcontractor", "supplier"];
+  const awardee = [...awardees].sort((a, b) => priority.indexOf(a.role as PartyRole) - priority.indexOf(b.role as PartyRole))[0] ?? null;
+  const anchor = awardee?.roleFact ?? owner?.roleFact ?? ex.project.stageFact;
+  if (!anchor) return ex;
+  const derived = (value: string, quote: string, start: number | null): VerifiedFact => ({
+    value,
+    quote,
+    start,
+    end: start === null ? null : start + quote.length,
+    agreement: "rule",
+    extractedBy: "rule:derived",
+  });
+  const out: ExtractedDoc = { ...ex, project: { ...ex.project }, packages: [...ex.packages] };
+
+  // Stage
+  if (awardee && (!out.project.stage || ["concept", "feasibility", "feed", "prequalification", "epc_tender"].includes(out.project.stage))) {
+    out.project.stage = "awarded";
+    out.project.stageFact = { ...awardee.roleFact!, value: "awarded" };
+  }
+
+  // Scope of the award: the award sentence first, then the rest of the article.
+  let scope = disciplineIn(anchor.quote);
+  let scopeQuote = anchor.quote;
+  let scopeStart = anchor.start;
+  if (!scope) {
+    const found = sentenceWith(text, /pipe|piping|valve|pressure vessel|storage tank|heat exchanger/i);
+    const inText = found ? disciplineIn(found.sentence) : null;
+    if (found && inText) {
+      scope = inText;
+      scopeQuote = found.sentence;
+      scopeStart = found.start >= 0 ? found.start : null;
+    }
+  }
+
+  // Buyer of a supply order: the company in the award sentence that is not the supplier.
+  const BUYER_ROLES = ["main_epc", "consortium_member", "subcontractor", "owner"];
+  // The parent of the awardee ("Welspun Corp's US unit wins …", "Welspun associate EPIC bags …") is
+  // not the buyer of the order: skip it and take the next party.
+  const awardQuote = awardee?.roleFact?.quote ?? "";
+  const isParent = (c: ExtractedCompany) => Boolean(awardee) && (isParentMention(awardQuote, c.name.value) || isParentMention(text.slice(0, 600), c.name.value));
+  const inAwardSentence = (c: ExtractedCompany) => c !== awardee && c.role !== "supplier" && awardQuote.includes(c.name.value) && !isParent(c);
+  const buyerOfSupply =
+    awardee?.role === "supplier"
+      ? (ex.companies.find((c) => inAwardSentence(c) && BUYER_ROLES.includes(c.role)) ??
+        ex.companies.find((c) => inAwardSentence(c)) ??
+        ex.companies.find((c) => c !== awardee && BUYER_ROLES.includes(c.role) && !isParent(c)) ??
+        null)
+      : null;
+
+  // Project
+  if (!out.project.name && scope) {
+    const label = PACKAGE_LABEL[scope.discipline] ?? scope.discipline.replace(/_/g, " ");
+    const client = awardee?.role === "supplier" ? buyerOfSupply : owner;
+    const name = awardee
+      ? `${client ? `${client.name.value} ` : ""}${label} ${awardee.role === "supplier" ? "supply " : ""}contract – ${awardee.name.value}`
+      : `${owner!.name.value} ${label} tender`;
+    out.project.name = derived(name.charAt(0).toUpperCase() + name.slice(1), anchor.quote, anchor.start);
+  }
+
+  // Package in the award's discipline
+  if (scope && !out.packages.some((p) => p.discipline === scope!.discipline)) {
+    const packageOwner = awardee ? (awardee.role === "supplier" ? buyerOfSupply : awardee) : owner;
+    out.packages.push({
+      discipline: scope.discipline,
+      name: derived(scope.phrase, scopeQuote, scopeStart),
+      scope: null,
+      owner: packageOwner ? packageOwner.name : null,
+      route: tendering && !awardee ? "open_tender" : "unknown",
+    });
+  }
+  return out;
 }
 
 /** Rules-extracted specs to fill requirements the model missed (live mode only; 06 §3 "rules first"). */
@@ -483,23 +728,30 @@ function withRuleSpecs(results: PassResults, text: string): PassResults {
  */
 export async function extractDocument(
   doc: { text: string; url: string; structured?: StructuredFacts | null },
-  options: { db?: Queryable; runId?: string; onNote?: (message: string) => Promise<void> } = {},
+  options: { db?: Queryable; runId?: string; onNote?: (message: string) => Promise<void>; /** Rules extractor only (sample-data runs). */ rulesOnly?: boolean } = {},
 ): Promise<ExtractedDoc> {
   if (doc.structured) {
     const s = doc.structured;
     return checkAndAgree(doc.text, { a: { p1: s.p1, p2: s.p2, p3: s.p3 ?? EMPTY_P3 }, b: null, mode: "rule", extractedBy: s.extractedBy });
   }
-  const results = await runModels(doc.text, doc.url, options.db, options.runId, options.onNote);
+  const results = await runModels(doc.text, doc.url, options.db, options.runId, options.onNote, options.rulesOnly === true);
+  // Live models: facts the rules extractor also finds count as two-extractor agreement (`both`);
+  // what only the rules extractor finds is added as `rule` (rules first, 06 §1).
+  const finish = (ex: ExtractedDoc): ExtractedDoc => {
+    if (results.mode === "rule") return deriveFromAward(ex, doc.text);
+    const rules = rulesP1(doc.text);
+    return deriveFromAward(adoptRuleFacts(corroborateWithRules(ex, rules), rules, doc.text), doc.text);
+  };
   const ruleSpecs = withRuleSpecs(results, doc.text);
   if (ruleSpecs !== results) {
     // Requirements from rules are labelled 'rule' even in live mode.
     const extracted = checkAndAgree(doc.text, results);
     const rulesOnly = checkAndAgree(doc.text, { a: { p1: EMPTY_P1, p2: { packages: [], requirements: ruleSpecs.a.p2.requirements }, p3: EMPTY_P3 }, b: null, mode: "rule", extractedBy: "rule:regex" });
-    return {
+    return finish({
       ...extracted,
       requirements: rulesOnly.requirements,
       stats: { kept: extracted.stats.kept + rulesOnly.stats.kept, dropped: extracted.stats.dropped + rulesOnly.stats.dropped, dropReasons: [...extracted.stats.dropReasons, ...rulesOnly.stats.dropReasons] },
-    };
+    });
   }
-  return checkAndAgree(doc.text, results);
+  return finish(checkAndAgree(doc.text, results));
 }

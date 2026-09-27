@@ -66,7 +66,7 @@ export const GENERIC_QUERY_TERMS = new Set([
 
 /** Figurative uses of "pipeline" (deal/IPO/hotel pipelines) removed before the scope check. */
 const FIGURATIVE_PIPELINE = [
-  /\b(?:ipo|deal|deals|hotel|hotels|property|real estate|project|projects|order|sales|talent|drug|investment|investments|renewables?|re|ai|data cent(?:re|er)s?|content|product|funding|launch|policy|development|tech|m&a|capacity|contract|contracts|housing|infrastructure|room|rooms|film|pharma|clinical|export|hiring|revenue|bid|tender|opportunity)\s+pipelines?\b/gi,
+  /\b(?:ipo|deal|deals|hotel|hotels|property|real estate|project|projects|order|sales|talent|drug|investment|investments|renewables?|re|ai|data cent(?:re|er)s?|order ?book|orderbook|defen[cs]e|ipo|listing|startup|venture|dealmaking|m&a|content|product|funding|launch|policy|development|tech|m&a|capacity|contract|contracts|housing|infrastructure|room|rooms|film|pharma|clinical|export|hiring|revenue|bid|tender|opportunity)\s+pipelines?\b/gi,
   /\bpipelines? of (?:projects|deals|orders|ipos|investments|talent|contracts|opportunities|hotels|rooms)\b/gi,
   /\bin the pipeline\b/gi,
 ];
@@ -74,6 +74,29 @@ const FIGURATIVE_PIPELINE = [
 /** Text with figurative "pipeline" phrases removed (for the scope check only). */
 export function scopeText(text: string): string {
   return FIGURATIVE_PIPELINE.reduce((t, re) => t.replace(re, " "), text);
+}
+
+/**
+ * Oil, gas and water-infrastructure words that make a "pipeline" physical (07 §2 news precision).
+ * "Gas pipeline", "120 km pipeline", "water transmission pipeline" pass; "orderbook … pipeline builds",
+ * "AI pipeline", "drone order pipeline" do not.
+ */
+const PIPELINE_DOMAIN =
+  /\b(?:gas|oil|crude|petroleum|products?|lpg|lng|cng|png|natural gas|hydrocarbons?|refiner(?:y|ies)|petrochemicals?|condensate|ethane|ammonia|hydrogen|co2|carbon capture|water|desalinat\w*|sewage|sewer(?:age)?|wastewater|effluent|slurry|irrigation|drinking|jet fuel|fuel|transmission|trunk|distribution|city gas|km|kms|kilomet(?:re|er)s?|inch(?:es)?|diameter|mm|laying|lay|pumping|compressor|subsea|offshore|onshore|cross-country|steel|welded|pipe|pipes|flowlines?|spur|interconnector|terminal|gail|ongc|iocl|indian oil|aramco|adnoc|petronas|swpc|swcc|dewa|taqa)\b/i;
+
+const PIPELINE_WORD = /\bpipelines?\b/gi;
+
+/**
+ * Is at least one "pipeline" in the text a physical oil/gas/water pipeline? Looks for a domain word
+ * within 70 characters of each (non-figurative) mention. Exported for tests.
+ */
+export function mentionsPhysicalPipeline(text: string): boolean {
+  const t = scopeText(text);
+  for (const m of t.matchAll(PIPELINE_WORD)) {
+    const window = t.slice(Math.max(0, m.index! - 70), m.index! + m[0].length + 70).replace(m[0], " ");
+    if (PIPELINE_DOMAIN.test(window)) return true;
+  }
+  return false;
 }
 
 /** Scope terms for a run: query terms (minus generic words), active product keywords, core disciplines, SCOPE_TERMS. */
@@ -86,7 +109,16 @@ export function scopeTermsFor(profile: ClientProfile, queryTermList: string[]): 
 /** First scope term in the text (figurative "pipeline" ignored), or null. */
 export function findScope(text: string, terms: readonly string[]): string | null {
   const t = scopeText(text);
-  for (const term of terms) if (hasTerm(t, term)) return term;
+  let physical: boolean | null = null;
+  for (const term of terms) {
+    if (!hasTerm(t, term)) continue;
+    // A bare "pipeline" only counts when it is an oil, gas or water pipeline (not a deal/AI/order pipeline).
+    if (term === "pipeline" || term === "pipelines") {
+      physical ??= mentionsPhysicalPipeline(text);
+      if (!physical) continue;
+    }
+    return term;
+  }
   return null;
 }
 

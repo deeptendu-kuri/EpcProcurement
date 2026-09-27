@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** The root sends users to Find (the proxy has already required a session). */
+/** The root sends users to the Overview (the proxy has already required a session). */
 export default function RootPage() {
-  redirect("/find");
+  redirect("/overview");
 }

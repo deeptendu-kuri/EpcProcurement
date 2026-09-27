@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { getClientProfile } from "@/mvp/config/profile";
-import { filterDocument, queryTerms, scopeText } from "./filter";
-import { buildBingQuery, decodeBingLink, parseBingRss } from "./sources/bing-news";
+import { filterDocument, findScope, mentionsPhysicalPipeline, queryTerms, scopeTermsFor, scopeText } from "./filter";
+import { BING_MKT, BING_QUERIES_PER_MARKET, buildBingQueries, buildBingQuery, decodeBingLink, parseBingRss, sameStory } from "./sources/bing-news";
+import { DEFAULT_RSS_FEEDS, feedUrls } from "./sources/rss";
 import { buildTedQuery, disciplineFor } from "./sources/ted";
 
 const NOW = new Date("2026-09-27T00:00:00Z");
@@ -80,5 +81,68 @@ describe("source queries", () => {
       `<rss><channel><item><title>A wins pipeline contract</title><link>http://www.bing.com/news/apiclick.aspx?url=https%3a%2f%2fexample.com%2fa</link><description>Text</description><pubDate>Wed, 23 Sep 2026 17:00:00 GMT</pubDate></item></channel></rss>`,
     );
     expect(items).toEqual([{ title: "A wins pipeline contract", url: "https://example.com/a", description: "Text", published: "2026-09-23T17:00:00.000Z", source: null }]);
+  });
+});
+
+describe("news recall and precision (07 §2)", () => {
+  it("builds short award-phrased queries per market, in the market's Bing edition", () => {
+    expect(buildBingQueries(queryTerms("pipeline"), "IN")).toEqual([
+      "pipeline contract India",
+      "GAIL pipeline contract",
+      "pipe contract GAIL",
+      "gas pipeline contract bags",
+      "water pipeline contract India",
+      "pipe order India",
+    ]);
+    expect(buildBingQueries(queryTerms("pipeline EPC contract"), "SA")).toContain("pipe contract Aramco");
+    expect(buildBingQueries(queryTerms("pipeline"), "SA")).toContain("water transmission pipeline Saudi");
+    expect(buildBingQueries([], "AE")).toEqual(expect.arrayContaining(["ADNOC pipeline contract", "DEWA pipeline contract"]));
+    expect(buildBingQueries(queryTerms("line pipe"), "MY")).toEqual([
+      "line pipe contract Malaysia",
+      "Petronas line pipe contract",
+      "pipe contract Petronas",
+      "Petronas Carigali contract",
+      "water pipeline contract Malaysia",
+      "pipe order Malaysia",
+    ]);
+    // Non-pipe scopes get no pipeline-specific market queries.
+    expect(buildBingQueries(queryTerms("pressure vessel"), "IN").join(" ")).not.toMatch(/pipe/);
+    expect(buildBingQueries(queryTerms("piping works"), "IN")[0]).toBe("piping contract India");
+    for (const market of ["IN", "SA", "AE", "MY"]) {
+      const queries = buildBingQueries([], market);
+      expect(queries.length).toBeLessThanOrEqual(BING_QUERIES_PER_MARKET);
+      expect(queries.join(" ")).not.toMatch(/["()]|\bOR\b/); // plain queries: Bing RSS returns few items for operators
+    }
+    expect(BING_MKT).toMatchObject({ IN: "en-in", SA: "en-xa", AE: "en-ae", MY: "en-my" });
+  });
+
+  it("detects syndicated copies of one story, not different stories of one company", () => {
+    expect(sameStory("Welspun secures $412.5 million pipe order in the United States", "Welspun Corp secures $412.5 million HFIW pipe order, global order book hits record $4.7 billion")).toBe(true);
+    expect(sameStory("Welspun Corp bags largest-ever Rs 4,000 cr pipe order", "Welspun Corp's associate firm wins ₹2,000 crore steel pipe contract from Aramco")).toBe(false);
+  });
+
+  it("keeps oil, gas and water pipelines; drops figurative ones", () => {
+    expect(mentionsPhysicalPipeline("Desco Infratech secures gas pipeline contract from Adani Total Gas")).toBe(true);
+    expect(mentionsPhysicalPipeline("GMDA awards contract for 200mld water pipeline")).toBe(true);
+    expect(mentionsPhysicalPipeline("Gamuda orderbook seen hitting RM60bil as contract pipeline builds")).toBe(false);
+    expect(mentionsPhysicalPipeline("Bitdeer says its AI pipeline has crossed $7B after Malaysia expansion")).toBe(false);
+    expect(mentionsPhysicalPipeline("Drone stock: strong order pipeline, says broker")).toBe(false);
+    const terms = scopeTermsFor(profile, queryTerms("pipeline"));
+    expect(findScope("India’s Rs 9.3 lakh cr defence pipeline: big approval jump", terms)).toBeNull();
+    expect(findScope("Welspun wins steel pipe contract from Aramco", terms)).not.toBeNull();
+    const r = verdict("Bitdeer secures Malaysia AI facility as sales pipeline tops $7 billion", "Bitdeer secured a contract in Malaysia; its sales pipeline tops $7 billion.", ["MY"]);
+    expect(r.verdict).toBe("drop");
+  });
+
+  it("reads the configured feeds plus the default feeds", () => {
+    const saved = process.env.RSS_FEEDS;
+    process.env.RSS_FEEDS = "https://feeds.example.com/a.xml";
+    try {
+      expect(feedUrls()[0]).toBe("https://feeds.example.com/a.xml");
+      expect(feedUrls()).toEqual(expect.arrayContaining(DEFAULT_RSS_FEEDS));
+    } finally {
+      if (saved === undefined) delete process.env.RSS_FEEDS;
+      else process.env.RSS_FEEDS = saved;
+    }
   });
 });

@@ -7,6 +7,7 @@ import { ActivitySection } from "./activity-section";
 import { DraftPanel, type DraftContact } from "./draft-panel";
 import { EvidenceProvider } from "./evidence";
 import { LeadHeader } from "./lead-header";
+import { LeadRail, draftBlockedReason } from "./lead-rail";
 import {
   BuyerHistorySection,
   ComplianceSection,
@@ -59,29 +60,42 @@ export function LeadView({ detail, productNames, companyOutreach }: LeadViewProp
 
   return (
     <EvidenceProvider evidence={detail.evidence}>
-      <div className="flex flex-col gap-3 pb-10">
+      <div className="flex flex-col gap-4 pb-10">
         <LeadHeader
           lead={lead}
           buyerName={buyer.canonical_name}
           projectName={project?.name ?? null}
           productLabel={productNames.join(", ") || null}
           onDraftEmail={() => setDraftOpen(true)}
-          onAddNote={addNote}
+          draftBlocked={draftBlockedReason(contacts)}
         />
         <RejectedBanner gates={detail.gates} leadClass={lead.class} status={lead.status} rejectReason={lead.reject_reason} />
-        <WhySection reasons={detail.reasons} signals={detail.signals} />
-        <ProjectSection detail={detail} />
-        <SupplyChainSection detail={detail} />
-        <PeopleSection detail={detail} />
-        <BuyerHistorySection insights={detail.buyerInsights} buyerName={buyer.canonical_name} />
-        <Section id="score" title="Score breakdown">
-          <ScoreBreakdown breakdown={detail.breakdown} score={lead.score} />
-        </Section>
-        <ComplianceSection
-          items={detail.compliance.bid}
-          eligibility={eligibilitySub ? { points: eligibilitySub.points, max: eligibilitySub.max } : null}
-        />
-        <ActivitySection ref={noteRef} leadId={lead.id} activities={detail.activities} people={detail.people} />
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="flex min-w-0 flex-col gap-3">
+            <div data-tour="lead-why">
+              <WhySection reasons={detail.reasons} signals={detail.signals} />
+            </div>
+            <ProjectSection detail={detail} />
+            <SupplyChainSection detail={detail} />
+            <PeopleSection detail={detail} />
+            <BuyerHistorySection insights={detail.buyerInsights} buyerName={buyer.canonical_name} />
+            <Section id="score" title="Score breakdown">
+              <ScoreBreakdown breakdown={detail.breakdown} score={lead.score} />
+            </Section>
+            <ComplianceSection
+              items={detail.compliance.bid}
+              eligibility={eligibilitySub ? { points: eligibilitySub.points, max: eligibilitySub.max } : null}
+            />
+            <ActivitySection ref={noteRef} leadId={lead.id} activities={detail.activities} people={detail.people} />
+          </div>
+          <LeadRail
+            lead={lead}
+            contacts={contacts}
+            compliance={detail.compliance.bid}
+            onDraftEmail={() => setDraftOpen(true)}
+            onAddNote={addNote}
+          />
+        </div>
       </div>
       {draftOpen ? (
         <DraftPanel

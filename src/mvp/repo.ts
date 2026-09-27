@@ -3,12 +3,18 @@
  * All functions use getDb(); rows are typed in src/mvp/types.ts. Parameterised SQL only.
  */
 import { getDb, type Queryable } from "@/mvp/db";
-import { getProductById } from "@/mvp/config/profile";
+import { getClientProfile, getProductById } from "@/mvp/config/profile";
 import { bidChecklist, contactCountry, outreachRules } from "@/mvp/compliance";
 import { failStaleRuns } from "@/mvp/pipeline/active-runs";
 import { getCompanyInsights } from "@/mvp/scoring/graph";
 import type {
   ActivityRow,
+  AddedWindow,
+  FacetOption,
+  LeadFacets,
+  LeadSort,
+  OverviewStats,
+  ProjectStage,
   ActivityType,
   ChecklistItem,
   CompanyInsights,
@@ -46,7 +52,7 @@ import type {
 export const OPEN_STATUSES: LeadStatus[] = ["new", "accepted", "contacted", "rfq", "quoted"];
 const LEAD_CLASSES: LeadClass[] = ["genuine", "research", "watch", "rejected"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DEFAULT_PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 500;
 
 /** True when `value` is a uuid (ids that are not uuids can never match a row and would fail the cast). */
@@ -62,39 +68,182 @@ function uniqUuids(values: Iterable<string | null | undefined>): string[] {
 
 // ───────────────────────── leads inbox ─────────────────────────
 
-interface LeadListSqlRow extends LeadRow {
-  buyer_name: string;
-  buyer_country: string | null;
-  project_name: string | null;
-  project_country: string | null;
-  package_name: string | null;
-  package_discipline: Discipline | null;
-}
-
 const LEAD_LIST_FROM = `
   from leads l
   join companies c on c.id = l.buyer_company_id
   left join projects p on p.id = l.project_id
   left join packages pk on pk.id = l.package_id`;
 
-/** WHERE clause for every filter except the class (so the tab counts can share it). */
-function leadWhere(filter: LeadFilter): { sql: string; params: unknown[] } {
+/** Filter dimensions that have options with counts (facets) in the Leads filter bar. */
+export type LeadDimension = "class" | "discipline" | "market" | "kind" | "stage" | "status" | "confidence" | "product" | "source";
+
+const ADDED_INTERVAL: Record<AddedWindow, string> = { "24h": "24 hours", "7d": "7 days", "30d": "30 days" };
+
+/**
+ * Collects positional parameters ($1, $2 …) for one statement. Values are never inlined into SQL.
+ */
+export class SqlParams {
+  readonly values: unknown[] = [];
+  /** Add a value and return its placeholder, e.g. "$3". */
+  add(value: unknown): string {
+    this.values.push(value);
+    return `$${this.values.length}`;
+  }
+}
+
+/** Escape % _ and \ for an ILIKE pattern (used with `escape '\'`). */
+export function escapeLike(text: string): string {
+  return text.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+/** Product id -> discipline, from the client profile (lets leads without a package still have a category). */
+function productDisciplineMap(): Record<string, string> {
+  return Object.fromEntries(getClientProfile().products.map((product) => [product.id, product.discipline]));
+}
+
+/** Product ids whose name or keywords contain the text (free-text search also finds products). */
+function productIdsMatching(text: string): string[] {
+  const needle = text.trim().toLowerCase();
+  if (!needle) return [];
+  return getClientProfile()
+    .products.filter((product) => [product.name, ...product.keywords].some((word) => word.toLowerCase().includes(needle)))
+    .map((product) => product.id);
+}
+
+/** SQL expression for a facet dimension (the value shown as a filter option). */
+export function dimensionExpr(dim: Exclude<LeadDimension, "product">, sql: SqlParams): string {
+  switch (dim) {
+    case "class":
+      return "l.class";
+    case "discipline":
+      return `coalesce(pk.discipline, ${sql.add(JSON.stringify(productDisciplineMap()))}::jsonb ->> l.client_product_ids[1])`;
+    case "market":
+      return "upper(coalesce(p.country, c.country))";
+    case "kind":
+      return "l.kind";
+    case "stage":
+      return "p.current_stage";
+    case "status":
+      return "l.status";
+    case "confidence":
+      return "l.confidence_band";
+    case "source":
+      return "(case when l.is_sample then 'sample' else 'live' end)";
+  }
+}
+
+/**
+ * WHERE clause for a lead filter. `omit` leaves out some dimensions (a facet counts its options with
+ * every other filter applied; the class tabs count with everything but the class).
+ */
+export function buildLeadWhere(filter: LeadFilter, sql: SqlParams, omit: LeadDimension[] = []): string {
+  const skip = new Set(omit);
   const clauses: string[] = [];
-  const params: unknown[] = [];
-  const add = (sql: (n: string) => string, value: unknown) => {
-    params.push(value);
-    clauses.push(sql(`$${params.length}`));
+
+  if (filter.q?.trim()) {
+    const text = filter.q.trim().slice(0, 200);
+    const like = sql.add(`%${escapeLike(text)}%`);
+    const products = sql.add(productIdsMatching(text));
+    clauses.push(
+      `(c.canonical_name ilike ${like} escape '\\' or p.name ilike ${like} escape '\\' or pk.name ilike ${like} escape '\\'` +
+        ` or l.tender_ref ilike ${like} escape '\\' or l.client_product_ids && ${products}::text[])`,
+    );
+  }
+  if (filter.class && !skip.has("class")) clauses.push(`l.class = ${sql.add(filter.class)}`);
+  if (filter.discipline && !skip.has("discipline")) clauses.push(`${dimensionExpr("discipline", sql)} = ${sql.add(filter.discipline)}`);
+  if (filter.market && !skip.has("market")) clauses.push(`${dimensionExpr("market", sql)} = upper(${sql.add(filter.market)})`);
+  if (filter.kind && !skip.has("kind")) clauses.push(`l.kind = ${sql.add(filter.kind)}`);
+  if (filter.stage && !skip.has("stage")) clauses.push(`p.current_stage = ${sql.add(filter.stage)}`);
+  if (filter.confidence && !skip.has("confidence")) clauses.push(`l.confidence_band = ${sql.add(filter.confidence)}`);
+  if (filter.productId && !skip.has("product")) clauses.push(`${sql.add(filter.productId)}::text = any(l.client_product_ids)`);
+  if (filter.source && !skip.has("source")) clauses.push(`l.is_sample = ${sql.add(filter.source === "sample")}`);
+  if (filter.runId && isUuid(filter.runId)) clauses.push(`l.run_id = ${sql.add(filter.runId)}::uuid`);
+  if (filter.added && ADDED_INTERVAL[filter.added]) {
+    clauses.push(`l.created_at >= now() - ${sql.add(ADDED_INTERVAL[filter.added])}::interval`);
+  }
+  if (typeof filter.minScore === "number" && Number.isFinite(filter.minScore) && filter.minScore > 0) {
+    clauses.push(`l.score >= ${sql.add(Math.min(100, Math.floor(filter.minScore)))}`);
+  }
+  if (!skip.has("status")) {
+    if (filter.statuses?.length) {
+      clauses.push(`l.status = any(${sql.add(filter.statuses)}::text[])`);
+    } else {
+      const status = filter.status ?? "open";
+      if (status === "open") clauses.push(`l.status = any(${sql.add(OPEN_STATUSES)}::text[])`);
+      else if (status !== "all") clauses.push(`l.status = ${sql.add(status)}`);
+    }
+  }
+  return clauses.length ? `where ${clauses.join(" and ")}` : "";
+}
+
+const SORT_SQL: Record<LeadSort, string> = {
+  latest: "l.created_at desc, l.score desc nulls last, l.id",
+  score: "l.score desc nulls last, l.created_at desc, l.id",
+  // Future closing dates first (soonest first), then past ones, then leads without a date.
+  closing: "(l.closing_date is null), (l.closing_date < current_date), l.closing_date asc, l.score desc nulls last, l.id",
+};
+
+/** Clamp a page size / offset from user input. */
+export function pageWindow(filter: Pick<LeadFilter, "limit" | "offset">): { limit: number; offset: number } {
+  const limit = Math.min(Math.max(1, Math.floor(Number(filter.limit) || DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE);
+  const offset = Math.max(0, Math.floor(Number(filter.offset) || 0));
+  return { limit, offset };
+}
+
+/**
+ * The statements behind `listLeads`: one page of items and the per-class counts (for the tabs).
+ * Pure (no database), so the filter/paging SQL can be unit-tested.
+ */
+export function buildLeadListQuery(filter: LeadFilter): {
+  items: { sql: string; params: unknown[] };
+  classCounts: { sql: string; params: unknown[] };
+} {
+  const itemParams = new SqlParams();
+  const where = buildLeadWhere(filter, itemParams);
+  const { limit, offset } = pageWindow(filter);
+  const order = SORT_SQL[filter.sort ?? "latest"] ?? SORT_SQL.latest;
+  const items = `select l.*, c.canonical_name as buyer_name, c.country as buyer_country,
+      p.name as project_name, p.country as project_country, p.current_stage as project_stage,
+      pk.name as package_name, ${dimensionExpr("discipline", itemParams)} as package_discipline
+    ${LEAD_LIST_FROM} ${where}
+    order by ${order} limit ${itemParams.add(limit)} offset ${itemParams.add(offset)}`;
+
+  const countParams = new SqlParams();
+  const countWhere = buildLeadWhere(filter, countParams, ["class"]);
+  const classCounts = `select l.class as value, count(*)::int as n ${LEAD_LIST_FROM} ${countWhere} group by l.class`;
+  return { items: { sql: items, params: itemParams.values }, classCounts: { sql: classCounts, params: countParams.values } };
+}
+
+/** Statement counting the options of one filter dimension, with every other filter applied. */
+export function buildFacetQuery(filter: LeadFilter, dim: LeadDimension): { sql: string; params: unknown[] } {
+  const sql = new SqlParams();
+  const omit: LeadDimension[] = [dim];
+  if (dim === "status") omit.push("status");
+  if (dim === "product") {
+    const where = buildLeadWhere(filter, sql, omit);
+    return {
+      sql: `select x.value, count(*)::int as n ${LEAD_LIST_FROM} cross join lateral unnest(l.client_product_ids) as x(value)
+        ${where} group by x.value order by n desc, x.value`,
+      params: sql.values,
+    };
+  }
+  const expr = dimensionExpr(dim, sql);
+  const where = buildLeadWhere(filter, sql, omit);
+  return {
+    sql: `select value, count(*)::int as n from (select ${expr} as value ${LEAD_LIST_FROM} ${where}) f
+      where value is not null group by value order by n desc, value`,
+    params: sql.values,
   };
+}
 
-  if (filter.market) add((n) => `upper(coalesce(p.country, c.country)) = upper(${n})`, filter.market);
-  if (filter.productId) add((n) => `${n}::text = any(l.client_product_ids)`, filter.productId);
-  if (filter.kind) add((n) => `l.kind = ${n}`, filter.kind);
-  if (filter.runId && isUuid(filter.runId)) add((n) => `l.run_id = ${n}::uuid`, filter.runId);
-  const status = filter.status ?? "open";
-  if (status === "open") add((n) => `l.status = any(${n}::text[])`, OPEN_STATUSES);
-  else if (status !== "all") add((n) => `l.status = ${n}`, status);
-
-  return { sql: clauses.length ? `where ${clauses.join(" and ")}` : "", params };
+interface LeadListSqlRow extends LeadRow {
+  buyer_name: string;
+  buyer_country: string | null;
+  project_name: string | null;
+  project_country: string | null;
+  project_stage: ProjectStage | null;
+  package_name: string | null;
+  package_discipline: Discipline | null;
 }
 
 function toListItem(row: LeadListSqlRow): LeadListItem {
@@ -119,41 +268,91 @@ function toListItem(row: LeadListSqlRow): LeadListItem {
     closingDate: row.closing_date,
     isSample: row.is_sample,
     createdAt: row.created_at,
+    stage: row.project_stage ?? null,
+    nextAction: row.next_action ?? null,
   };
 }
 
 /**
- * Leads for the inbox, sorted by score desc then newest, with per-class counts for the tabs.
- * `filter.status` defaults to "open".
+ * Leads for the inbox: one page (sorted by `filter.sort`, default "latest"), the per-class counts for
+ * the tabs and the total for the current filter. `filter.status` defaults to "open".
  */
 export async function listLeads(filter: LeadFilter = {}): Promise<LeadListResult> {
   const db = getDb();
-  const where = leadWhere(filter);
-
-  const params = [...where.params];
-  let sql = `select l.*, c.canonical_name as buyer_name, c.country as buyer_country,
-      p.name as project_name, p.country as project_country, pk.name as package_name, pk.discipline as package_discipline
-    ${LEAD_LIST_FROM} ${where.sql}`;
-  if (filter.class) {
-    params.push(filter.class);
-    sql += `${where.sql ? " and" : " where"} l.class = $${params.length}`;
-  }
-  const limit = Math.min(Math.max(1, Math.floor(filter.limit ?? DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE);
-  const offset = Math.max(0, Math.floor(filter.offset ?? 0));
-  params.push(limit, offset);
-  sql += ` order by l.score desc nulls last, l.created_at desc, l.id limit $${params.length - 1} offset $${params.length}`;
-
+  const query = buildLeadListQuery(filter);
   const [items, counts] = await Promise.all([
-    db.query<LeadListSqlRow>(sql, params),
-    db.query<{ class: LeadClass; n: number }>(
-      `select l.class, count(*)::int as n ${LEAD_LIST_FROM} ${where.sql} group by l.class`,
-      where.params,
-    ),
+    db.query<LeadListSqlRow>(query.items.sql, query.items.params),
+    db.query<{ value: LeadClass; n: number }>(query.classCounts.sql, query.classCounts.params),
   ]);
 
   const countMap = Object.fromEntries(LEAD_CLASSES.map((cls) => [cls, 0])) as Record<LeadClass, number>;
-  for (const row of counts.rows) countMap[row.class] = Number(row.n);
-  return { items: items.rows.map(toListItem), counts: countMap };
+  for (const row of counts.rows) countMap[row.value] = Number(row.n);
+  const total = filter.class ? countMap[filter.class] : LEAD_CLASSES.reduce((sum, cls) => sum + countMap[cls], 0);
+  return { items: items.rows.map(toListItem), counts: countMap, total };
+}
+
+const FACET_DIMENSIONS = ["discipline", "market", "kind", "stage", "status", "confidence", "product", "source"] as const;
+
+/** Options with counts for every filter of the Leads filter bar, computed from the leads in the database. */
+export async function leadFacets(filter: LeadFilter = {}): Promise<LeadFacets> {
+  const db = getDb();
+  const results = await Promise.all(
+    FACET_DIMENSIONS.map(async (dim) => {
+      const query = buildFacetQuery(filter, dim);
+      const { rows } = await db.query<{ value: string; n: number }>(query.sql, query.params);
+      return [dim, rows.map((row) => ({ value: String(row.value), count: Number(row.n) }))] as const;
+    }),
+  );
+  return Object.fromEntries(results) as unknown as LeadFacets;
+}
+
+/** Counts of one dimension (e.g. leads by market) for a filter. */
+export async function facetCounts(filter: LeadFilter, dim: LeadDimension): Promise<FacetOption[]> {
+  const query = buildFacetQuery(filter, dim);
+  const { rows } = await getDb().query<{ value: string; n: number }>(query.sql, query.params);
+  return rows.map((row) => ({ value: String(row.value), count: Number(row.n) }));
+}
+
+export const PIPELINE_STATUSES: LeadStatus[] = ["accepted", "contacted", "rfq", "quoted"];
+
+/** Overview (docs/mvp/13 §3): 4 KPIs, leads by market and category, latest leads. */
+export async function getOverviewStats(): Promise<OverviewStats> {
+  const db = getDb();
+  const [kpis, byMarket, byCategory, latest] = await Promise.all([
+    db.query<{ new_week: number; genuine: number; closing: number; in_pipeline: number; total: number }>(
+      `select
+         count(*) filter (where created_at >= now() - interval '7 days' and class <> 'rejected')::int as new_week,
+         count(*) filter (where class = 'genuine' and status = any($1::text[]))::int as genuine,
+         count(*) filter (where closing_date between current_date and current_date + 14 and status = any($1::text[]))::int as closing,
+         count(*) filter (where status = any($2::text[]))::int as in_pipeline,
+         count(*)::int as total
+       from leads`,
+      [OPEN_STATUSES, PIPELINE_STATUSES],
+    ),
+    facetCounts({ status: "open" }, "market"),
+    facetCounts({ status: "open" }, "discipline"),
+    listLeads({ status: "open", sort: "latest", limit: 12 }),
+  ]);
+  const row = kpis.rows[0];
+  return {
+    newThisWeek: Number(row?.new_week ?? 0),
+    genuine: Number(row?.genuine ?? 0),
+    closingSoon: Number(row?.closing ?? 0),
+    inPipeline: Number(row?.in_pipeline ?? 0),
+    totalLeads: Number(row?.total ?? 0),
+    byMarket,
+    byCategory,
+    latest: latest.items.filter((item) => item.class !== "rejected").slice(0, 5),
+  };
+}
+
+/** New Genuine leads (sidebar badge) and the time of the last finished run ("Updated x min ago"). */
+export async function getAppStatusCounts(): Promise<{ newGenuine: number; lastFinishedAt: string | null }> {
+  const { rows } = await getDb().query<{ new_genuine: number; last_finished: string | null }>(
+    `select (select count(*)::int from leads where class = 'genuine' and status = 'new') as new_genuine,
+            (select max(finished_at) from runs where status = 'done') as last_finished`,
+  );
+  return { newGenuine: Number(rows[0]?.new_genuine ?? 0), lastFinishedAt: rows[0]?.last_finished ?? null };
 }
 
 /** Evidence URLs behind each lead (reasons, signals, breakdown), for the CSV export. */

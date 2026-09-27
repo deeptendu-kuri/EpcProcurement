@@ -3,7 +3,7 @@
  * GET https://api.gdeltproject.org/api/v2/doc/doc?query=…&mode=artlist&format=json&maxrecords=50&timespan=3months
  * Response: { articles: [{ url, title, seendate: "20260920T101500Z", domain, language, sourcecountry }] }.
  * GDELT asks for at most one request every 5 seconds; when throttled it answers with a plain-text
- * message instead of JSON, which we treat as "rate limited" (single attempt, 10 s timeout).
+ * message instead of JSON, which we treat as "rate limited" (single attempt, 20 s timeout).
  * Article pages are fetched later by the read step (text = null here).
  */
 import { MARKET_NAMES } from "@/mvp/config/markets";
@@ -16,7 +16,7 @@ export const GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc";
 /** Articles taken per run (each is then fetched politely). */
 export const GDELT_MAX_ARTICLES = 12;
 /** One short attempt: GDELT is often slow or throttled from shared IPs, and must never stall a run. */
-export const GDELT_TIMEOUT_MS = 10_000;
+export const GDELT_TIMEOUT_MS = 20_000;
 
 const TRIGGERS = ["tender", "awarded", "contract"];
 

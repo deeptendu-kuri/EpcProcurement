@@ -228,3 +228,96 @@ export function canonicalUrl(url: string): string {
     return url.trim();
   }
 }
+
+// ───────────────────────── company names: hygiene and aliases ─────────────────────────
+
+/** Places that extractors sometimes return as a company ("UAE awards contract …"): not a buyer. */
+const PLACE_NAMES = new Set([
+  "uae", "u.a.e", "united arab emirates", "india", "saudi arabia", "saudi", "ksa", "kingdom of saudi arabia", "malaysia",
+  "qatar", "oman", "kuwait", "bahrain", "norway", "dubai", "abu dhabi", "sharjah", "riyadh", "jeddah", "dammam", "gujarat",
+  "maharashtra", "rajasthan", "mumbai", "delhi", "new delhi", "gurugram", "gurgaon", "kuala lumpur", "sabah", "sarawak", "johor",
+  "oslo", "us", "usa", "u.s", "united states", "uk", "china", "egypt", "iraq",
+]);
+const PLACE_ALT = [...PLACE_NAMES].map((p) => p.replace(/[.]/g, "\\.")).sort((a, b) => b.length - a.length).join("|");
+/** "UAE's Emarat", "Dubai-based X", "Saudi Arabia’s Y": the place prefix is not part of the company name. */
+const PLACE_PREFIX = new RegExp(String.raw`^(?:the\s+)?(?:${PLACE_ALT})(?:['’]s\s+|\s*-\s*based\s+)`, "i");
+const WEEKDAY_DATELINE = /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*[.:,–-]\s*/i;
+
+/**
+ * Company-name hygiene for any extracted buyer / awardee / owner name: strips a run-together dateline
+ * ("Wednesday.GMDA" → "GMDA") and a place prefix ("UAE's Emarat" → "Emarat"), and returns null for a
+ * bare place name ("UAE", "Saudi Arabia"). The result is always a substring of the input, so a
+ * verified quote still contains it.
+ */
+export function tidyCompanyName(value: string): string | null {
+  let name = value.trim();
+  for (let i = 0; i < 2; i++) name = name.replace(WEEKDAY_DATELINE, "").replace(PLACE_PREFIX, "").trim();
+  name = name.replace(/[,;:]+$/, "").trim();
+  if (name.length < 2 || PLACE_NAMES.has(name.toLowerCase().replace(/^the\s+/, "").replace(/\.$/, ""))) return null;
+  return name;
+}
+
+/**
+ * The main name and the aliases written into one company name:
+ * "Saudi Arabian Oil Co. (Saudi Aramco)" → main "Saudi Arabian Oil Co.", aliases ["Saudi Aramco"];
+ * "East Pipes Integrated Company for Industry, or EPIC" → main "East Pipes …", aliases ["EPIC"].
+ */
+export function companyNameParts(name: string): { main: string; aliases: string[] } {
+  let main = name.replace(/\s+/g, " ").trim();
+  const aliases: string[] = [];
+  const paren = main.match(/^(.+?)\s*\(\s*["“']?([^()"”']{2,60})["”']?\s*\)\s*$/);
+  if (paren) {
+    main = paren[1].trim();
+    aliases.push(paren[2].trim());
+  }
+  const or = main.match(/^(.+?),\s*(?:or|also known as|aka)\s+["“']?([^,"”']{2,60})["”']?$/i);
+  if (or) {
+    main = or[1].trim();
+    aliases.push(or[2].trim());
+  }
+  return { main: main.replace(/[,;]+$/, "").trim(), aliases };
+}
+
+/** Display form: "Main (Alias)" (", or EPIC" becomes "(EPIC)"). */
+export function displayCompanyName(name: string): string {
+  const { main, aliases } = companyNameParts(name);
+  return aliases.length ? `${main} (${aliases.join(", ")})` : main;
+}
+
+/** Well-known companies written several ways in the press; each group counts as one company. */
+const KNOWN_ALIAS_GROUPS: { key: string; country: string | null; names: string[] }[] = [
+  { key: "aramco", country: "SA", names: ["saudi aramco", "aramco", "saudi arabian oil", "saudi arabian oil company"] },
+  { key: "adnoc", country: "AE", names: ["adnoc", "abu dhabi national oil", "abu dhabi national oil company"] },
+  { key: "petronas", country: "MY", names: ["petronas", "petroliam nasional", "petroliam nasional berhad"] },
+  { key: "qatarenergy", country: null, names: ["qatarenergy", "qatar energy", "qatar petroleum"] },
+  { key: "ongc", country: "IN", names: ["ongc", "oil and natural gas corporation", "oil and natural gas"] },
+  { key: "iocl", country: "IN", names: ["iocl", "indian oil", "indian oil corporation"] },
+  { key: "equinor", country: "NO", names: ["equinor", "statoil"] },
+];
+const KNOWN_BY_NAME = new Map(KNOWN_ALIAS_GROUPS.flatMap((g) => g.names.map((n) => [normalizeCompanyName(n), g] as const)));
+
+/** The well-known company group for a name (any of its parts), or null. */
+export function knownCompany(name: string): { key: string; country: string | null } | null {
+  const { main, aliases } = companyNameParts(name);
+  for (const part of [main, ...aliases]) {
+    const group = KNOWN_BY_NAME.get(normalizeCompanyName(part));
+    if (group) return { key: group.key, country: group.country };
+  }
+  return null;
+}
+
+/**
+ * Matching keys of a company name: the normalised main name, each normalised alias, and the
+ * well-known group ("known:aramco"). Two names that share a key are the same company.
+ */
+export function companyKeys(name: string): { keys: string[]; hasAlias: boolean } {
+  const { main, aliases } = companyNameParts(name);
+  const keys = new Set<string>();
+  for (const part of [main, ...aliases]) {
+    const key = normalizeCompanyName(part);
+    if (key.length >= 2) keys.add(key);
+  }
+  const known = knownCompany(name);
+  if (known) keys.add(`known:${known.key}`);
+  return { keys: [...keys], hasAlias: aliases.length > 0 || known !== null };
+}

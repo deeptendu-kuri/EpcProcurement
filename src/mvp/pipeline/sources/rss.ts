@@ -1,6 +1,6 @@
 /**
- * Trade-press RSS/Atom feeds (05 §2: ETEnergyWorld, ETInfra, Zawya …). Feeds come from RSS_FEEDS
- * (comma-separated) or the defaults below. A feed that fails is logged and skipped.
+ * Trade-press RSS/Atom feeds (05 §2: ETEnergyWorld, ETInfra, BusinessLine, Argaam, NST …). Feeds are
+ * RSS_FEEDS (comma-separated) plus the defaults below. A feed that fails is logged and skipped.
  * Items are pre-filtered on title + description (buying action or scope term) before any page fetch,
  * so we only read pages that can matter. Long descriptions are used as the text directly.
  */
@@ -21,13 +21,26 @@ export const DEFAULT_RSS_FEEDS = [
   "https://www.offshore-technology.com/feed/",
   "https://www.pipeline-journal.net/rss.xml",
   "https://www.offshore-energy.biz/feed/",
+  // Added 2026-09 (reachable, market-specific business news with award stories):
+  "https://energy.economictimes.indiatimes.com/rss/oil-and-gas",
+  "https://www.thehindubusinessline.com/companies/feeder/default.rss",
+  "https://www.argaam.com/en/rss/ho-main-news?sectionid=1524",
+  "https://www.nst.com.my/feed",
+  "https://www.malaymail.com/feed/rss/money",
 ];
 
-export const RSS_MAX_ITEMS = 12;
+/** Items taken per run across all feeds, and per feed (so the first feeds cannot crowd out the rest). */
+export const RSS_MAX_ITEMS = 18;
+export const RSS_MAX_PER_FEED = 4;
 
+/**
+ * Feeds to read: RSS_FEEDS (comma-separated) plus the defaults, deduplicated. Set RSS_FEEDS_ONLY=1 to
+ * read only the configured feeds.
+ */
 export function feedUrls(): string[] {
   const configured = mvpEnv.rssFeeds();
-  return (configured.length ? configured : DEFAULT_RSS_FEEDS).filter((url) => isHttpUrl(url));
+  const only = process.env.RSS_FEEDS_ONLY === "1" && configured.length > 0;
+  return [...new Set([...configured, ...(only ? [] : DEFAULT_RSS_FEEDS)])].filter((url) => isHttpUrl(url));
 }
 
 interface FeedItem {
@@ -90,7 +103,9 @@ export const rssSource: Source = {
         const res = await getText(feed, "application/rss+xml, application/atom+xml, application/xml, text/xml");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const items = parseFeed(res.text);
+        let fromFeed = 0;
         for (const item of items) {
+          if (fromFeed >= RSS_MAX_PER_FEED) break;
           const blurb = `${item.title}\n${item.description}`;
           if (!actionTerms.some((t) => hasTerm(blurb, t)) || !findScope(blurb, scopeTerms)) continue;
           const long = item.description.length >= 600;
@@ -107,6 +122,7 @@ export const rssSource: Source = {
             language: "en",
             isSample: false,
           });
+          fromFeed++;
           if (docs.length >= RSS_MAX_ITEMS) break;
         }
       } catch (error) {

@@ -20,7 +20,7 @@ import { classifyLead, findSub, researchTasks, totalScore } from "./classify";
 import { computeConfidence } from "./confidence";
 import { SCORING_CONFIG } from "./config";
 import { keyEvidenceIds, type Candidate, type ScoringContext } from "./context";
-import { closingDate, evaluateGates } from "./gates";
+import { classCap, closingDate, evaluateGates, hardFailures } from "./gates";
 import { loadContext, type InsightsCache } from "./loader";
 import { topReasons } from "./reasons";
 import { scoreRubric } from "./rubric";
@@ -40,12 +40,17 @@ export interface LeadScore {
   band: ConfidenceBand;
   leadClass: LeadClass;
   reasons: Reason[];
-  /** Sub-criteria to research (07 §8). */
+  /** Sub-criteria to research (07 §8); "G5" first when the lead needs a second independent source. */
   researchTasks: string[];
   isSample: boolean;
   closingDate: string | null;
   clientProductIds: string[];
 }
+
+/** Reason shown first on a lead capped by the single-source G5 (07 §3, §8). */
+export const SECOND_SOURCE_REASON = "Needs research: find a second independent source (only one news report so far)";
+/** Reason shown first on a lead capped by G6 only (key facts read by one AI model; quotes checked). */
+export const CONFIRM_FACTS_REASON = "Needs research: confirm the key facts in the source (read by one AI model only)";
 
 /** Pure: score one loaded candidate. */
 export function scoreContext(ctx: ScoringContext): LeadScore {
@@ -62,6 +67,12 @@ export function scoreContext(ctx: ScoringContext): LeadScore {
     size: findSub(breakdown.criteria, "1.4")?.points ?? null,
     stage: ctx.project?.current_stage ?? null,
   });
+
+  // Single-source cap (07 §3 G5): the first research task is "find a second independent source".
+  const capped = leadClass !== "rejected" && classCap(gates) !== null;
+  const cappedBy = gates.filter((g) => !g.pass && (g as { cap?: string }).cap).map((g) => g.id);
+  const capReason = cappedBy.includes("G5") ? SECOND_SOURCE_REASON : CONFIRM_FACTS_REASON;
+  const signalEvidenceIds = unique(ctx.triggerSignals.flatMap((s) => s.evidence_ids ?? [])).filter((id) => ctx.evidence[id]);
 
   const productIds = new Set<string>();
   for (const req of ctx.requirements)
@@ -81,11 +92,13 @@ export function scoreContext(ctx: ScoringContext): LeadScore {
     reasons:
       leadClass === "rejected"
         ? [
-            ...gates.filter((gate) => !gate.pass).map((gate) => ({ text: `Rejected: ${gate.why}`, evidenceIds: [] as string[] })),
+            ...hardFailures(gates).map((gate) => ({ text: `Rejected: ${gate.why}`, evidenceIds: [] as string[] })),
             ...topReasons(breakdown.criteria),
           ].slice(0, 3)
-        : topReasons(breakdown.criteria),
-    researchTasks: researchTasks(breakdown.criteria, leadClass),
+        : capped
+          ? [{ text: capReason, evidenceIds: signalEvidenceIds }, ...topReasons(breakdown.criteria)].slice(0, 3)
+          : topReasons(breakdown.criteria),
+    researchTasks: capped ? [...cappedBy, ...researchTasks(breakdown.criteria, "research")] : researchTasks(breakdown.criteria, leadClass),
     isSample: keyIds.length > 0 && keyIds.every((id) => ctx.evidence[id]?.isSample),
     closingDate: ctx.kind === "bid" ? closingDate(ctx) : null,
     clientProductIds: [...productIds],

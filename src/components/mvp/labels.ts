@@ -195,6 +195,16 @@ export function formatDate(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? value : DATE_FMT.format(date);
 }
 
+const SHORT_DATE_FMT = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/** "15 Oct" in the current year, "15 Oct 2027" otherwise (for tight table cells). */
+export function formatShortDate(value: string | null | undefined, now: number = Date.now()): string {
+  if (!value) return "";
+  const date = new Date(value.length === 10 ? `${value}T00:00:00Z` : value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.getUTCFullYear() === new Date(now).getUTCFullYear() ? SHORT_DATE_FMT.format(date) : DATE_FMT.format(date);
+}
+
 /** "27 Sep, 10:05 UTC". */
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "";

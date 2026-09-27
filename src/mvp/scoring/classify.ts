@@ -1,17 +1,21 @@
 /**
  * Lead classes (docs/mvp/07 §8), as written:
- *   Rejected  any gate failed
+ *   Rejected  any gate failed (except a capping failure: G5 with a single Tier B source)
  *   Watch     gates pass but stage is concept/feasibility, or 1.4 = 0 (below minimum size) — these
  *             "watch triggers" win over the score (07 §7 1.4: "also triggers class watch")
  *   Genuine   score ≥ 70 and confidence high and 4.1 ≠ 0
  *   Research  55 ≤ score < 70, or score ≥ 70 but confidence medium
  *   Watch     everything else (score < 55, or ≥ 70 with low confidence or 4.1 = 0)
  *
+ * Cap (07 §3 G5): a lead whose only failed gate is the single-source G5 is classified as usual and
+ * then limited to Research (Genuine → Research; Research and Watch stay).
+ *
  * Research tasks (07 §8): for Genuine and Research leads, every sub-criterion with max ≥ 4 that is
  * unknown or scored below half its maximum.
  */
 import type { ConfidenceBand, CriterionScore, GateResult, LeadClass, ProjectStage, SubScore } from "@/mvp/types";
 import { SCORING_CONFIG } from "./config";
+import { classCap, hardFailures } from "./gates";
 
 export interface ClassifyInput {
   gates: GateResult[];
@@ -25,8 +29,17 @@ export interface ClassifyInput {
 }
 
 export function classifyLead(input: ClassifyInput): LeadClass {
+  if (hardFailures(input.gates).length) return "rejected";
+  const cls = classifyPassing(input);
+  const cap = classCap(input.gates);
+  if (cap === "research" && cls === "genuine") return "research";
+  if (cap === "watch" && (cls === "genuine" || cls === "research")) return "watch";
+  return cls;
+}
+
+/** Class of a lead with no hard gate failure (07 §8). */
+function classifyPassing(input: ClassifyInput): LeadClass {
   const { genuineMinScore, researchMinScore } = SCORING_CONFIG.classes;
-  if (input.gates.some((gate) => !gate.pass)) return "rejected";
   if (input.stage === "concept" || input.stage === "feasibility") return "watch";
   if (input.size === 0) return "watch";
   if (input.score >= genuineMinScore && input.band === "high" && input.eligibility !== 0) return "genuine";

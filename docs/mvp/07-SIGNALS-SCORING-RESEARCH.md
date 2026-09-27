@@ -28,6 +28,18 @@ A **candidate lead** is the combination *(kind, buyer company, project, package)
 | A job post for a procurement, package or project role naming a project | `hiring_project_roles` |
 | An approved-vendor or approved-makes list in a tender | `approved_vendor_listed` |
 
+**News award articles** (trade press, news search) rarely name a project or a package. So that an award or order report can still become a lead, the extract step completes it before `resolve` (all derived facts quote a verified sentence and are labelled `rule`, extractor `rule:derived`):
+
+| The article says | Graph rows built | Signal → candidate |
+|---|---|---|
+| "X awarded the EPC contract for Y pipeline to Z" / "Z wins … contract from X" | project Y (or, with no named project, *"X pipeline contract – Z"*), owner X, party Z `main_epc` with award date (the article date when none is printed), stage `awarded`, a package in the discipline of the award sentence (`pipeline`, `piping`, `static_equipment`) owned by Z | `contract_awarded` (Z) → supply / subcontract lead for Z on that package |
+| "S bags steel pipe order from Z" / "S signs supply contract with Z" | S `supplier`, `supplied_by` edge Z → S dated, package owned by Z | `supply_order_announced` (Z) → supply lead for Z |
+| "X invites bids for …" with no project name | project *"X pipeline tender"*, package with route `open_tender` | `tender_released` → bid lead for X |
+
+When two models name the awardee's role differently but both say it won the work (e.g. `supplier` vs `main_epc`), the award sentence decides by the rules extractor's wording (subcontract → subcontractor; supply / pipe or valve order → supplier; otherwise main EPC); any other role disagreement is still a dispute and the role is dropped. A model fact that the rules extractor also finds (same company name, role, project name, value or award date) counts as two-extractor agreement (`both`). What only the rules extractor finds (a company or a role the models missed, or lost in the quote check because a quote was truncated; the stage, project name, value or award date when the models gave none) is added as a `rule` fact. It never replaces a model fact. The rules extractor also reads Title Case market-news headlines (*"Desco Infratech In Focus After Securing Rs2.34 Crore Gas Pipeline Contract From Adani Total Gas"*) and decimal amounts (*"Rs 2.34 crore"*, *"$412.5 million"*). A generic name such as *"Gas Pipeline"* is not taken as a project name.
+
+**News search (recall and precision).** Bing News RSS is searched per market in the market's own edition (`mkt`: IN `en-in`, SA `en-xa`, AE `en-ae`, MY `en-my`) with up to 6 short award-phrased queries. Bing returns few items for quoted phrases and OR groups, so the queries are plain words: *"pipeline contract India"*, *"GAIL pipeline contract"*, *"pipe contract GAIL"*, *"water pipeline contract India"*, *"pipe order India"*, plus market queries checked against Bing (IN *"gas pipeline contract bags"*, SA *"water transmission pipeline Saudi"*, AE *"DEWA pipeline contract"*, MY *"Petronas Carigali contract"*). Headlines are pre-filtered before any page fetch. A headline passes only with a buying action and a **physical** scope: a "pipeline" counts only with an oil, gas or water word within 70 characters (gas, crude, water, km, inch, laying, GAIL, Aramco …). Figurative pipelines (deal, order, AI, defence, contract pipeline, "in the pipeline") are dropped. At most 2 publishers are kept per story; syndicated copies beyond that add nothing.
+
 **Fingerprint:** one real-world event = one signal.
 
 ```
@@ -38,7 +50,7 @@ A second source reporting the same event adds its evidence to the existing signa
 
 ## 3. Hard gates
 
-A candidate must pass all 8 gates. A failed gate means class `rejected`, with the gate and reason stored.
+A candidate must pass all 8 gates. A failed gate means class `rejected`, with the gate and reason stored — **except G5 in the single-source case and G6 in the single-reader case**, which are class caps (below), not rejections.
 
 | Gate | Passes when | Data used |
 |---|---|---|
@@ -46,8 +58,8 @@ A candidate must pass all 8 gates. A failed gate means class `rejected`, with th
 | **G2 In scope** | At least one package discipline is in `client_profile.disciplines` or `adjacent_disciplines`, **or** at least one requirement matches a `client_products` row | Packages, requirements |
 | **G3 In market** | Project country, or buyer country for supply leads, is in `client_profile.markets` | Projects, companies |
 | **G4 Live** | Project status is not cancelled or completed; stage is not operations; for bid leads the closing date is 3 or more days away (or unknown with a signal under 60 days old); for supply leads the award is under 18 months old | Stage events, tenders, parties |
-| **G5 Corroborated** | The triggering signal has at least 1 Tier A evidence item, **or** 2 evidence items from independent publishers | Evidence tier, publisher_key |
-| **G6 Verified facts** | Every fact used by gates G1–G5 has `quote_verified = true` and `agreement ∈ {both, rule}` | Evidence |
+| **G5 Corroborated** | The triggering signal has at least 1 Tier A evidence item, **or** 2 evidence items from independent publishers. **Single source:** when the only checked evidence comes from one Tier B publisher, G5 is marked failed with `cap: "research"` — the lead is **not rejected**; its class is capped at Research and its first research task is *"Find a second independent source"*. No checked evidence at all, or a single Tier C source, still rejects | Evidence tier, publisher_key |
+| **G6 Verified facts** | Every fact used by gates G1–G5 has `quote_verified = true` and `agreement ∈ {both, rule}`. Only the fields the gates read count: buyer identity and country; buyer role, award date and party; project stage, status, owner, closing date; package discipline and owner; requirement item category / product (a project's site, a package's name or a quantity is scored, not gated). **Single reader:** when every failing fact has a verbatim-checked quote and only the second extractor's agreement is missing (`single`), G6 is marked failed with `cap: "research"` — first reason *"Needs research: confirm the key facts in the source"*. A fact with no checked quote still rejects | Evidence |
 | **G7 Not sanctioned** | No `sanctions_matches` for the buyer (or its parent) with status `to_review` or `confirmed` | Sanctions |
 | **G8 Not excluded** | The buyer isn't in `client_profile.excluded_company_ids`. Existing customers are routed to their account owner instead | Client profile |
 
@@ -60,6 +72,12 @@ A candidate must pass all 8 gates. A failed gate means class `rejected`, with th
 | Exact normalised name + same country | 0.90 |
 | Fuzzy name (token-set ratio of 92 or more) + same country + embedding similarity of 0.9 or more | 0.85 |
 | Fuzzy name only | 0.60 → goes to the human review queue |
+
+Names are cleaned before matching, wherever a company is created: a model's list, the headline rules, or the award→lead conversion.
+- A place returned as a company is dropped ("UAE" → no company). A place prefix and a run-together dateline are stripped ("UAE's Emarat" → "Emarat", "Wednesday.GMDA" → "GMDA").
+- A written alias makes one company: "X (Y)" and "X, or Y" are stored as "X (Y)", and X, Y and a small list of well-known groups (Aramco = Saudi Aramco = Saudi Arabian Oil Co.; ADNOC; Petronas; …) are all matching keys. An alias match holds across the publisher-derived country: 0.90 when the countries agree or the group is well known, otherwise 0.85.
+- The parent of an awarded unit ("Welspun Corp's US unit wins …", "Welspun Corp's associate EPIC bags …") is never taken as the buyer of that order.
+- A project's country comes from where the work is, not from the publisher's market. The order is: the project location, the delivery site or port, a single market named in the award sentence or project name, and the home country of a well-known client. The document's market is used only when none of these is known.
 
 ## 5. Confidence (trust in the facts, separate from priority)
 
@@ -148,9 +166,11 @@ Each sub-criterion returns points **or `unknown`**. Unknown scores 0 and is list
 | **Genuine** | All gates passed **and** score ≥ 70 **and** confidence band high **and** 4.1 is not 0 |
 | **Research** | All gates passed and (55 ≤ score < 70, **or** score ≥ 70 but confidence medium) |
 | **Watch** | All gates passed, but the stage is concept or feasibility, or 1.4 = 0, or the score is below 55 |
-| **Rejected** | Any gate failed. The reason is shown in a "Rejected" tab for audit |
+| **Rejected** | Any gate failed (a capping G5 or G6 does not count). The reason is shown in a "Rejected" tab for audit |
 
-**Research tasks** are created for every lead in class **Research or Genuine**: one task per sub-criterion with a maximum of 4 points or more that is either `unknown` or scored below half its maximum. For Research leads they can lift the class. For Genuine leads they fill in the picture before outreach.
+**Single-source cap (G5):** a lead whose only failed gate is G5 with one Tier B source is classified by the rules above and then capped: Genuine → **Research**; Research and Watch stay. The gate row is stored as `{ id: "G5", pass: false, cap: "research", why: "Only one source so far … find a second independent source" }`, the lead's first reason is *"Needs research: find a second independent source"*, and `G5` is the first research task (before the sub-criteria tasks). A second independent publisher reporting the same event (same signal fingerprint) passes G5 on the next scoring and lifts the cap. A G5 single source also covers a report whose only evidence is quote-checked but read by one AI model (it is still one Tier B publisher). The same cap applies to a capping **G6** (single reader): Genuine → Research, and `G6` is the first research task. When both cap, the G5 reason is shown first.
+
+**Research tasks** are created for every lead in class **Research or Genuine** (and for a capped single-source lead, whatever its class): one task per sub-criterion with a maximum of 4 points or more that is either `unknown` or scored below half its maximum. For Research leads they can lift the class. For Genuine leads they fill in the picture before outreach.
 
 | Unknown sub-criterion | What the research agent tries |
 |---|---|
@@ -162,6 +182,7 @@ Each sub-criterion returns points **or `unknown`**. Unknown scores 0 and is list
 | 4.2 Decision maker | Tender contact officer; company news naming a project director or procurement head; company website team page |
 | 5.2 Competition | Bid-opening results (e.g. Bahrain), prequalified bidder lists, news |
 | 5.3 Logistics | Project site location, nearest port named in documents |
+| G5 Second source (capped leads) | The same award in another publisher, the buyer's or awardee's exchange filing or press release, the owner's tender results page |
 
 After research, the lead is **re-scored**. It can move up to Genuine only through the same rules; research never overrides a gate.
 

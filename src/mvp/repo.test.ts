@@ -29,7 +29,21 @@ vi.mock("@/mvp/scoring/graph", () => ({
   })),
 }));
 
-import { addActivity, getLeadDetail, getRun, leadEvidenceUrls, listLeads, listRecentRuns, updateDraft, updateLead } from "./repo";
+import {
+  addActivity,
+  buildFacetQuery,
+  buildLeadListQuery,
+  getAppStatusCounts,
+  getLeadDetail,
+  getOverviewStats,
+  getRun,
+  leadEvidenceUrls,
+  leadFacets,
+  listLeads,
+  listRecentRuns,
+  updateDraft,
+  updateLead,
+} from "./repo";
 
 let db: Db;
 const ids: Record<string, string> = {};
@@ -107,7 +121,7 @@ afterAll(async () => {
 
 describe("listLeads", () => {
   it("sorts by score, counts per class and maps display fields", async () => {
-    const result = await listLeads({ class: "genuine" });
+    const result = await listLeads({ class: "genuine", sort: "score" });
     expect(result.items.map((item) => item.score)).toEqual([86, 72]);
     expect(result.counts).toEqual({ genuine: 2, research: 1, watch: 0, rejected: 1 });
     const first = result.items[0];
@@ -130,6 +144,96 @@ describe("listLeads", () => {
   it("returns evidence URLs per lead for the export", async () => {
     const urls = await leadEvidenceUrls([ids.genuine]);
     expect(urls[ids.genuine]).toEqual(["https://example.com/a"]);
+  });
+});
+
+describe("filter and paging query building (docs/mvp/13 §4)", () => {
+  it("never inlines user values into SQL and numbers the parameters in order", () => {
+    const evil = "x'; drop table leads; --";
+    const { items, classCounts } = buildLeadListQuery({ q: evil, market: "in", stage: "awarded", minScore: 50, limit: 10, offset: 20 });
+    expect(items.sql).not.toContain("drop table");
+    expect(classCounts.sql).not.toContain("drop table");
+    expect(items.params).toContain("%x'; drop table leads; --%");
+    const placeholders = [...items.sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
+    expect(Math.max(...placeholders)).toBe(items.params.length);
+    // page window is the last two parameters
+    expect(items.params.slice(-2)).toEqual([10, 20]);
+  });
+
+  it("clamps page size and offset, and falls back to the latest sort", () => {
+    const huge = buildLeadListQuery({ limit: 100_000, offset: -5, sort: "nope" as never });
+    expect(huge.items.params.slice(-2)).toEqual([500, 0]);
+    expect(huge.items.sql).toContain("order by l.created_at desc");
+    expect(buildLeadListQuery({ sort: "score" }).items.sql).toContain("order by l.score desc");
+    expect(buildLeadListQuery({ sort: "closing" }).items.sql).toContain("l.closing_date asc");
+  });
+
+  it("escapes LIKE wildcards in free-text search", () => {
+    const { items } = buildLeadListQuery({ q: "100%_pipe" });
+    expect(items.params[0]).toBe(String.raw`%100\%\_pipe%`);
+  });
+
+  it("counts the class tabs and each facet without their own dimension", () => {
+    const { classCounts } = buildLeadListQuery({ class: "genuine", market: "IN" });
+    expect(classCounts.sql).not.toContain("l.class =");
+    expect(classCounts.params).toContain("IN");
+    const facet = buildFacetQuery({ market: "IN", kind: "bid" }, "market");
+    expect(facet.params).not.toContain("IN");
+    expect(facet.params).toContain("bid");
+    const product = buildFacetQuery({ productId: "prod-valves" }, "product");
+    expect(product.sql).toContain("unnest(l.client_product_ids)");
+    expect(product.params).not.toContain("prod-valves");
+  });
+});
+
+describe("listLeads filters, paging and facets (database)", () => {
+  it("returns the total for the whole filter and one page of items", async () => {
+    const page1 = await listLeads({ limit: 2, offset: 0, sort: "score" });
+    const page2 = await listLeads({ limit: 2, offset: 2, sort: "score" });
+    expect(page1.total).toBe(4);
+    expect(page1.items.map((item) => item.score)).toEqual([86, 72]);
+    expect(page2.items.map((item) => item.score)).toEqual([60, 40]);
+    expect((await listLeads({ class: "genuine" })).total).toBe(2);
+  });
+
+  it("filters by text, category, stage, confidence, minimum score, source and date added", async () => {
+    expect((await listLeads({ q: "water line" })).items.map((i) => i.id).sort()).toEqual([ids.research, ids.rejected].sort());
+    expect((await listLeads({ q: "valve" })).items.map((i) => i.id)).toEqual([ids.genuine2]);
+    expect((await listLeads({ discipline: "piping" })).items.map((i) => i.id)).toEqual([ids.genuine2]);
+    expect((await listLeads({ discipline: "pipeline" })).total).toBe(3);
+    expect((await listLeads({ stage: "awarded" })).total).toBe(2);
+    expect((await listLeads({ confidence: "high" })).total).toBe(4);
+    expect((await listLeads({ confidence: "low" })).total).toBe(0);
+    expect((await listLeads({ minScore: 70 })).total).toBe(2);
+    expect((await listLeads({ source: "sample" })).total).toBe(4);
+    expect((await listLeads({ source: "live" })).total).toBe(0);
+    expect((await listLeads({ added: "24h" })).total).toBe(4);
+    expect((await listLeads({ statuses: ["accepted"] })).total).toBe(0);
+  });
+
+  it("computes filter options with counts from the data", async () => {
+    const facets = await leadFacets({});
+    expect(facets.discipline).toEqual([{ value: "pipeline", count: 3 }, { value: "piping", count: 1 }]);
+    expect(facets.market).toEqual([{ value: "IN", count: 2 }, { value: "SA", count: 2 }]);
+    expect(facets.kind).toEqual([{ value: "bid", count: 2 }, { value: "supply_subcontract", count: 2 }]);
+    expect(facets.stage).toEqual([{ value: "awarded", count: 2 }]);
+    expect(facets.product).toEqual([{ value: "prod-line-pipe", count: 3 }, { value: "prod-valves", count: 1 }]);
+    expect(facets.source).toEqual([{ value: "sample", count: 4 }]);
+    // A filter narrows the other facets but not its own options.
+    const saOnly = await leadFacets({ market: "SA" });
+    expect(saOnly.market).toEqual([{ value: "IN", count: 2 }, { value: "SA", count: 2 }]);
+    expect(saOnly.discipline).toEqual([{ value: "pipeline", count: 2 }]);
+  });
+
+  it("builds the overview and the top-bar counts", async () => {
+    const stats = await getOverviewStats();
+    expect(stats.totalLeads).toBe(4);
+    expect(stats.genuine).toBe(2);
+    expect(stats.newThisWeek).toBe(3); // rejected leads are not counted
+    expect(stats.byMarket.map((item) => item.value).sort()).toEqual(["IN", "SA"]);
+    expect(stats.latest.every((lead) => lead.class !== "rejected")).toBe(true);
+    const counts = await getAppStatusCounts();
+    expect(counts.newGenuine).toBe(2);
   });
 });
 
@@ -168,6 +272,21 @@ describe("writes", () => {
     const { rows } = await db.query<{ type: string; body: string }>("select type, body from activities where lead_id = $1 order by created_at", [ids.genuine2]);
     expect(rows.map((r) => r.body)).toEqual(["new → rejected (too_small)", "rejected → accepted"]);
     expect(await updateLead("00000000-0000-4000-8000-000000000000", { status: "accepted" })).toBeNull();
+  });
+
+  it("writes one activity per pipeline board move and lists the lead in its new column (docs/mvp/13 §5)", async () => {
+    const board = ["new", "accepted", "contacted", "rfq", "quoted", "won", "lost"] as const;
+    for (const status of ["accepted", "contacted", "rfq", "quoted", "won"] as const) {
+      await updateLead(ids.genuine, { status });
+    }
+    const { rows } = await db.query<{ type: string; body: string }>(
+      "select type, body from activities where lead_id = $1 and type = 'status_change' order by created_at",
+      [ids.genuine],
+    );
+    expect(rows.map((r) => r.body)).toEqual(["new → accepted", "accepted → contacted", "contacted → rfq", "rfq → quoted", "quoted → won"]);
+    const won = await listLeads({ statuses: [...board].filter((s) => s === "won"), limit: 50 });
+    expect(won.items.map((item) => item.id)).toContain(ids.genuine);
+    await updateLead(ids.genuine, { status: "new" }); // back for the other tests
   });
 
   it("does not record a status change when only the next step changes", async () => {

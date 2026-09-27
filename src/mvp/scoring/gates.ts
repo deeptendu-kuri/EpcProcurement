@@ -1,14 +1,28 @@
 /**
  * Hard gates G1–G8 (docs/mvp/07 §3). A candidate must pass all 8; any failure → class `rejected`,
- * with the gate and reason stored. Gates only rely on evidence that is quote-verified with
+ * with the gate and reason stored, except G5 with a single Tier B source, which caps the class at
+ * `research` ("find a second independent source") instead of rejecting. Gates only rely on evidence that is quote-verified with
  * agreement `both` or `rule` (06 §4, 12 §3).
  */
-import type { GateResult } from "@/mvp/types";
+import type { GateResult, LeadClass } from "@/mvp/types";
 import { AWARD_SIGNALS, SCORING_CONFIG } from "./config";
 import { buyerParties, evidenceOf, type ScoringContext } from "./context";
 import { daysBetween, formatDay, isGateGrade, monthsBetween, sameName, unique } from "./util";
 
 const G = SCORING_CONFIG.gates;
+
+/**
+ * A gate result. `cap` marks a failed gate that limits the class instead of rejecting the lead
+ * (07 §3: G5 with a single Tier B source → at most "research"). Stored as-is in leads.gate_results.
+ */
+export interface GateCheck extends GateResult {
+  cap?: Exclude<LeadClass, "rejected" | "genuine">;
+}
+
+/** Failed gates that reject the lead (failures with a `cap` only limit the class). */
+export function hardFailures(gates: GateResult[]): GateResult[] {
+  return gates.filter((gate) => !gate.pass && !(gate as GateCheck).cap);
+}
 
 // ───────────────────────── shared facts ─────────────────────────
 
@@ -37,6 +51,11 @@ export function closingDate(ctx: ScoringContext): string | null {
 
 function gateGradeIds(ctx: ScoringContext, ids: string[]): string[] {
   return ids.filter((id) => ctx.evidence[id] && isGateGrade(ctx.evidence[id]));
+}
+
+/** Evidence whose quote was found verbatim in the source (any agreement). */
+function verifiedIds(ctx: ScoringContext, ids: string[]): string[] {
+  return ids.filter((id) => ctx.evidence[id]?.quoteVerified);
 }
 
 // ───────────────────────── gates ─────────────────────────
@@ -119,15 +138,19 @@ function g4(ctx: ScoringContext): GateResult {
 }
 
 /** G5 for one signal: ≥ 1 Tier A gate-grade evidence, or ≥ 2 gate-grade evidence from different publishers. */
-export function signalCorroborated(ctx: ScoringContext, evidenceIds: string[]): { pass: boolean; tierA: number; publishers: number } {
+export function signalCorroborated(ctx: ScoringContext, evidenceIds: string[]): { pass: boolean; tierA: number; publishers: number; tiers: string[] } {
   const ids = gateGradeIds(ctx, evidenceIds);
   const tierA = ids.filter((id) => ctx.evidence[id].tier === "A").length;
   const publishers = unique(ids.map((id) => ctx.evidence[id].publisherKey)).length;
-  return { pass: tierA >= 1 || publishers >= 2, tierA, publishers };
+  return { pass: tierA >= 1 || publishers >= 2, tierA, publishers, tiers: unique(ids.map((id) => ctx.evidence[id].tier)) };
 }
 
-function g5(ctx: ScoringContext): GateResult {
+/** G5 wording for the single-source case (a class cap, not a rejection). */
+export const SINGLE_SOURCE_WHY = "Only one source so far (a news report, not an official one) — Needs research: find a second independent source";
+
+function g5(ctx: ScoringContext): GateCheck {
   if (!ctx.triggerSignals.length) return { id: "G5", pass: false, why: "No triggering signal" };
+  let singleTierB = false;
   for (const signal of ctx.triggerSignals) {
     const result = signalCorroborated(ctx, signal.evidence_ids ?? []);
     if (result.pass)
@@ -138,8 +161,17 @@ function g5(ctx: ScoringContext): GateResult {
           ? `"${signal.summary}" comes from an official or primary source`
           : `"${signal.summary}" is confirmed by ${result.publishers} independent sources`,
       };
+    if (result.publishers === 1 && result.tiers.includes("B")) singleTierB = true;
+    // A quote-verified report read by one AI model only (agreement `single`) from one Tier B publisher is
+    // the same single-source case: G6 caps the unconfirmed facts, G5 asks for the second source.
+    const verified = verifiedIds(ctx, signal.evidence_ids ?? []);
+    if (!result.publishers && verified.length && unique(verified.map((id) => ctx.evidence[id].publisherKey)).length === 1 && verified.every((id) => ctx.evidence[id].tier === "B"))
+      singleTierB = true;
   }
-  return { id: "G5", pass: false, why: "Only one source so far, and not an official one — needs a second independent source" };
+  // 07 §3/§8: one checked Tier B report is not a reason to reject; the lead is capped at
+  // "Needs research" until a second independent source confirms it.
+  if (singleTierB) return { id: "G5", pass: false, cap: "research", why: SINGLE_SOURCE_WHY };
+  return { id: "G5", pass: false, why: "No checked source for the triggering event — needs an official source or two independent reports" };
 }
 
 /**
@@ -160,7 +192,23 @@ function factsOf(ctx: ScoringContext, entityType: string, id: string | null | un
   return evidenceOf(ctx, entityType, id).map((evidenceId) => ({ field: null, ids: [evidenceId] }));
 }
 
-function g6(ctx: ScoringContext): GateResult {
+/**
+ * Fields the gates G1–G5 read, per entity type (07 §3 G6: "every fact used by gates G1–G5"). A fact on
+ * another field (a project's site, a package's name, a requirement's quantity) is scored, not gated.
+ * `*` is the row itself (the entity exists / its identity).
+ */
+const GATE_FIELDS: Record<string, Set<string>> = {
+  company: new Set(["*", "canonical_name", "name", "country", "status"]),
+  project_party: new Set(["*", "role", "award_date", "company_id"]),
+  project: new Set(["*", "country", "current_stage", "status", "owner_company_id", "specs.closing_date", "specs.tenders"]),
+  package: new Set(["*", "discipline", "package_owner_company_id"]),
+  requirement: new Set(["*", "item_category", "client_product_id"]),
+};
+
+/** G6 wording when the only unconfirmed facts are quote-verified but read by one AI model (a class cap). */
+export const SINGLE_READER_WHY = "Some key facts were read by one AI model only (quotes checked) — Needs research: confirm";
+
+function g6(ctx: ScoringContext): GateCheck {
   // Every entity whose facts G1–G5 read: buyer identity + country (G1, G3), buyer role + award date
   // (G4), project country / stage / closing date (G3, G4), the packages and requirements G2 looked
   // at (scopePackages + ctx.requirements). The triggering signal must have gate-grade evidence (G5).
@@ -172,22 +220,30 @@ function g6(ctx: ScoringContext): GateResult {
     ...ctx.requirements.map((r) => ({ label: "requirement", type: "requirement", id: r.id })),
   ];
   const failed: string[] = [];
+  // Every failed fact has a verbatim-checked quote (only the second reader is missing) → cap, not reject.
+  let allVerified = true;
   for (const entity of entities) {
     for (const fact of factsOf(ctx, entity.type, entity.id)) {
+      if (fact.field !== null && !GATE_FIELDS[entity.type]?.has(fact.field)) continue;
       const known = fact.ids.filter((id) => ctx.evidence[id]);
       if (known.length > 0 && gateGradeIds(ctx, known).length === 0) {
         failed.push(fact.field && fact.field !== "*" ? `${entity.label} ${fact.field.replace(/^specs\./, "").replace(/_id$/, "").replace(/_/g, " ")}` : entity.label);
+        if (!verifiedIds(ctx, known).length) allVerified = false;
       }
     }
   }
-  const signalOk = ctx.triggerSignals.some((s) => gateGradeIds(ctx, s.evidence_ids ?? []).length > 0);
-  if (!signalOk) failed.push("triggering signal");
-  if (failed.length)
-    return {
-      id: "G6",
-      pass: false,
-      why: `Could not double-check these facts against the source text: ${unique(failed).join(", ")}`,
-    };
+  const signalIds = ctx.triggerSignals.flatMap((s) => s.evidence_ids ?? []);
+  const signalOk = gateGradeIds(ctx, signalIds).length > 0 || ctx.triggerSignals.some((s) => gateGradeIds(ctx, s.evidence_ids ?? []).length > 0);
+  if (!signalOk) {
+    failed.push("triggering signal");
+    if (!verifiedIds(ctx, signalIds).length) allVerified = false;
+  }
+  if (failed.length) {
+    const list = unique(failed).join(", ");
+    return allVerified
+      ? { id: "G6", pass: false, cap: "research", why: `${SINGLE_READER_WHY} ${list}` }
+      : { id: "G6", pass: false, why: `Could not double-check these facts against the source text: ${list}` };
+  }
   return { id: "G6", pass: true, why: "Key facts are checked against the exact source text" };
 }
 
@@ -204,10 +260,17 @@ function g8(ctx: ScoringContext): GateResult {
 }
 
 /** Evaluate all 8 gates in order. */
-export function evaluateGates(ctx: ScoringContext): GateResult[] {
+export function evaluateGates(ctx: ScoringContext): GateCheck[] {
   return [g1(ctx), g2(ctx), g3(ctx), g4(ctx), g5(ctx), g6(ctx), g7(), g8(ctx)];
 }
 
 export function allGatesPass(gates: GateResult[]): boolean {
   return gates.every((gate) => gate.pass);
+}
+
+/** The strictest class cap among failed gates, or null. */
+export function classCap(gates: GateResult[]): GateCheck["cap"] | null {
+  const caps = gates.filter((gate) => !gate.pass).map((gate) => (gate as GateCheck).cap);
+  if (caps.includes("watch")) return "watch";
+  return caps.includes("research") ? "research" : null;
 }

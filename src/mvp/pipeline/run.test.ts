@@ -205,6 +205,33 @@ describe("offline run over fixtures", () => {
     expect(await count(`source_documents where run_id = '${runId}'`)).toBe(12);
   }, 60_000);
 
+  it("RunInput.offline searches the sample data only, even when live mode is on", async () => {
+    const before = process.env.MVP_OFFLINE;
+    process.env.MVP_OFFLINE = "0";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network must not be used"));
+    try {
+      const runId = await startRun({ query: "line pipe", markets: ["IN", "SA"], leadKinds: ["bid", "supply_subcontract"], offline: true });
+      await waitForRun(runId);
+      const run = (await db.query<RunRow & { adhoc_query: Record<string, unknown> }>("select * from runs where id = $1", [runId])).rows[0];
+      expect(run.status).toBe("done");
+      expect(run.adhoc_query).toMatchObject({ offline: true });
+      expect(run.counters).toMatchObject({ sourcesTotal: 1, sourcesDone: 1 });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      const events = (await db.query<RunEventRow>("select * from run_events where run_id = $1 order by id", [runId])).rows;
+      expect(events[0].message).toContain("sample data");
+      // Without the flag the input carries no offline key.
+      process.env.MVP_OFFLINE = "1";
+      const plain = await startRun({ query: "line pipe", markets: ["IN"], leadKinds: ["bid"], offline: false });
+      await waitForRun(plain);
+      const plainRow = (await db.query<{ adhoc_query: Record<string, unknown> }>("select adhoc_query from runs where id = $1", [plain])).rows[0];
+      expect(plainRow.adhoc_query).not.toHaveProperty("offline");
+    } finally {
+      fetchSpy.mockRestore();
+      if (before === undefined) delete process.env.MVP_OFFLINE;
+      else process.env.MVP_OFFLINE = before;
+    }
+  }, 60_000);
+
   it("marks the run failed (not thrown) when something breaks", async () => {
     const { rows } = await db.query<{ id: string }>("insert into runs (status) values ('queued') returning id");
     const broken = { ...db, query: async () => { throw new Error("db down"); } } as unknown as Db;

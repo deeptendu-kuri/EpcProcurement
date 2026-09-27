@@ -18,6 +18,8 @@ export interface RunInput {
   query: string;
   markets: string[];
   leadKinds: LeadKind[];
+  /** Search the sample documents (fixtures) for this run only, whatever MVP_OFFLINE says ("Load sample leads"). */
+  offline?: boolean;
 }
 
 export interface SubScore {
@@ -599,6 +601,24 @@ export interface LeadFilter {
   runId?: string;
   limit?: number;
   offset?: number;
+  // ── added for the CRM UI (docs/mvp/13 §4); all optional ──
+  /** Free text: company, project, package or product. */
+  q?: string;
+  /** Category = discipline of the lead's package (or of its first product). */
+  discipline?: string;
+  /** Project stage (ProjectStage). */
+  stage?: string;
+  /** Only leads added in the last 24 h / 7 days / 30 days. */
+  added?: AddedWindow;
+  confidence?: ConfidenceBand;
+  /** Minimum score (0–100). */
+  minScore?: number;
+  /** "live" = not sample, "sample" = built from sample documents. */
+  source?: LeadSource;
+  /** Only these statuses (overrides `status`; used by the pipeline board). */
+  statuses?: LeadStatus[];
+  /** Default "latest". */
+  sort?: LeadSort;
 }
 
 export interface LeadListItem {
@@ -622,12 +642,18 @@ export interface LeadListItem {
   closingDate: string | null;
   isSample: boolean;
   createdAt: string;
+  /** Project stage (added for the CRM table). */
+  stage?: ProjectStage | null;
+  /** The lead's next step (added for the pipeline board). */
+  nextAction?: string | null;
 }
 
 export interface LeadListResult {
   items: LeadListItem[];
   /** Count per class for the tabs, respecting the other filters. */
   counts: Record<LeadClass, number>;
+  /** Leads matching the whole filter (all pages), for "Showing 1–25 of n". */
+  total: number;
 }
 
 export type LeadPatch = Partial<Pick<LeadRow, "status" | "reject_reason" | "owner_user_id" | "next_action">>;
@@ -689,3 +715,69 @@ export interface LeadDetail {
 // ═════════════════════════ LLM ═════════════════════════
 
 export type LLMRole = "triage" | "extract_a" | "extract_b" | "draft" | "judge";
+
+// ═════════════════════════ CRM UI (docs/mvp/13) ═════════════════════════
+
+export type LeadSort = "latest" | "score" | "closing";
+export type AddedWindow = "24h" | "7d" | "30d";
+export type LeadSource = "live" | "sample";
+
+/** One option of a Leads filter with the number of matching leads (other filters applied). */
+export interface FacetOption {
+  value: string;
+  count: number;
+}
+
+/** Options with counts for every Leads filter, computed from the database. */
+export interface LeadFacets {
+  discipline: FacetOption[];
+  market: FacetOption[];
+  kind: FacetOption[];
+  stage: FacetOption[];
+  status: FacetOption[];
+  confidence: FacetOption[];
+  product: FacetOption[];
+  source: FacetOption[];
+}
+
+export type RefreshHours = 6 | 12 | 24;
+
+/** `saved_searches` row (migration 002). refresh_hours null = manual only. */
+export interface SavedSearchRow {
+  id: string;
+  name: string;
+  query: string;
+  markets: string[];
+  lead_kinds: LeadKind[];
+  refresh_hours: RefreshHours | null;
+  active: boolean;
+  last_run_at: string | null;
+  last_run_id: string | null;
+  created_at: string;
+}
+
+/** A saved search with its last run, for Find and Overview. */
+export interface SavedSearchView extends SavedSearchRow {
+  lastRunStatus: RunStatus | null;
+  lastRunNewLeads: number | null;
+  /** When the scheduler will run it next (null = manual or paused). */
+  nextRunAt: string | null;
+}
+
+export interface OverviewStats {
+  newThisWeek: number;
+  genuine: number;
+  closingSoon: number;
+  inPipeline: number;
+  byMarket: FacetOption[];
+  byCategory: FacetOption[];
+  latest: LeadListItem[];
+  totalLeads: number;
+}
+
+/** Top-bar status: last refresh, new genuine leads and the run queue. */
+export interface AppStatus {
+  lastFinishedAt: string | null;
+  newGenuine: number;
+  queue: { running: boolean; waiting: number; runId: string | null };
+}

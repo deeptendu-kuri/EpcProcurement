@@ -224,6 +224,45 @@ describe("gates (07 §3)", () => {
     expect(gate(ctx2, "G5").pass).toBe(false);
   });
 
+  it("G5 single Tier B source caps the class at research instead of rejecting (07 §3, §8)", () => {
+    const ctx = workedExample();
+    // The worked example (71, high) with only the Tier B trade-press report behind the award.
+    ctx.evidence[IDS.evA] = evidence(IDS.evA, { tier: "B", publisherKey: "pipelinejournal.example" });
+    const g5 = gate(ctx, "G5") as GateResult & { cap?: string };
+    expect(g5).toMatchObject({ pass: false, cap: "research" });
+    expect(g5.why).toMatch(/find a second independent source/);
+    const result = scoreContext(ctx);
+    expect(result.score).toBe(71);
+    expect(result.leadClass).toBe("research");
+    expect(result.reasons[0].text).toMatch(/find a second independent source/);
+    expect(result.researchTasks[0]).toBe("G5");
+    // A second independent publisher lifts the cap: genuine again.
+    ctx.evidence[IDS.evA] = evidence(IDS.evA, { tier: "B", publisherKey: "news-one" });
+    expect(scoreContext(ctx).leadClass).toBe("genuine");
+  });
+
+  it("G5 without any checked source still rejects; a single Tier C source still rejects", () => {
+    const ctx = workedExample();
+    ctx.evidence[IDS.evA] = evidence(IDS.evA, { tier: "C", publisherKey: "blog.example" });
+    ctx.evidence[IDS.evB] = evidence(IDS.evB, { tier: "C", publisherKey: "blog.example" });
+    expect(gate(ctx, "G5")).not.toHaveProperty("cap");
+    expect(scoreContext(ctx).leadClass).toBe("rejected");
+    const none = workedExample();
+    none.triggerSignals = [];
+    expect(gate(none, "G5").pass).toBe(false);
+    expect(scoreContext(none).leadClass).toBe("rejected");
+  });
+
+  it("a capped G5 never lifts a lead over another failed gate", () => {
+    const gates = PASS.map((g) =>
+      g.id === "G5" ? { ...g, pass: false, cap: "research" as const } : g.id === "G3" ? { ...g, pass: false } : g,
+    );
+    expect(classifyLead({ gates, score: 90, band: "high", eligibility: 8, size: 4, stage: "awarded" })).toBe("rejected");
+    const capped = PASS.map((g) => (g.id === "G5" ? { ...g, pass: false, cap: "research" as const } : g));
+    expect(classifyLead({ gates: capped, score: 90, band: "high", eligibility: 8, size: 4, stage: "awarded" })).toBe("research");
+    expect(classifyLead({ gates: capped, score: 40, band: "high", eligibility: 8, size: 4, stage: "awarded" })).toBe("watch");
+  });
+
   it("G6: facts used by gates must be quote-verified and agreed (both/rule)", () => {
     const ctx = workedExample();
     ctx.evidence[IDS.evA] = evidence(IDS.evA, { agreement: "single" });
@@ -251,6 +290,28 @@ describe("gates (07 §3)", () => {
     // Same field backed by a `both` source and a weaker one → the fact is verified.
     ctx.fieldEvidence = { [`company:${IDS.buyer}:canonical_name`]: [evBoth, evSingle] };
     expect(gate(ctx, "G6").pass).toBe(true);
+  });
+
+  it("G6 gates only the fields G1–G5 read; a quote-checked single-reader fact caps at research", () => {
+    const evSingle = "00000000-0000-4000-8000-0000000000d4";
+    const ctx = workedExample();
+    ctx.evidence[evSingle] = evidence(evSingle, { agreement: "single" });
+    // A project's site is scored, not gated.
+    ctx.fieldEvidence = { [`project:${IDS.project}:site`]: [evSingle] };
+    expect(gate(ctx, "G6").pass).toBe(true);
+    // The buyer's country read by one model (quote checked) → cap, not reject.
+    ctx.fieldEvidence = { [`company:${IDS.buyer}:country`]: [evSingle] };
+    const g6 = gate(ctx, "G6") as GateResult & { cap?: string };
+    expect(g6).toMatchObject({ pass: false, cap: "research" });
+    expect(g6.why).toContain("buyer country");
+    const result = scoreContext(ctx);
+    expect(result.leadClass).toBe("research");
+    expect(result.reasons[0].text).toMatch(/confirm the key facts/);
+    expect(result.researchTasks[0]).toBe("G6");
+    // An unverified quote still rejects.
+    ctx.evidence[evSingle] = evidence(evSingle, { agreement: "single", quoteVerified: false });
+    expect(gate(ctx, "G6")).not.toHaveProperty("cap");
+    expect(scoreContext(ctx).leadClass).toBe("rejected");
   });
 
   it("G6 checks every package G2 looked at when the lead has no package", () => {

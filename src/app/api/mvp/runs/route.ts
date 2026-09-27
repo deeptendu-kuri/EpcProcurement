@@ -1,32 +1,19 @@
-import { NextResponse, after } from "next/server";
-import { z } from "zod";
-import { startRun, waitForRun } from "@/mvp/pipeline";
+import { NextResponse } from "next/server";
 import { listRecentRuns } from "@/mvp/repo";
-import { MARKET_CODES } from "@/mvp/types";
 import { NO_STORE, readJson, serverError } from "../_shared/http";
+import { enqueueResponse } from "../_shared/queue";
+import { runInputSchema } from "../_shared/schemas";
 
-const runInputSchema = z.object({
-  query: z.string().trim().min(2, "Type what you offer.").max(200),
-  markets: z
-    .array(z.string().trim().toUpperCase().pipe(z.enum(MARKET_CODES)))
-    .min(1, "Pick at least one market.")
-    .max(MARKET_CODES.length)
-    .transform((markets) => [...new Set(markets)]),
-  leadKinds: z
-    .array(z.enum(["bid", "supply_subcontract"]))
-    .min(1, "Pick a lead type.")
-    .transform((kinds) => [...new Set(kinds)]),
-});
-
-/** POST /api/mvp/runs — start a "Search now" run. Body: { query, markets[], leadKinds[] } → 202 { runId }. */
+/**
+ * POST /api/mvp/runs — "Search now". Body: { query, markets[], leadKinds[] }.
+ * The search goes through the shared run queue (one run at a time) → 202 { ticketId, runId, state, position }.
+ * `runId` is null while the search waits in line; poll GET /api/mvp/queue/[ticketId] until it is set.
+ */
 export async function POST(request: Request) {
   const body = await readJson(request, runInputSchema);
   if (body.response) return body.response;
   try {
-    const runId = await startRun(body.data);
-    // Keep the background run alive after the 202 on hosts that end work with the response.
-    after(() => waitForRun(runId));
-    return NextResponse.json({ runId }, { status: 202, headers: NO_STORE });
+    return await enqueueResponse({ input: body.data });
   } catch (error) {
     return serverError("start run", error, "The search could not start. Try again in a moment.");
   }

@@ -1,5 +1,5 @@
-import { SkeletonRows } from "@/components/mvp/skeleton";
+import { SkeletonLead } from "@/components/mvp/skeleton";
 
 export default function Loading() {
-  return <SkeletonRows />;
+  return <SkeletonLead />;
 }

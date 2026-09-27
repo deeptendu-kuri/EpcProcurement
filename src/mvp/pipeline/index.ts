@@ -20,7 +20,7 @@ export { fixtureDocs } from "./sources/fixtures";
 export { failStaleRuns } from "./active-runs";
 
 /** Documents read per run at most (keeps a "Search now" run to a few minutes on free quotas). */
-export const MAX_DOCS_PER_RUN = 40;
+export const MAX_DOCS_PER_RUN = 60;
 const READ_CONCURRENCY = 3;
 
 /** Live sources for a run (fixtures are the fallback). */
@@ -51,6 +51,7 @@ export async function startRun(input: RunInput): Promise<string> {
     markets: [...new Set((input.markets ?? []).map((m) => String(m).trim().toUpperCase()).filter(Boolean))],
     leadKinds: (input.leadKinds ?? []).filter((k) => k === "bid" || k === "supply_subcontract"),
   };
+  if (input.offline === true) clean.offline = true;
   if (!clean.leadKinds.length) clean.leadKinds = ["bid", "supply_subcontract"];
   if (!clean.markets.length) clean.markets = [...getClientProfile().markets];
   const { rows } = await db.query<{ id: string }>(
@@ -75,6 +76,8 @@ class Progress {
   readonly counters: Required<Pick<RunCounters, "sourcesTotal" | "sourcesDone" | "sourcesFailed" | "itemsRead" | "relevant" | "factsKept" | "factsDropped" | "newLeads" | "updatedLeads">> = {
     sourcesTotal: 0, sourcesDone: 0, sourcesFailed: 0, itemsRead: 0, relevant: 0, factsKept: 0, factsDropped: 0, newLeads: 0, updatedLeads: 0,
   };
+  /** Sources that failed in this run, with the reason ("Bing News (HTTP 429)"): named in the progress line. */
+  readonly failedSources: string[] = [];
   constructor(
     private readonly db: Db,
     private readonly runId: string,
@@ -95,7 +98,8 @@ class Progress {
   /** "Searched 3 of 5 sources · read 24 items · 6 relevant · 3 new leads" */
   summary(): string {
     const c = this.counters;
-    return [`Searched ${c.sourcesDone} of ${c.sourcesTotal} sources`, `read ${c.itemsRead} items`, `${c.relevant} relevant`, `${c.newLeads} new leads`].join(" · ");
+    const failed = this.failedSources.length ? [`${this.failedSources.length === 1 ? "1 source" : `${this.failedSources.length} sources`} failed: ${this.failedSources.join("; ")}`] : [];
+    return [`Searched ${c.sourcesDone + c.sourcesFailed} of ${c.sourcesTotal} sources`, `read ${c.itemsRead} items`, `${c.relevant} relevant`, `${c.newLeads} new leads`, ...failed].join(" · ");
   }
 }
 
@@ -119,10 +123,30 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: nu
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** Documents sent to AI extraction per run (MVP_MAX_AI_DOCS, default 15). Structured notices need no AI. */
+/**
+ * A short, user-facing reason for a failed source, shown on the Find screen. Never contains URLs,
+ * response bodies or stack detail (those stay in the server log). Exported for tests.
+ */
+export function sourceFailureReason(error: unknown): string {
+  const text = errorText(error);
+  const name = error instanceof Error ? error.name : "";
+  if (name === "AbortError" || /timeout|timed out|aborted/i.test(text)) return "didn't answer in time";
+  if (/rate limit|HTTP 429/i.test(text)) return "rate limited, try again in a minute";
+  const http = text.match(/HTTP (\d{3})/);
+  if (http) return `server error ${http[1]}`;
+  if (/non-JSON|too large|unexpected|parse/i.test(text)) return "sent an unreadable answer";
+  if (/all .* failed/i.test(text)) return "every request failed";
+  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|fetch failed|network/i.test(text)) return "couldn't be reached";
+  return "didn't work this time";
+}
+
+/**
+ * Documents sent to AI extraction per run (MVP_MAX_AI_DOCS, default 20). Structured notices need no AI.
+ * One news item costs ~3.5k Groq tokens (P1+P2+P3), so 20 items ≈ 70k of the 180k daily budget.
+ */
 export function maxAiDocsPerRun(): number {
   const n = Number(process.env.MVP_MAX_AI_DOCS);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 15;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 20;
 }
 
 const TITLE_ACTION = /\b(?:award|awarded|awards|wins|won|secures?|secured|bags?|order|orders|contract|tender|bid|rfq|prequalification)\b/i;
@@ -163,7 +187,8 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     ensureMockExtractor();
     const profile = getClientProfile();
     const terms = queryTerms(input.query);
-    const offline = mvpEnv.offline();
+    // Fixtures only when MVP_OFFLINE=1 or when this run asks for sample data (RunInput.offline).
+    const offline = input.offline === true || mvpEnv.offline();
     const ctx: SourceContext = { runId, input, profile, terms, log: (message) => progress.emit("info", message) };
 
     // ── collect ──
@@ -177,11 +202,15 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
           const docs = await source.collect(ctx);
           raws.push(...docs);
           progress.counters.sourcesDone++;
-          await progress.emit("collect", `${source.name}: ${docs.length} items · Searched ${progress.counters.sourcesDone} of ${progress.counters.sourcesTotal} sources`);
+          await progress.emit("collect", `${source.name}: ${docs.length} items · Searched ${progress.counters.sourcesDone + progress.counters.sourcesFailed} of ${progress.counters.sourcesTotal} sources`);
         } catch (error) {
-          progress.counters.sourcesDone++;
+          // sourcesDone counts sources that answered; the UI shows done + failed as "searched".
           progress.counters.sourcesFailed++;
-          await progress.emit("collect", `${source.name} unavailable (${errorText(error)}) · Searched ${progress.counters.sourcesDone} of ${progress.counters.sourcesTotal} sources`);
+          // Full detail (URLs, bodies) goes to the server log only; the run line gets a plain reason.
+          console.warn(`[pipeline] source ${source.name} failed:`, errorText(error));
+          const reason = sourceFailureReason(error);
+          progress.failedSources.push(`${source.name} (${reason})`);
+          await progress.emit("collect", `${source.name} failed: ${reason} · Searched ${progress.counters.sourcesDone + progress.counters.sourcesFailed} of ${progress.counters.sourcesTotal} sources`);
         }
       }),
     );
@@ -249,7 +278,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
       let verdict = filterDocument({ title: raw.title, text: doc.text, publishedAt: raw.publishedAt, markets: input.markets, queryTerms: terms, profile, sourceMarket: raw.market });
       if (raw.structured && verdict.verdict !== "drop") verdict = { ...verdict, verdict: "relevant", reason: `structured notice; ${verdict.reason}` };
       if (verdict.verdict === "uncertain") {
-        const t = await triage(doc.text, raw.url, db, runId);
+        const t = offline ? { relevant: null, reason: "no AI triage for sample data" } : await triage(doc.text, raw.url, db, runId);
         verdict =
           t.relevant === true
             ? { verdict: "relevant", reason: `${verdict.reason}; ${t.reason}`, markets: verdict.markets }
@@ -268,7 +297,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     // ── AI cap ── free AI tiers allow a few documents a minute: read the most promising first.
     const cap = maxAiDocsPerRun();
     const needsAi = relevant.filter((r) => !r.raw.structured && !r.raw.isSample);
-    if (!mvpEnv.offline() && needsAi.length > cap) {
+    if (!offline && needsAi.length > cap) {
       const ranked = [...needsAi].sort((a, b) => aiPriority(b, profile) - aiPriority(a, profile));
       const deferred = new Set(ranked.slice(cap));
       for (const item of deferred) {
@@ -285,7 +314,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
       try {
         const extracted = await extractDocument(
           { text: item.stored.text, url: item.raw.url, structured: item.raw.structured },
-          { db, runId, onNote: (message) => progress.emit("info", message) },
+          { db, runId, onNote: (message) => progress.emit("info", message), rulesOnly: offline },
         );
         progress.counters.factsKept += extracted.stats.kept;
         progress.counters.factsDropped += extracted.stats.dropped;

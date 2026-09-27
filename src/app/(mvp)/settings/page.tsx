@@ -2,6 +2,7 @@ import { CheckCircle2, Info, XCircle } from "lucide-react";
 import { getClientProfile } from "@/mvp/config/profile";
 import { marketName } from "@/mvp/config/markets";
 import { disciplineLabel, formatDate, formatMoney } from "@/components/mvp/labels";
+import { PageHeader } from "@/components/mvp/page-header";
 
 /** Human names for the portal registration keys in client-profile.json. */
 const REGISTRATION_NAMES: Record<string, string> = {
@@ -22,9 +23,11 @@ function humanKey(key: string): string {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="surface rounded-xl">
-      <h2 className="border-b border-[#edf1f6] px-4 py-3 text-xs font-bold uppercase tracking-wide text-[#475467]">{title}</h2>
-      <div className="px-4 py-3 text-[15px] text-[#344054]">{children}</div>
+    <section className="card">
+      <div className="card-header">
+        <h2 className="card-title">{title}</h2>
+      </div>
+      <div className="px-4 py-3 text-sm text-[var(--text-2)]">{children}</div>
     </section>
   );
 }
@@ -39,12 +42,15 @@ export default function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-bold text-[#101828]">Settings</h1>
-        <p className="mt-1 flex items-center gap-1.5 text-sm text-[#475467]">
-          <Info size={15} aria-hidden /> Read-only for now. Editing comes in the next release.
-        </p>
-      </div>
+      <PageHeader
+        title="Settings"
+        subtitle="The company profile that drives matching, scoring and compliance."
+        actions={
+          <span className="chip">
+            <Info size={13} aria-hidden /> Read-only for now
+          </span>
+        }
+      />
 
       {profile.is_example ? (
         <p role="note" className="rounded-lg border border-[#fedf89] bg-[#fffaeb] px-3 py-2 text-sm font-semibold text-[#b54708]">

@@ -20,8 +20,10 @@ import type {
 } from "@/mvp/types";
 import type { ExtractedDoc, VerifiedFact } from "./extract";
 import { detectMarkets } from "./filter";
+import { isParentMention } from "./rules-extract";
 import {
-  normalizeCompanyName, normalizePersonName, normalizeProjectName, parseDate, parseMoney, parseNumber, tokenSetRatio,
+  companyKeys, companyNameParts, displayCompanyName, knownCompany, normalizeCompanyName, normalizePersonName, normalizeProjectName,
+  parseDate, parseMoney, parseNumber, tokenSetRatio,
 } from "./text";
 
 export interface DocContext {
@@ -49,6 +51,9 @@ export interface ResolveStats {
 }
 
 export const CERTAINTY = { exactCountry: 0.9, fuzzyCountry: 0.85, nameOnly: 0.6 } as const;
+
+/** Roles of a company that won work (its award sentence dates the award). */
+const AWARDEE: PartyRole[] = ["main_epc", "consortium_member", "subcontractor", "supplier"];
 
 // ───────────────────────── mappings ─────────────────────────
 
@@ -132,6 +137,29 @@ function countryCode(value: string | null | undefined): string | null {
   return detectMarkets(v)[0] ?? null;
 }
 
+/**
+ * Country of a project: where the work is, not where the story was published (an Indian paper
+ * reporting a Saudi order). In order: the project location; the delivery site or port; one market
+ * named in the award/stage sentence or the project name; the well-known owner/client's home country;
+ * then the document's market. Exported for tests.
+ */
+export function projectCountry(ex: ExtractedDoc, docMarket: string | null): string | null {
+  const fromLocation = countryCode(ex.project.location?.value);
+  if (fromLocation) return fromLocation;
+  for (const req of ex.requirements) {
+    const fromDelivery = countryCode(req.deliverySite?.value) ?? countryCode(req.deliveryPort?.value);
+    if (fromDelivery) return fromDelivery;
+  }
+  for (const text of [ex.project.name?.value, ex.project.stageFact?.quote, ex.project.value?.quote]) {
+    const markets = text ? detectMarkets(text) : [];
+    if (markets.length === 1) return markets[0];
+  }
+  const client = ex.companies.find((c) => c.role === "owner" && knownCompany(c.name.value)?.country) ??
+    ex.companies.find((c) => c.role === "unknown" && knownCompany(c.name.value)?.country);
+  const clientCountry = client ? knownCompany(client.name.value)?.country : null;
+  return clientCountry ?? docMarket;
+}
+
 // ───────────────────────── resolver ─────────────────────────
 
 class Resolver {
@@ -184,20 +212,47 @@ class Resolver {
   }
 
   async company(nameFact: VerifiedFact, role: PartyRole | "unknown", countryFact: VerifiedFact | null): Promise<string> {
-    const name = nameFact.value.replace(/\s+/g, " ").trim();
-    const normalized = normalizeCompanyName(name) || name.toLowerCase();
-    const country = countryCode(countryFact?.value) ?? this.doc.market;
+    // "X, or EPIC" / "X (EPIC)" are stored as "X (EPIC)"; the main name is the normalised name and
+    // every part (plus a well-known group such as Aramco) is a matching key (entity resolution, 07 §4).
+    const name = displayCompanyName(nameFact.value);
+    const { main } = companyNameParts(name);
+    const normalized = normalizeCompanyName(main) || main.toLowerCase();
+    const incoming = companyKeys(name);
+    const known = knownCompany(name);
+    const country = countryCode(countryFact?.value) ?? known?.country ?? this.doc.market;
     const type = role !== "unknown" ? ROLE_TYPES[role] : undefined;
 
-    const candidates = await this.db.query<{ id: string; normalized_name: string; country: string | null; match_certainty: number; types: string[] }>(
-      "select id, normalized_name, country, match_certainty, types from companies where country is not distinct from $1 or country is null or normalized_name = $2",
-      [country, normalized],
+    const candidates = await this.db.query<{ id: string; canonical_name: string; normalized_name: string; country: string | null; match_certainty: number; types: string[] }>(
+      `select id, canonical_name, normalized_name, country, match_certainty, types from companies
+        where country is not distinct from $1 or country is null or normalized_name = any($2::text[]) or canonical_name like '%(%'`,
+      [country, incoming.keys.filter((k) => !k.startsWith("known:"))],
     );
-    let match: { id: string; certainty: number; setCountry: boolean; types: string[] } | null = null;
+    let match: { id: string; certainty: number; setCountry: boolean; types: string[]; upgradeName: boolean } | null = null;
     for (const row of candidates.rows) {
       const sameCountry = country !== null && row.country === country;
       if (row.normalized_name === normalized && sameCountry) {
-        match = { id: row.id, certainty: CERTAINTY.exactCountry, setCountry: false, types: row.types };
+        match = { id: row.id, certainty: CERTAINTY.exactCountry, setCountry: false, types: row.types, upgradeName: false };
+        break;
+      }
+    }
+    if (!match) {
+      // Alias or well-known group: "EPIC" = "East Pipes Integrated Company for Industry (EPIC)",
+      // "Aramco" = "Saudi Aramco" = "Saudi Arabian Oil Co. (Saudi Aramco)". A written alias is strong
+      // evidence, so it matches across the publisher-derived country too.
+      for (const row of candidates.rows) {
+        const theirs = companyKeys(row.canonical_name);
+        const rowKeys = new Set([...theirs.keys, row.normalized_name]);
+        if (!incoming.keys.some((k) => rowKeys.has(k))) continue;
+        const sameCountry = country !== null && row.country === country;
+        const eitherUnknown = country === null || row.country === null;
+        if (!sameCountry && !eitherUnknown && !incoming.hasAlias && !theirs.hasAlias) continue;
+        match = {
+          id: row.id,
+          certainty: sameCountry || known ? CERTAINTY.exactCountry : CERTAINTY.fuzzyCountry,
+          setCountry: row.country === null && country !== null,
+          types: row.types,
+          upgradeName: companyNameParts(name).aliases.length > 0 && companyNameParts(row.canonical_name).aliases.length === 0,
+        };
         break;
       }
     }
@@ -208,11 +263,11 @@ class Resolver {
         const score = tokenSetRatio(row.normalized_name, normalized);
         if (score >= 92 && (!best || score > best.score)) best = { id: row.id, score, types: row.types };
       }
-      if (best) match = { id: best.id, certainty: CERTAINTY.fuzzyCountry, setCountry: false, types: best.types };
+      if (best) match = { id: best.id, certainty: CERTAINTY.fuzzyCountry, setCountry: false, types: best.types, upgradeName: false };
     }
     if (!match) {
       const nameOnly = candidates.rows.find((row) => row.normalized_name === normalized && (row.country === null || country === null));
-      if (nameOnly) match = { id: nameOnly.id, certainty: country ? CERTAINTY.exactCountry : CERTAINTY.nameOnly, setCountry: nameOnly.country === null && country !== null, types: nameOnly.types };
+      if (nameOnly) match = { id: nameOnly.id, certainty: country ? CERTAINTY.exactCountry : CERTAINTY.nameOnly, setCountry: nameOnly.country === null && country !== null, types: nameOnly.types, upgradeName: false };
     }
 
     let id: string;
@@ -220,8 +275,9 @@ class Resolver {
       id = match.id;
       const types = type && !match.types.includes(type) ? [...match.types, type] : match.types;
       await this.db.query(
-        `update companies set match_certainty = greatest(match_certainty, $2), types = $3, country = coalesce(country, $4), updated_at = now() where id = $1`,
-        [id, match.certainty, types, match.setCountry ? country : null],
+        `update companies set match_certainty = greatest(match_certainty, $2), types = $3, country = coalesce(country, $4),
+           canonical_name = coalesce($5, canonical_name), updated_at = now() where id = $1`,
+        [id, match.certainty, types, match.setCountry ? country : null, match.upgradeName ? name : null],
       );
     } else {
       const inserted = await this.db.query<{ id: string }>(
@@ -243,7 +299,7 @@ class Resolver {
     if (!nameFact) return null;
     const name = nameFact.value.replace(/\s+/g, " ").trim();
     const normalized = normalizeProjectName(name);
-    const country = countryCode(ex.project.location?.value) ?? this.doc.market;
+    const country = projectCountry(ex, this.doc.market);
     const stage = ex.project.stage;
     const money = parseMoney(ex.project.value?.value);
     const closing = parseDate(ex.project.closingDate?.value);
@@ -358,10 +414,13 @@ type CompanyIndex = Map<string, { id: string; role: PartyRole | "unknown"; fact:
 
 function findCompany(index: CompanyIndex, name: string | null | undefined) {
   if (!name) return null;
-  const normalized = normalizeCompanyName(name);
-  const exact = index.get(normalized);
-  if (exact) return exact;
-  for (const [key, value] of index) if (tokenSetRatio(key, normalized) >= 92) return value;
+  const { keys } = companyKeys(name);
+  for (const key of keys) {
+    const exact = index.get(key);
+    if (exact) return exact;
+  }
+  const normalized = normalizeCompanyName(companyNameParts(name).main);
+  for (const [key, value] of index) if (!key.startsWith("known:") && tokenSetRatio(key, normalized) >= 92) return value;
   return null;
 }
 
@@ -373,13 +432,16 @@ export async function resolveDocument(db: Queryable, doc: DocContext, ex: Extrac
   const index: CompanyIndex = new Map();
   for (const company of ex.companies) {
     const id = await r.company(company.name, company.role, company.country);
-    const key = normalizeCompanyName(company.name.value);
-    const current = index.get(key);
-    if (!current || (current.role === "unknown" && company.role !== "unknown")) {
-      index.set(key, { id, role: company.role, fact: company.name, roleFact: company.roleFact });
+    // Every name key points at one entry per company ("Aramco" and "Saudi Aramco" in one article).
+    const current = [...index.values()].find((entry) => entry.id === id);
+    const entry = current ?? { id, role: company.role, fact: company.name, roleFact: company.roleFact };
+    if (current && current.role === "unknown" && company.role !== "unknown") {
+      current.role = company.role;
+      current.roleFact = company.roleFact;
     }
+    for (const key of companyKeys(company.name.value).keys) if (!index.has(key)) index.set(key, entry);
   }
-  const all = [...index.values()];
+  const all = [...new Set(index.values())];
   const byRole = (...roles: PartyRole[]) => all.filter((c) => roles.includes(c.role as PartyRole));
   const owner = byRole("owner")[0] ?? null;
   const epcs = byRole("main_epc", "consortium_member");
@@ -393,14 +455,16 @@ export async function resolveDocument(db: Queryable, doc: DocContext, ex: Extrac
     if (found) return found;
     const id = await r.company(fact, "unknown", null);
     const entry = { id, role: "unknown" as const, fact, roleFact: null };
-    index.set(normalizeCompanyName(fact.value), entry);
+    for (const key of companyKeys(fact.value).keys) if (!index.has(key)) index.set(key, entry);
     return entry;
   };
 
   // Project + stage event
   const projectId = await r.project(ex, owner?.id ?? null);
   const stage = ex.project.stage;
-  const awardDate = parseDate(ex.project.awardDate?.value) ?? (stage === "awarded" ? (doc.publishedAt?.slice(0, 10) ?? null) : null);
+  // No award date in the text: an award article is dated by its publication (the award is news that day).
+  const reportsAward = stage === "awarded" || ex.companies.some((c) => AWARDEE.includes(c.role as PartyRole) && c.roleFact && /award|won|wins|win|secur|bag|order|contract|signed/i.test(c.roleFact.quote));
+  const awardDate = parseDate(ex.project.awardDate?.value) ?? (reportsAward && stage !== "completed" ? (doc.publishedAt?.slice(0, 10) ?? null) : null);
   const money = parseMoney(ex.project.value?.value);
   if (projectId && owner) await r.link("project", projectId, "owner_company_id", owner.roleFact ?? owner.fact);
 
@@ -575,7 +639,9 @@ export async function resolveDocument(db: Queryable, doc: DocContext, ex: Extrac
   if (subcontractFrom) for (const sub of subs) await relationship(subcontractFrom, sub, "subcontracted_to", firstDiscipline(["piping", "pipeline", "static_equipment", "civil_structural", "electrical"]));
   const buyerCandidates = [...epcs, ...subs, ...all.filter((c) => c.role === "unknown"), ...(owner ? [owner] : [])];
   for (const supplier of suppliers) {
-    const buyer = buyerCandidates.find((c) => c.id !== supplier.id);
+    // Not the supplier's own parent ("Welspun Corp's US unit wins …").
+    const quote = supplier.roleFact?.quote ?? "";
+    const buyer = buyerCandidates.find((c) => c.id !== supplier.id && !isParentMention(quote, c.fact.value));
     if (buyer) await relationship(buyer, supplier, "supplied_by", firstDiscipline(["piping", "pipeline", "static_equipment"]));
   }
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, CalendarClock, Check, X } from "lucide-react";
+import { ArrowRight, CalendarClock, Check, Eye, X } from "lucide-react";
 import { marketName } from "@/mvp/config/markets";
 import { REJECT_REASONS, type LeadListItem, type RejectReason } from "@/mvp/types";
 import { ConfidenceChip, NewBadge, SampleBadge, ScoreBadge } from "./badges";
@@ -17,10 +17,14 @@ export interface LeadCardProps {
   onRejectOpenChange?: (open: boolean) => void;
   onAccept?: (id: string) => void;
   onReject?: (id: string, reason: RejectReason) => void;
+  /** Open the quick preview (Cards view); the title link then previews instead of navigating. */
+  onPreview?: (id: string) => void;
+  /** data-tour marker (the first card in the tour). */
+  tourId?: string;
 }
 
 /** One lead in the inbox (09 §4.2): score, confidence, type · product, buyer → project, ≤ 3 reasons. */
-export function LeadCard({ lead, selected, busy, rejectOpen, onRejectOpenChange, onAccept, onReject }: LeadCardProps) {
+export function LeadCard({ lead, selected, busy, rejectOpen, onRejectOpenChange, onAccept, onReject, onPreview, tourId }: LeadCardProps) {
   const [localOpen, setLocalOpen] = useState(false);
   const open = rejectOpen ?? localOpen;
   const setOpen = (value: boolean) => (onRejectOpenChange ? onRejectOpenChange(value) : setLocalOpen(value));
@@ -34,29 +38,38 @@ export function LeadCard({ lead, selected, busy, rejectOpen, onRejectOpenChange,
     <article
       data-lead-id={lead.id}
       aria-label={`${lead.buyerName}${lead.projectName ? `, ${lead.projectName}` : ""}`}
-      className={`surface rounded-xl p-4 transition-shadow ${selected ? "ring-2 ring-[#2563eb]" : ""}`}
+      data-tour={tourId}
+      className={`card flex h-full flex-col p-4 transition-shadow hover:shadow-md ${selected ? "ring-2 ring-[var(--accent)]" : ""}`}
     >
       <div className="flex flex-wrap items-center gap-2">
         {lead.status === "new" ? <NewBadge /> : (
-          <span className="rounded-md bg-[#f2f4f7] px-2 py-0.5 text-xs font-semibold text-[#475467]">{STATUS_LABELS[lead.status]}</span>
+          <span className={`status-pill status-${lead.status}`}>{STATUS_LABELS[lead.status]}</span>
         )}
         <ScoreBadge score={lead.score} />
         <ConfidenceChip band={lead.confidenceBand} />
-        <span className="text-sm font-semibold text-[#344054]">
+        <span className="text-xs font-semibold text-[#374151]">
           {KIND_SHORT[lead.kind]}
           {product ? ` · ${product}` : ""}
         </span>
         {lead.isSample ? <SampleBadge /> : null}
       </div>
 
-      <h3 className="mt-2 text-base font-bold text-[#101828]">
-        <Link href={`/leads/${lead.id}`} className="focus-ring hover:underline">
+      <h3 className="mt-2.5 text-[0.9375rem] font-semibold leading-snug text-[#111827]">
+        <Link
+          href={`/leads/${lead.id}`}
+          className="focus-ring hover:underline"
+          onClick={(event) => {
+            if (!onPreview || event.metaKey || event.ctrlKey || event.shiftKey) return;
+            event.preventDefault();
+            onPreview(lead.id);
+          }}
+        >
           {lead.buyerName}
           {lead.projectName ? <> → {lead.projectName}</> : null}
         </Link>
-        {country ? <span className="font-semibold text-[#475467]"> ({marketName(country)})</span> : null}
+        {country ? <span className="font-normal text-[#6b7280]"> ({marketName(country)})</span> : null}
         {lead.closingDate ? (
-          <span className="ml-2 inline-flex items-center gap-1 text-sm font-semibold text-[#b54708]">
+          <span className="ml-2 inline-flex items-center gap-1 text-xs font-semibold text-[#b54708]">
             <CalendarClock size={14} aria-hidden />
             closes {formatDate(lead.closingDate)}
           </span>
@@ -64,7 +77,7 @@ export function LeadCard({ lead, selected, busy, rejectOpen, onRejectOpenChange,
       </h3>
 
       {lead.reasons.length ? (
-        <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm text-[#344054]">
+        <ul className="mt-2 list-disc space-y-0.5 pl-5 text-[0.8125rem] text-[#4b5563] marker:text-[#c3c7cf]">
           {lead.reasons.slice(0, 3).map((reason, index) => (
             <li key={index}>{reason.text}</li>
           ))}
@@ -73,13 +86,13 @@ export function LeadCard({ lead, selected, busy, rejectOpen, onRejectOpenChange,
         <p className="mt-2 text-sm text-[#98a2b3]">No reasons recorded yet.</p>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+      <div className="mt-auto flex flex-wrap items-center justify-end gap-2 pt-3">
         {canAct && onAccept ? (
           <button
             type="button"
             disabled={busy}
             onClick={() => onAccept(lead.id)}
-            className="btn-quiet focus-ring inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50"
+            className="btn btn-secondary btn-sm"
           >
             <Check size={15} aria-hidden />
             Accept
@@ -104,7 +117,7 @@ export function LeadCard({ lead, selected, busy, rejectOpen, onRejectOpenChange,
                 onKeyDown={(event) => {
                   if (event.key === "Escape") setOpen(false);
                 }}
-                className="control focus-ring h-9 px-2 text-sm"
+                className="control h-8 px-2 text-sm"
               >
                 {REJECT_REASONS.map((value) => (
                   <option key={value} value={value}>{REJECT_REASON_LABELS[value]}</option>
@@ -113,11 +126,11 @@ export function LeadCard({ lead, selected, busy, rejectOpen, onRejectOpenChange,
               <button
                 type="submit"
                 disabled={busy}
-                className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-md border border-[#fda29b] bg-white px-3 text-sm font-semibold text-[#b42318] hover:bg-[#fef3f2] disabled:opacity-50"
+                className="btn btn-danger btn-sm"
               >
                 Reject
               </button>
-              <button type="button" onClick={() => setOpen(false)} className="focus-ring h-9 rounded-md px-2 text-sm text-[#475467]">
+              <button type="button" onClick={() => setOpen(false)} className="btn btn-ghost btn-sm">
                 Cancel
               </button>
             </form>
@@ -126,16 +139,22 @@ export function LeadCard({ lead, selected, busy, rejectOpen, onRejectOpenChange,
               type="button"
               disabled={busy}
               onClick={() => setOpen(true)}
-              className="btn-quiet focus-ring inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50"
+              className="btn btn-secondary btn-sm"
             >
               <X size={15} aria-hidden />
               Reject
             </button>
           )
         ) : null}
+        {onPreview ? (
+          <button type="button" onClick={() => onPreview(lead.id)} className="btn btn-ghost btn-sm" aria-label={`Preview ${lead.buyerName}`}>
+            <Eye size={15} aria-hidden />
+            Preview
+          </button>
+        ) : null}
         <Link
           href={`/leads/${lead.id}`}
-          className="btn-primary focus-ring inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold"
+          className="btn btn-primary btn-sm"
         >
           Open
           <ArrowRight size={15} aria-hidden />

@@ -9,7 +9,7 @@
  */
 import type { Discipline } from "@/mvp/types";
 import type { CompanyRole, P1Output, P2Output, P3Output } from "./schemas";
-import { MONEY_RE } from "./text";
+import { MONEY_RE, tidyCompanyName } from "./text";
 
 type Fact = { value: string; quote: string };
 
@@ -41,19 +41,36 @@ export function splitSentences(text: string): string[] {
 
 const CAP = String.raw`(?:\p{Lu}[\p{L}\p{N}&'’.–-]*|\p{Lu}{2,})`;
 /** Company-like name: capitalised tokens, allowing "and"/"of"/"&" between them. */
-const NAME = String.raw`${CAP}(?:\s+(?:and|of|&)\s+${CAP}|\s+${CAP})*`;
+const NAME = String.raw`${CAP}(?:\s+(?:and|of|&)\s+${CAP}|\s+for\s+Industr(?:y|ies|ial)\b|\s+${CAP})*`;
 /** Optional appositive after a subject: ", the main EPC contractor on the X Project,". */
 const APPOS = String.raw`(?:,[^,]{0,140},)?`;
+/** A name with a written alias: "East Pipes Integrated Company for Industry, or EPIC" / "Saudi Arabian Oil Co. (Saudi Aramco)". */
+const ALIASED = String.raw`${NAME}(?:,\s+or\s+${CAP}(?=,)|\s+\(${NAME}\))?`;
 const PROJECT_KEYWORDS = "Project|Pipeline|Scheme|System|Plant|Expansion|Development|Upgrade|Network|Line|Facility|Complex|Programme|Program|Replacement|Terminal|Refinery";
 const PROJ = String.raw`${CAP}(?:\s+(?:and|of)\s+${CAP}|\s+${CAP})*?\s+(?:${PROJECT_KEYWORDS})(?:\s+(?:${PROJECT_KEYWORDS}))*(?![\p{L}])`;
 const MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
+/** Any character but a sentence full stop ("Rs 2.34 crore" and "$412.5 million" keep their decimal point). */
+const NODOT = String.raw`(?:[^.]|(?<=\d)\.(?=\d))`;
 const DATE = String.raw`(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:${MONTHS})\.?,?\s+\d{4}|(?:${MONTHS})\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}|\d{4}-\d{2}-\d{2}|(?:${MONTHS})\s+\d{4})`;
 
 const RE = {
   awardedX: new RegExp(String.raw`(${NAME})${APPOS}\s+(?:has\s+|had\s+)?awarded\s+(${NAME})\s+(?:a|an|the)\s+[^.]*?(?:contract|order|package|subcontract|scope)`, "u"),
   awardTo: new RegExp(String.raw`(${NAME})${APPOS}\s+(?:has\s+|had\s+)?(?:awarded|awards|subcontracted|subcontracts|let)\s+(?:(?:a|an|the)\s+)?[^.]*?\s+to\s+(${NAME})`, "u"),
   win: new RegExp(
-    String.raw`(${NAME})${APPOS}\s+(?:has\s+|have\s+)?(?:won|wins|secured|secures|bagged|bags|received|receives|bagged|clinched|clinches|landed|lands|been awarded|was awarded)\s+(?:(?:a|an|the)\s+)?[^.]*?(?:contract|order|package|subcontract|work|works)[^.]*?\s+(?:from|by)\s+(?:the\s+)?(${NAME})`,
+    String.raw`(${NAME})${APPOS}\s+(?:has\s+|have\s+)?(?:won|wins|secured|secures|bagged|bags|received|receives|bagged|clinched|clinches|landed|lands|been awarded|was awarded)\s+(?:(?:a|an|the)\s+)?${NODOT}*?(?:contract|order|package|subcontract|work|works)${NODOT}*?\s+(?:from|by)\s+(?:the\s+)?(${NAME})`,
+    "u",
+  ),
+  /**
+   * News headline / market-news form: "<Name> [in focus after | shares surge 10% on] securing Rs 234 crore
+   * gas pipeline contract from <Buyer>". Not when the winner is a unit/arm/associate of <Name>.
+   */
+  winLoose: new RegExp(
+    String.raw`^(?:The\s+)?(${ALIASED}),?((?:\s+(?!(?:unit|units|arm|associate|subsidiary|jv|joint)\b)[\p{Ll}\d][^\s.]*){0,6}?)\s+(?:won|wins|win|secured|secures|securing|bagged|bags|bagging|received|receives|receiving|clinched|clinches|clinching|landed|lands|landing|gets|getting|signs|signed|signing|inks|inked)\s+${NODOT}*?(?:contract|order|package|subcontract|work|works)s?\b${NODOT}*?\s+(?:from|by|with)\s+(?:the\s+)?(${ALIASED})`,
+    "u",
+  ),
+  /** Winner without a named client: "<Name> wins / bags … pipe order" (the awardee role only). */
+  awardeeOnly: new RegExp(
+    String.raw`(${NAME})${APPOS}\s+(?:has\s+|have\s+)?(?:won|wins|secured|secures|bagged|bags|received|receives|clinched|clinches|landed|lands)\s+(?:(?:a|an|the)\s+)?${NODOT}*?\b(?:contract|order)s?\b`,
     "u",
   ),
   tender: new RegExp(
@@ -92,10 +109,29 @@ const NOT_A_NAME = new Set(["the", "it", "this", "that", "these", "company", "ep
 
 function cleanName(raw: string): string | null {
   let name = raw.trim().replace(/[,.;:]+$/, "");
-  name = name.replace(/^(?:The|A|An)\s+/, "");
+  name = name.replace(/^(?:The|A|An)\s+/, "").replace(/['’]s$/u, "");
   name = name.replace(/^(?:[\p{L}-]+-(?:based|run|owned|listed|headquartered)\s+)+/u, "");
   if (name.length < 3 || NOT_A_NAME.has(name.toLowerCase())) return null;
-  return name;
+  // Datelines and place names are not companies ("Wednesday.GMDA" → "GMDA", "UAE" → none).
+  const tidy = tidyCompanyName(name);
+  if (!tidy || tidy.length < 3 || NOT_A_NAME.has(tidy.toLowerCase())) return null;
+  return tidy;
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * True when `sentence` names `parent` as the parent of the company that won the work:
+ * "Welspun Corp's US unit wins …", "Welspun Corp associate EPIC bags …", "a subsidiary of Welspun Corp".
+ * The parent of an awardee is neither the buyer nor the awardee of that order (07 §2).
+ */
+export function isParentMention(sentence: string, parent: string): boolean {
+  const name = escapeRe(parent.trim());
+  if (!name) return false;
+  const UNIT = String.raw`(?:unit|units|arm|associate|associate company|subsidiary|subsidiaries|affiliate|group company|JV|joint venture)`;
+  const after = new RegExp(String.raw`${name}(?:['’]s)?(?:\s+[\p{L}\p{N}-]+){0,3}?\s+${UNIT}\b`, "iu");
+  const before = new RegExp(String.raw`\b${UNIT}\s+(?:company\s+)?of\s+(?:the\s+)?${name}`, "iu");
+  return after.test(sentence) || before.test(sentence);
 }
 
 // ───────────────────────── P1 ─────────────────────────
@@ -111,26 +147,69 @@ interface Mention {
   roleQuote: string | null;
 }
 
-function classifyAward(sentence: string): { awardee: CompanyRole; awarder: CompanyRole } {
+/** Roles in an award sentence. Exported: extract.ts uses it to settle awardee-role disputes between models. */
+export function classifyAward(sentence: string): { awardee: CompanyRole; awarder: CompanyRole } {
   if (/subcontract/i.test(sentence)) return { awardee: "subcontractor", awarder: "main_epc" };
-  const supply = /\b(?:supply|supplies|supplying|purchase order)\b|\border for\b/i.test(sentence);
+  // Supply orders: "supply of …", "order for …", and pipe/valve orders or contracts ("bags steel pipe contract").
+  const supply =
+    /\b(?:supply|supplies|supplying|purchase order|manufacture|manufacturing)\b|\border for\b/i.test(sentence) ||
+    /\b(?:line ?pipes?|pipes|pipe|valves?)\s+(?:supply\s+)?(?:orders?|contracts?|deals?)\b/i.test(sentence) ||
+    (/\b(?:orders?|contracts?|deals?)\b[^.]*?\bfor\s+(?:the\s+)?(?:[\p{L}-]+\s+){0,3}(?:line ?pipes?|pipes|valves?)\b/iu.test(sentence) &&
+      !/\b(?:lay|laying|install|installation|construction)\b/i.test(sentence));
   if (supply && !/\bEPC\s+(?:contract|order)\b/i.test(sentence)) return { awardee: "supplier", awarder: "unknown" };
   if (/\bconsortium\b/i.test(sentence)) return { awardee: "consortium_member", awarder: "owner" };
   return { awardee: "main_epc", awarder: "owner" };
 }
 
+/** Words that do not make a project name on their own ("Gas Pipeline", "Water Pipeline Project"). */
+const GENERIC_PROJECT_WORDS = new Set([
+  "gas", "water", "oil", "crude", "steel", "new", "pipeline", "pipelines", "project", "projects", "line", "network", "system",
+  "plant", "facility", "scheme", "development", "expansion", "upgrade", "replacement", "transmission", "distribution", "city",
+]);
+
 function findProject(text: string): Fact | null {
   const sentences = splitSentences(text);
   for (const re of [RE.project, RE.projectAny]) {
     for (const s of sentences) {
-      const m = s.match(re);
+      // Title Case headlines: match on the connector-lower-cased copy, take the name from the original.
+      const h = headlineCase(s);
+      const m = h.match(re);
       if (m) {
-        const value = m[1].trim();
-        if (value.split(/\s+/).length >= 2) return { value, quote: s };
+        const value = fromOriginal(s, h, m, 1).trim();
+        const words = value.split(/\s+/);
+        if (words.length >= 2 && words.some((w) => !GENERIC_PROJECT_WORDS.has(w.toLowerCase()))) return { value, quote: s };
       }
     }
   }
   return null;
+}
+
+/** Connector words lower-cased in a Title Case headline so that names stop before them (same length). */
+const HEADLINE_WORDS = new Set([
+  "wins", "win", "won", "secures", "secure", "secured", "securing", "bags", "bag", "bagged", "bagging", "receives", "received",
+  "receiving", "gets", "getting", "lands", "landed", "landing", "clinches", "clinched", "clinching", "contract", "contracts",
+  "order", "orders", "from", "by", "for", "in", "on", "after", "focus", "worth", "to", "the", "a", "an", "with", "at", "shares",
+  "share", "stock", "stocks", "surge", "surges", "jumps", "jump", "gains", "gain", "rises", "rise", "up", "over", "rallies", "soars",
+  "signs", "signed", "signing", "inks", "inked", "crore", "cr", "million", "billion", "mn", "bn", "lakh", "worth", "unit", "arm", "associate", "subsidiary", "firm",
+]);
+
+/**
+ * A Title Case headline ("Desco Infratech In Focus After Securing Rs2.34 Crore Gas Pipeline Contract From
+ * Adani Total Gas") with its connector words lower-cased, so the sentence patterns can find the names.
+ * Same length as the input (offsets map 1:1); other sentences are returned unchanged.
+ */
+export function headlineCase(sentence: string): string {
+  const words = sentence.match(/\p{L}{4,}/gu) ?? [];
+  const capital = words.filter((w) => /^\p{Lu}/u.test(w)).length;
+  if (words.length < 4 || capital / words.length < 0.7) return sentence;
+  return sentence.replace(/\p{L}+/gu, (w) => (HEADLINE_WORDS.has(w.toLowerCase()) && w.length === w.toLowerCase().length ? w.toLowerCase() : w));
+}
+
+/** Group `i` of a match on the headline-cased copy `h`, taken from the original sentence `s`. */
+function fromOriginal(s: string, h: string, m: RegExpMatchArray, i: number): string {
+  if (s === h || m.index === undefined) return m[i];
+  const offset = h.indexOf(m[i], m.index);
+  return offset < 0 ? m[i] : s.slice(offset, offset + m[i].length);
 }
 
 /** P1: project, stage, companies with roles, contract value, award date, tender ref, closing date. */
@@ -158,6 +237,7 @@ export function rulesP1(text: string): P1Output {
 
   for (const s of sentences) {
     let m: RegExpMatchArray | null;
+    const h = headlineCase(s);
     if ((m = s.match(RE.awardedX))) {
       const roles = classifyAward(s);
       add(m[1], roles.awarder, s);
@@ -172,6 +252,14 @@ export function rulesP1(text: string): P1Output {
       const roles = classifyAward(s);
       add(m[1], roles.awardee, s);
       add(m[2], roles.awarder, s);
+      awardSentence ??= s;
+    } else if ((m = h.match(RE.winLoose))) {
+      const roles = classifyAward(s);
+      add(fromOriginal(s, h, m, 1), roles.awardee, s);
+      add(fromOriginal(s, h, m, 3), roles.awarder, s);
+      awardSentence ??= s;
+    } else if ((m = h.match(RE.awardeeOnly))) {
+      add(fromOriginal(s, h, m, 1), classifyAward(s).awardee, s);
       awardSentence ??= s;
     }
     if ((m = s.match(RE.tender))) {
@@ -239,6 +327,26 @@ const DISCIPLINE_PHRASES: { discipline: Discipline; re: RegExp }[] = [
   { discipline: "civil_structural", re: /\b(civil (?:and structural )?works)\b/i },
   { discipline: "electrical", re: /\b(electrical works|substations?)\b/i },
 ];
+
+/** Fallback phrases for award headlines ("steel pipe contract", "gas pipelines", "piping"). */
+const AWARD_SCOPE_PHRASES: { discipline: Discipline; re: RegExp }[] = [
+  { discipline: "pipeline", re: /\b(?:(?:steel|welded|seamless|line|hfiw|lsaw|hsaw|erw|ductile iron)\s+)?pipes?\b(?!\s*line)/i },
+  { discipline: "pipeline", re: /\b(?:[\p{L}-]+\s+)?pipelines?\b/iu },
+  { discipline: "piping", re: /\bpiping\b/i },
+];
+
+/**
+ * Discipline and phrase of the work named in a sentence (an award sentence or headline), e.g.
+ * "gas pipeline" → pipeline, "steel pipe contract" → pipeline (line pipe supply), "piping works" → piping.
+ * The phrase is a verbatim substring of the sentence. Exported for extract.ts (packages derived from awards).
+ */
+export function disciplineIn(sentence: string): { discipline: Discipline; phrase: string } | null {
+  for (const { discipline, re } of [...DISCIPLINE_PHRASES, ...AWARD_SCOPE_PHRASES]) {
+    const m = sentence.match(re);
+    if (m && m.index !== undefined) return { discipline, phrase: sentence.slice(m.index, m.index + m[0].length) };
+  }
+  return null;
+}
 
 const ITEM_PATTERNS: { discipline: Discipline; re: RegExp; withSpecs: boolean }[] = [
   { discipline: "pipeline", re: /\b(line ?pipes?)\b/i, withSpecs: true },
