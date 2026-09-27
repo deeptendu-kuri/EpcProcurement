@@ -4,7 +4,7 @@
  */
 import { getDb, type Queryable } from "@/mvp/db";
 import { getProductById } from "@/mvp/config/profile";
-import { bidChecklist, outreachRules } from "@/mvp/compliance";
+import { bidChecklist, contactCountry, outreachRules } from "@/mvp/compliance";
 import { getCompanyInsights } from "@/mvp/scoring/graph";
 import type {
   ActivityRow,
@@ -312,7 +312,7 @@ export async function getLeadDetail(id: string): Promise<LeadDetail | null> {
   const buyerInsights = await safe(() => getCompanyInsights(lead.buyer_company_id), null as CompanyInsights | null);
   const bid = await safe(() => bidChecklist(id), [] as ChecklistItem[]);
   const outreach: PersonOutreach[] = people.map((person) => {
-    const country = person.country ?? company(person.current_company_id)?.country ?? buyer?.country ?? null;
+    const country = contactCountry(person.country, company(person.current_company_id)?.country, buyer?.country);
     return { personId: person.id, country, rule: outreachRules(country ?? "") };
   });
 

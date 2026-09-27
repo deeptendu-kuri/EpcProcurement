@@ -103,6 +103,31 @@ describe("resolve", () => {
     expect(evidence.rows.every((e) => e.quote_verified && e.agreement === "rule")).toBe(true);
   });
 
+  it("never shares an evidence row between facts with different agreement labels", async () => {
+    const { rows } = await db.query<{ id: string }>("insert into runs (status) values ('running') returning id");
+    const raw = fixtureDocs().find((d) => d.fixtureId === "fx-01")!;
+    const stored = await storeDocument(db, rows[0].id, { ...raw, text: raw.text! });
+    const ex = await extractDocument({ text: stored.text, url: raw.url }, { db });
+    const name = ex.project.name!;
+    // Project name stored first as `both`; the site shares its quote and extractor but is `single`.
+    ex.project.name = { ...name, agreement: "both", extractedBy: "model-a" };
+    ex.project.location = { ...name, agreement: "single", extractedBy: "model-a" };
+    const stats = await db.tx((tx) =>
+      resolveDocument(tx, { documentId: stored.id, url: raw.url, tier: raw.tier, publisherKey: raw.publisherKey!, market: raw.market ?? null, publishedAt: raw.publishedAt, text: stored.text }, ex),
+    );
+    const linked = await db.query<{ field: string; agreement: string }>(
+      `select fe.field, e.agreement from fact_evidence fe join evidence e on e.id = fe.evidence_id
+        where fe.entity_type = 'project' and fe.entity_id = $1 and fe.field in ('name', 'site') and e.quote = $2`,
+      [stats.projectId, name.quote],
+    );
+    expect(Object.fromEntries(linked.rows.map((r) => [r.field, r.agreement]))).toEqual({ name: "both", site: "single" });
+    const rowsForQuote = await db.query<{ agreement: string }>(
+      "select agreement from evidence where document_id = $1 and quote = $2 and extracted_by = 'model-a' order by agreement",
+      [stored.id, name.quote],
+    );
+    expect(rowsForQuote.rows.map((r) => r.agreement)).toEqual(["both", "single"]);
+  });
+
   it("builds supplied_by and subcontracted_to edges", async () => {
     const { rows } = await db.query<{ id: string }>("insert into runs (status) values ('running') returning id");
     await resolveFixture("fx-04", rows[0].id);

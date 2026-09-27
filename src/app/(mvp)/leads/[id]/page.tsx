@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { outreachRules } from "@/mvp/compliance";
+import { companyOutreachRules } from "@/mvp/compliance";
 import { getProductById } from "@/mvp/config/profile";
 import { getLeadDetail } from "@/mvp/repo";
 import { LeadView } from "@/components/mvp/lead-view";
@@ -13,7 +13,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
   const productNames = (detail.lead.client_product_ids ?? []).map((productId) => getProductById(productId)?.name ?? productId);
   let companyOutreach = null;
   try {
-    companyOutreach = outreachRules(detail.buyer.country ?? "");
+    companyOutreach = companyOutreachRules(detail.buyer.country ?? "");
   } catch (error) {
     console.error("[lead page] outreach rules failed:", error);
   }

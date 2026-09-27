@@ -225,6 +225,34 @@ describe("gates (07 §3)", () => {
     expect(gate(ctx2, "G6").pass).toBe(true);
   });
 
+  it("G6: one `both` fact does not cover a `single` fact on the same entity", () => {
+    const evBoth = "00000000-0000-4000-8000-0000000000d1";
+    const evSingle = "00000000-0000-4000-8000-0000000000d2";
+    const ctx = workedExample();
+    ctx.evidence[evBoth] = evidence(evBoth, { agreement: "both" });
+    ctx.evidence[evSingle] = evidence(evSingle, { agreement: "single" });
+    ctx.factEvidence[`company:${IDS.buyer}`] = [evBoth, evSingle];
+    // Without field info every evidence id counts as its own fact.
+    expect(gate(ctx, "G6").pass).toBe(false);
+    // Different fields: country is single-only → fails and names the fact.
+    ctx.fieldEvidence = { [`company:${IDS.buyer}:canonical_name`]: [evBoth], [`company:${IDS.buyer}:country`]: [evSingle] };
+    const failed = gate(ctx, "G6");
+    expect(failed.pass).toBe(false);
+    expect(failed.why).toContain("buyer country");
+    // Same field backed by a `both` source and a weaker one → the fact is verified.
+    ctx.fieldEvidence = { [`company:${IDS.buyer}:canonical_name`]: [evBoth, evSingle] };
+    expect(gate(ctx, "G6").pass).toBe(true);
+  });
+
+  it("G6 checks every package G2 looked at when the lead has no package", () => {
+    const evSingle = "00000000-0000-4000-8000-0000000000d3";
+    const ctx = workedExample();
+    ctx.evidence[evSingle] = evidence(evSingle, { agreement: "single" });
+    ctx.leadPackage = null;
+    ctx.factEvidence[`package:${IDS.pkg}`] = [evSingle];
+    expect(gate(ctx, "G6").pass).toBe(false);
+  });
+
   it("G8 rejects excluded companies", () => {
     const ctx = workedExample();
     ctx.profile = { ...ctx.profile, excluded_company_names: ["Example Pipelines Construction Limited"] };

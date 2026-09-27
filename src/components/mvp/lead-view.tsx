@@ -24,7 +24,7 @@ export interface LeadViewProps {
   detail: LeadDetail;
   /** Product names for the lead's client_product_ids. */
   productNames: string[];
-  /** Outreach rule for the buyer's country, used for a company-level draft. */
+  /** Company-address outreach rule for the buyer's country (companyOutreachRules), used for a company-level draft. */
   companyOutreach: OutreachRule | null;
 }
 

@@ -141,24 +141,51 @@ function g5(ctx: ScoringContext): GateResult {
   return { id: "G5", pass: false, why: "Only one source so far, and not an official one — needs a second independent source" };
 }
 
+/**
+ * The facts behind one entity, grouped by field. With `ctx.fieldEvidence` (loaded from
+ * fact_evidence.field) each field is one fact; without it every evidence id is treated as its own
+ * fact (strict). A fact passes when at least one of its evidence rows is gate-grade, so a fact
+ * corroborated by a `both` source and a weaker one still passes, while a `single`-only fact fails even
+ * if another field of the same entity is `both`.
+ */
+function factsOf(ctx: ScoringContext, entityType: string, id: string | null | undefined): { field: string | null; ids: string[] }[] {
+  if (!id) return [];
+  if (ctx.fieldEvidence) {
+    const prefix = `${entityType}:${id}:`;
+    return Object.entries(ctx.fieldEvidence)
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([key, ids]) => ({ field: key.slice(prefix.length), ids }));
+  }
+  return evidenceOf(ctx, entityType, id).map((evidenceId) => ({ field: null, ids: [evidenceId] }));
+}
+
 function g6(ctx: ScoringContext): GateResult {
-  const groups: { label: string; ids: string[] }[] = [
-    { label: "buyer", ids: evidenceOf(ctx, "company", ctx.buyer.id) },
-    { label: "buyer role", ids: buyerParties(ctx).flatMap((p) => evidenceOf(ctx, "project_party", p.id)) },
-    { label: "project", ids: evidenceOf(ctx, "project", ctx.project?.id) },
-    { label: "package", ids: ctx.leadPackage ? evidenceOf(ctx, "package", ctx.leadPackage.id) : [] },
+  // Every entity whose facts G1–G5 read: buyer identity + country (G1, G3), buyer role + award date
+  // (G4), project country / stage / closing date (G3, G4), the packages and requirements G2 looked
+  // at (scopePackages + ctx.requirements). The triggering signal must have gate-grade evidence (G5).
+  const entities: { label: string; type: string; id: string | null | undefined }[] = [
+    { label: "buyer", type: "company", id: ctx.buyer.id },
+    ...buyerParties(ctx).map((p) => ({ label: "buyer role", type: "project_party", id: p.id })),
+    { label: "project", type: "project", id: ctx.project?.id },
+    ...scopePackages(ctx).map((p) => ({ label: "package", type: "package", id: p.id })),
+    ...ctx.requirements.map((r) => ({ label: "requirement", type: "requirement", id: r.id })),
   ];
-  const failed = groups.filter((g) => {
-    const known = g.ids.filter((id) => ctx.evidence[id]);
-    return known.length > 0 && gateGradeIds(ctx, known).length === 0;
-  });
+  const failed: string[] = [];
+  for (const entity of entities) {
+    for (const fact of factsOf(ctx, entity.type, entity.id)) {
+      const known = fact.ids.filter((id) => ctx.evidence[id]);
+      if (known.length > 0 && gateGradeIds(ctx, known).length === 0) {
+        failed.push(fact.field && fact.field !== "*" ? `${entity.label} ${fact.field.replace(/^specs\./, "").replace(/_id$/, "").replace(/_/g, " ")}` : entity.label);
+      }
+    }
+  }
   const signalOk = ctx.triggerSignals.some((s) => gateGradeIds(ctx, s.evidence_ids ?? []).length > 0);
-  if (!signalOk) failed.push({ label: "triggering signal", ids: [] });
+  if (!signalOk) failed.push("triggering signal");
   if (failed.length)
     return {
       id: "G6",
       pass: false,
-      why: `Could not double-check these facts against the source text: ${failed.map((g) => g.label).join(", ")}`,
+      why: `Could not double-check these facts against the source text: ${unique(failed).join(", ")}`,
     };
   return { id: "G6", pass: true, why: "Key facts are checked against the exact source text" };
 }

@@ -339,6 +339,11 @@ export interface OutreachRuleData {
   country: string;
   email: OutreachPermission;
   phone: OutreachPermission;
+  /**
+   * Email to a generic company address (post@, sales@) rather than a named person, when the law
+   * treats it differently (NO: allowed with an opt-out). Absent = same as `email`.
+   */
+  companyEmail?: OutreachPermission;
   steps: string[];
   sourceUrl: string;
 }
@@ -386,6 +391,7 @@ export const OUTREACH_RULES: Record<string, OutreachRuleData> = {
   NO: {
     country: "NO",
     email: "consent_needed",
+    companyEmail: "opt_out_only",
     phone: "opt_out_only",
     steps: [
       "Named individuals: electronic marketing needs consent (Marketing Act §15).",
@@ -415,6 +421,14 @@ export const OUTREACH_RULES: Record<string, OutreachRuleData> = {
     steps: ["Include an opt-out; PDPA applies. Pure B2B marketing is excluded from the DNC rules."],
     sourceUrl: "https://www.pdpc.gov.sg",
   },
+};
+
+/** Contact country unknown: apply the strictest rule until we know where they are based. */
+export const UNKNOWN_COUNTRY_OUTREACH_RULE: Omit<OutreachRuleData, "country"> = {
+  email: "consent_needed",
+  phone: "consent_needed",
+  steps: ["The contact's country is unknown: confirm where they (or their company) are based before contacting them."],
+  sourceUrl: "",
 };
 
 /** Countries not in the table: allowed with a working opt-out (task default), confirm with counsel. */

@@ -6,6 +6,7 @@ vi.mock("@/mvp/compliance", () => ({
   bidChecklist: vi.fn(async () => [
     { ruleKey: "IN_GEM_CPPP_REG", title: "GeM registration", status: "met", hard: true, note: "", sourceUrl: "https://gem.gov.in" },
   ]),
+  contactCountry: (a: string | null, b: string | null, c: string | null) => a || b || c || null,
   outreachRules: vi.fn((country: string) => ({
     country,
     email: country === "SA" ? "consent_needed" : "opt_out_only",

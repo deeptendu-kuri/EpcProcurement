@@ -152,16 +152,18 @@ export async function loadContext(
     ...roles.map((r) => r.id),
   ]);
   const facts = entityIds.length
-    ? await many<{ entity_type: string; entity_id: string; evidence_id: string }>(
+    ? await many<{ entity_type: string; entity_id: string; field: string; evidence_id: string }>(
         db,
-        "select entity_type, entity_id, evidence_id from fact_evidence where entity_id = any($1::uuid[])",
+        "select entity_type, entity_id, field, evidence_id from fact_evidence where entity_id = any($1::uuid[])",
         [entityIds],
       )
     : [];
   const factEvidence: Record<string, string[]> = {};
+  const fieldEvidence: Record<string, string[]> = {};
   for (const f of facts) {
     const key = `${f.entity_type}:${f.entity_id}`;
     (factEvidence[key] ??= []).push(f.evidence_id);
+    (fieldEvidence[`${key}:${f.field}`] ??= []).push(f.evidence_id);
   }
   for (const key of Object.keys(factEvidence)) factEvidence[key] = unique(factEvidence[key]);
 
@@ -211,5 +213,6 @@ export async function loadContext(
     competitorCount,
     evidence,
     factEvidence,
+    fieldEvidence,
   };
 }

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDb, setDbForTests, type Db } from "@/mvp/db";
 import { countWords, generateDraft, limitWords, OPT_OUT_LINE, templateDraft } from "./index";
 
@@ -22,6 +22,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const key of KEYS) {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
@@ -82,6 +83,53 @@ describe("generateDraft", () => {
     expect(countWords(draft.body.replace(OPT_OUT_LINE, ""))).toBeLessThanOrEqual(120);
     const activity = await db.query("select * from activities where lead_id = $1 and type = 'email_draft'", [lead]);
     expect(activity.rows).toHaveLength(1);
+  });
+
+  it("allows a company-level draft in Norway (generic address, opt-out) but blocks a named person", async () => {
+    const { lead, buyer } = await seedLead("NO");
+    const company = await generateDraft(lead, null);
+    expect(company.blockedReason).toBeUndefined();
+    expect(company.body.endsWith(OPT_OUT_LINE)).toBe(true);
+    const person = await id(
+      "insert into people (full_name, normalized_name, current_company_id, title) values ('Example Nordic', 'example nordic', $1, 'Buyer') returning id",
+      [buyer],
+    );
+    const named = await generateDraft(lead, person);
+    expect(named.blockedReason).toMatch(/consent needed/);
+  });
+
+  it("uses the contact's company country, not the project market (German EPC on an Indian project)", async () => {
+    const { lead } = await seedLead("IN");
+    const epc = await id("insert into companies (canonical_name, normalized_name, country) values ('Example EPC GmbH', 'example epc gmbh', 'DE') returning id");
+    const person = await id(
+      "insert into people (full_name, normalized_name, current_company_id, title) values ('Example Manager', 'example manager', $1, 'Manager') returning id",
+      [epc],
+    );
+    const draft = await generateDraft(lead, person);
+    expect(draft.blockedReason).toMatch(/DE is consent needed/);
+  });
+
+  it("applies the strictest rule when the contact's country is unknown", async () => {
+    const { lead } = await seedLead("IN");
+    const nowhere = await id("insert into companies (canonical_name, normalized_name) values ('Example Unknown Co', 'example unknown co') returning id");
+    await db.query("update leads set buyer_company_id = $1 where id = $2", [nowhere, lead]);
+    const person = await id(
+      "insert into people (full_name, normalized_name, current_company_id) values ('Example Nobody', 'example nobody', $1) returning id",
+      [nowhere],
+    );
+    expect((await generateDraft(lead, person)).blockedReason).toMatch(/consent needed/);
+  });
+
+  it("falls back to the template when the live model call fails", async () => {
+    process.env.GROQ_API_KEY = "test-key-not-real";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("rate limited", { status: 429 })));
+    const { lead } = await seedLead("IN");
+    const draft = await generateDraft(lead, null);
+    expect(draft.blockedReason).toBeUndefined();
+    expect(draft.subject).toContain("Example Gas Trunk Pipeline");
+    expect(draft.body.endsWith(OPT_OUT_LINE)).toBe(true);
+    const row = (await db.query<{ model: string }>("select model from outreach_drafts where id = $1", [draft.id])).rows[0];
+    expect(row.model).toMatch(/^template \(fallback from groq/);
   });
 
   it("throws for unknown leads", async () => {

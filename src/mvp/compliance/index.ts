@@ -11,7 +11,7 @@ import type {
   RequirementRow,
 } from "@/mvp/types";
 import { parseSpec, readTenders } from "@/mvp/scoring/util";
-import { BID_RULES, DEFAULT_OUTREACH_RULE, OUTREACH_RULES, type ChecklistInput } from "./rules";
+import { BID_RULES, DEFAULT_OUTREACH_RULE, OUTREACH_RULES, UNKNOWN_COUNTRY_OUTREACH_RULE, type ChecklistInput } from "./rules";
 
 export { BID_RULES, OUTREACH_RULES, type ChecklistInput } from "./rules";
 
@@ -116,7 +116,8 @@ export async function bidChecklist(leadId: string): Promise<ChecklistItem[]> {
 /**
  * Outreach rules for a contact's country (docs/mvp/08 §3): whether email and phone are allowed,
  * opt-out-only, consent-needed or blocked, with the steps to follow and the source.
- * Countries without a rule get `opt_out_only` with a "confirm with counsel" step.
+ * Countries without a rule get `opt_out_only` with a "confirm with counsel" step. An empty (unknown)
+ * country gets the strictest rule (`consent_needed`) until the contact's location is known.
  * The slice has no opt-out register yet; when one exists it overrides everything (08 §3).
  *
  * @param countryCode ISO 3166-1 alpha-2, e.g. "IN", "SA", "NO".
@@ -125,12 +126,38 @@ export function outreachRules(countryCode: string): OutreachRule {
   const country = (countryCode ?? "").trim().toUpperCase();
   const rule = OUTREACH_RULES[country];
   if (rule) return { ...rule, steps: [...rule.steps] };
-  return { country, ...DEFAULT_OUTREACH_RULE, steps: [...DEFAULT_OUTREACH_RULE.steps] };
+  const fallback = country ? DEFAULT_OUTREACH_RULE : UNKNOWN_COUNTRY_OUTREACH_RULE;
+  return { country, ...fallback, steps: [...fallback.steps] };
+}
+
+/**
+ * Outreach rule for a company-level draft to a generic company address (post@, sales@), not a named
+ * person (08 §3): `email` is the country's company-address permission where it differs (NO: opt-out
+ * only, while named individuals need consent). The steps about company addresses come first.
+ */
+export function companyOutreachRules(countryCode: string): OutreachRule {
+  const rule = outreachRules(countryCode);
+  if (!rule.companyEmail || rule.companyEmail === rule.email) return rule;
+  const companySteps = rule.steps.filter((step) => /company address|generic/i.test(step));
+  return {
+    ...rule,
+    email: rule.companyEmail,
+    steps: [...companySteps, ...rule.steps.filter((step) => !companySteps.includes(step))],
+  };
 }
 
 /** True when a channel permission means "don't draft/send" (08 §3: consent_needed disables Draft email). */
 export function isOutreachBlocked(permission: OutreachRule["email"]): boolean {
   return permission === "consent_needed" || permission === "blocked";
+}
+
+/**
+ * The country whose outreach rule applies to a contact: the person's own stated country, else their
+ * current company's, else the buyer's. Never the project/document market (a German EPC manager
+ * quoted in a Saudi article is still in Germany). null = unknown → strictest rule.
+ */
+export function contactCountry(personCountry: string | null | undefined, companyCountry: string | null | undefined, buyerCountry: string | null | undefined): string | null {
+  return personCountry || companyCountry || buyerCountry || null;
 }
 
 /** Outreach rules for each contact, by the contact's country (fallback: their company's / buyer's country). */

@@ -538,6 +538,8 @@ export interface OutreachRule {
   country: string;
   email: OutreachPermission;
   phone: OutreachPermission;
+  /** Email to a generic company address, when it differs from `email` (e.g. NO). */
+  companyEmail?: OutreachPermission;
   steps: string[];
   sourceUrl: string;
 }

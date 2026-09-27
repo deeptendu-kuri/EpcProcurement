@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getClientProfile } from "@/mvp/config/profile";
 import { createTestDb, setDbForTests, type Db } from "@/mvp/db";
-import { bidChecklist, buildChecklist, eligibilityPoints, outreachForPeople, outreachRules, type ChecklistInput } from "./index";
+import { bidChecklist, buildChecklist, companyOutreachRules, contactCountry, eligibilityPoints, outreachForPeople, outreachRules, type ChecklistInput } from "./index";
 
 const NOW = new Date("2026-09-27T00:00:00Z");
 
@@ -47,6 +47,23 @@ describe("outreach rules (08 §3)", () => {
 
   it("India phone step names the 140-series and DND scrub", () => {
     expect(outreachRules("in").steps.join(" ")).toMatch(/140-series.*DND/);
+  });
+
+  it("NO company addresses are opt-out only while named people need consent", () => {
+    expect(outreachRules("NO").email).toBe("consent_needed");
+    const company = companyOutreachRules("NO");
+    expect(company.email).toBe("opt_out_only");
+    expect(company.steps[0]).toMatch(/Generic company addresses/);
+    expect(companyOutreachRules("SA").email).toBe("consent_needed");
+    expect(companyOutreachRules("IN").email).toBe("opt_out_only");
+  });
+
+  it("unknown country gets the strictest rule; contactCountry never uses the market", () => {
+    expect(outreachRules("").email).toBe("consent_needed");
+    expect(outreachRules("").phone).toBe("consent_needed");
+    expect(contactCountry(null, "DE", "SA")).toBe("DE");
+    expect(contactCountry(null, null, "SA")).toBe("SA");
+    expect(contactCountry(null, null, null)).toBeNull();
   });
 
   it("per-person rules use the contact's country, then the fallback", () => {

@@ -38,21 +38,8 @@ export async function politeWait(host: string, intervalMs = MIN_DOMAIN_INTERVAL_
   if (slot > now) await sleep(slot - now);
 }
 
-/** fetch() with timeout and our User-Agent. */
-export async function timedFetch(url: string, init: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      ...init,
-      signal: controller.signal,
-      redirect: "follow",
-      headers: { "User-Agent": userAgent(), Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5", ...(init.headers ?? {}) },
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-}
+/** Largest response body we read (bytes). Anything beyond is cut off, so a huge page cannot exhaust memory. */
+export const MAX_BODY_BYTES = 3_000_000;
 
 export interface SimpleResponse {
   status: number;
@@ -60,44 +47,132 @@ export interface SimpleResponse {
   url: string;
   contentType: string;
   text: string;
+  /** True when the body was cut at maxBytes. */
+  truncated?: boolean;
+}
+
+/** Read a fetch body with a byte cap; stops (and cancels the stream) once the cap is passed. */
+async function readCapped(res: Response, maxBytes: number): Promise<{ text: string; truncated: boolean }> {
+  if (!res.body) return { text: "", truncated: false };
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let size = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const remaining = maxBytes - size;
+      if (value.byteLength > remaining) {
+        text += decoder.decode(value.subarray(0, Math.max(0, remaining)));
+        await reader.cancel().catch(() => undefined);
+        return { text, truncated: true };
+      }
+      size += value.byteLength;
+      text += decoder.decode(value, { stream: true });
+    }
+    return { text: text + decoder.decode(), truncated: false };
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
+ * fetch() with our User-Agent and ONE deadline that covers connect, headers and the whole body,
+ * which is read with a byte cap. A slow-drip or endless body aborts at the deadline instead of
+ * hanging the run.
+ */
+export async function timedFetch(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = FETCH_TIMEOUT_MS,
+  maxBytes = MAX_BODY_BYTES,
+): Promise<SimpleResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(Object.assign(new Error("timeout"), { name: "AbortError" })), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      redirect: "follow",
+      headers: { "User-Agent": userAgent(), Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5", ...(init.headers ?? {}) },
+    });
+    const body = await readCapped(res, maxBytes);
+    return { status: res.status, ok: res.ok, url: res.url || url, contentType: res.headers.get("content-type") ?? "", ...body };
+  } catch (error) {
+    if (controller.signal.aborted) throw Object.assign(new Error(`timeout after ${timeoutMs} ms: ${url}`), { name: "AbortError" });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** GET over node:https/http (follows up to 5 redirects). Used when fetch() fails to connect. */
-async function nodeGet(url: string, timeoutMs: number, accept: string, redirects = 5): Promise<SimpleResponse> {
+async function nodeGet(url: string, timeoutMs: number, accept: string, redirects = 5, deadline = Date.now() + timeoutMs): Promise<SimpleResponse> {
   const { request } = url.startsWith("https:") ? await import("node:https") : await import("node:http");
   return new Promise<SimpleResponse>((resolve, reject) => {
-    const req = request(url, { method: "GET", headers: { "User-Agent": userAgent(), Accept: accept }, timeout: timeoutMs }, (res) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      reject(Object.assign(new Error(`timeout after ${timeoutMs} ms: ${url}`), { name: "AbortError" }));
+      return;
+    }
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(total);
+      fn();
+    };
+    const req = request(url, { method: "GET", headers: { "User-Agent": userAgent(), Accept: accept }, timeout: remaining }, (res) => {
       const status = res.statusCode ?? 0;
       if (status >= 300 && status < 400 && res.headers.location && redirects > 0) {
         res.resume();
-        nodeGet(new URL(res.headers.location, url).toString(), timeoutMs, accept, redirects - 1).then(resolve, reject);
+        finish(() => nodeGet(new URL(res.headers.location!, url).toString(), timeoutMs, accept, redirects - 1, deadline).then(resolve, reject));
         return;
       }
       const chunks: Buffer[] = [];
       let size = 0;
+      let truncated = false;
+      const done = () =>
+        finish(() =>
+          resolve({ status, ok: status >= 200 && status < 300, url, contentType: String(res.headers["content-type"] ?? ""), text: Buffer.concat(chunks).toString("utf8"), truncated }),
+        );
       res.on("data", (chunk: Buffer) => {
+        if (truncated) return;
+        const left = MAX_BODY_BYTES - size;
+        if (chunk.length > left) {
+          chunks.push(chunk.subarray(0, Math.max(0, left)));
+          truncated = true;
+          done();
+          req.destroy();
+          return;
+        }
         size += chunk.length;
-        if (size <= 3_000_000) chunks.push(chunk);
+        chunks.push(chunk);
       });
-      res.on("end", () =>
-        resolve({ status, ok: status >= 200 && status < 300, url, contentType: String(res.headers["content-type"] ?? ""), text: Buffer.concat(chunks).toString("utf8") }),
-      );
-      res.on("error", reject);
+      res.on("end", done);
+      res.on("error", (error) => finish(() => reject(error)));
     });
+    // Total deadline (the socket `timeout` option is only an idle timeout).
+    const total = setTimeout(() => {
+      const error = Object.assign(new Error(`timeout after ${timeoutMs} ms: ${url}`), { name: "AbortError" });
+      finish(() => reject(error));
+      req.destroy(error);
+    }, remaining);
     req.on("timeout", () => req.destroy(Object.assign(new Error("timeout"), { name: "AbortError" })));
-    req.on("error", reject);
+    req.on("error", (error) => finish(() => reject(error)));
     req.end();
   });
 }
 
 /**
  * GET a URL as text: fetch() first, then node:https when fetch cannot connect (seen on some networks
- * where undici's 10 s connect timeout trips). Throws on network failure of both.
+ * where undici's 10 s connect timeout trips). Throws on network failure of both. The deadline covers
+ * the whole body; bodies are capped at MAX_BODY_BYTES.
  */
 export async function getText(url: string, accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5", timeoutMs = FETCH_TIMEOUT_MS): Promise<SimpleResponse> {
   try {
-    const res = await timedFetch(url, { headers: { Accept: accept } }, timeoutMs);
-    return { status: res.status, ok: res.ok, url: res.url || url, contentType: res.headers.get("content-type") ?? "", text: await res.text() };
+    return await timedFetch(url, { headers: { Accept: accept } }, timeoutMs);
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw error;
     return nodeGet(url, timeoutMs, accept);

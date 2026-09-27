@@ -30,8 +30,8 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except Next.js build assets and plain static files at any depth.
-  matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|robots\\.txt|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|avif|woff2?|ttf|css|map)$).*)",
-  ],
+  // Everything except Next.js build assets, favicon.ico and robots.txt. Do NOT exclude by file
+  // extension: dynamic segments such as /legacy/lead-lists/x.png would skip the session gate.
+  // If public/ assets are added later, allow them by explicit path inside proxy().
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|robots\\.txt).*)"],
 };

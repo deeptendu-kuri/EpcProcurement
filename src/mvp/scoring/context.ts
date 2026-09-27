@@ -62,6 +62,11 @@ export interface ScoringContext {
   evidence: Record<string, EvidenceInfo>;
   /** `${entity_type}:${entity_id}` → evidence ids (any field). */
   factEvidence: Record<string, string[]>;
+  /**
+   * `${entity_type}:${entity_id}:${field}` → evidence ids for that one fact (G6 checks each fact).
+   * Absent (hand-built test contexts) = every evidence id counts as its own fact.
+   */
+  fieldEvidence?: Record<string, string[]>;
 }
 
 /** Evidence ids behind one entity (any field). */

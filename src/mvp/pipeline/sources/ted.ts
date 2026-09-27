@@ -198,8 +198,9 @@ export const tedSource: Source = {
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ query, fields: FIELDS, limit: 20, scope: "ALL" }),
     });
-    if (!res.ok) throw new Error(`TED HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const body = (await res.json()) as { notices?: TedNotice[] };
+    if (!res.ok) throw new Error(`TED HTTP ${res.status}: ${res.text.slice(0, 200)}`);
+    if (res.truncated) throw new Error("TED response too large");
+    const body = JSON.parse(res.text) as { notices?: TedNotice[] };
     return (body.notices ?? []).map(noticeToDoc).filter((d): d is RawDoc => d !== null);
   },
 };

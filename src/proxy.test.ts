@@ -2,7 +2,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SESSION_COOKIE, createSessionToken } from "@/mvp/auth/session";
-import { proxy } from "./proxy";
+import { config, proxy } from "./proxy";
 
 const SECRET = "proxy-test-secret-at-least-32-characters!!";
 const saved = { password: process.env.DEMO_PASSWORD, secret: process.env.SESSION_SECRET };
@@ -76,6 +76,29 @@ describe("proxy session gate", () => {
   it("leaves /login and the login API public", async () => {
     expect(passedThrough(await proxy(request("/login")))).toBe(true);
     expect(passedThrough(await proxy(request("/api/mvp/login")))).toBe(true);
+  });
+
+  const EXTENSION_PAGES = ["/legacy/lead-lists/x.png", "/leads/x.css", "/legacy/companies/a.svg", "/find/x.woff2"];
+  const EXTENSION_APIS = ["/api/mvp/leads/x.png", "/api/mvp/runs/x.map"];
+
+  it.each(EXTENSION_PAGES)("gates extension-suffixed page %s", async (path) => {
+    expect((await proxy(request(path))).status).toBe(307);
+  });
+
+  it.each(EXTENSION_APIS)("gates extension-suffixed API %s", async (path) => {
+    expect((await proxy(request(path))).status).toBe(401);
+  });
+
+  it("matcher runs the proxy on extension-suffixed paths and skips only build assets", () => {
+    // Next compiles the matcher source as an anchored regex; mirror that here.
+    const matchers = (config.matcher as string[]).map((m) => new RegExp(`^${m}$`));
+    const runs = (path: string) => matchers.some((re) => re.test(path));
+    for (const path of [...PROTECTED_PAGES, ...PROTECTED_APIS, ...EXTENSION_PAGES, ...EXTENSION_APIS, "/login"]) {
+      expect(runs(path), path).toBe(true);
+    }
+    for (const path of ["/_next/static/chunks/app.js", "/_next/image", "/favicon.ico", "/robots.txt"]) {
+      expect(runs(path), path).toBe(false);
+    }
   });
 
   it("fails closed when auth is not configured", async () => {

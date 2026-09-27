@@ -145,14 +145,18 @@ class Resolver {
     private readonly doc: DocContext,
   ) {}
 
-  /** Find-or-create the evidence row for a verified fact. */
+  /**
+   * Find-or-create the evidence row for a verified fact. Rows are shared only between facts with the
+   * same quote, extractor AND agreement label, so a `single` fact never borrows a `both` row (and
+   * passes G5/G6), nor does a `both` fact inherit `single` (06 §4).
+   */
   async evidence(fact: VerifiedFact): Promise<string> {
-    const key = `${fact.quote}\u0000${fact.extractedBy}`;
+    const key = `${fact.quote}\u0000${fact.extractedBy}\u0000${fact.agreement}`;
     const cached = this.evidenceIds.get(key);
     if (cached) return cached;
     const found = await this.db.query<{ id: string }>(
-      "select id from evidence where document_id = $1 and quote = $2 and extracted_by = $3 limit 1",
-      [this.doc.documentId, fact.quote, fact.extractedBy],
+      "select id from evidence where document_id = $1 and quote = $2 and extracted_by = $3 and agreement is not distinct from $4 limit 1",
+      [this.doc.documentId, fact.quote, fact.extractedBy, fact.agreement],
     );
     let id = found.rows[0]?.id;
     if (!id) {
@@ -588,13 +592,16 @@ export async function resolveDocument(db: Queryable, doc: DocContext, ex: Extrac
     let personId = existing.rows[0]?.id;
     if (personId) {
       await db.query(
-        "update people set title = coalesce(title, $2), current_company_id = coalesce(current_company_id, $3), seniority = coalesce(seniority, $4), country = coalesce(country, $5) where id = $1",
-        [personId, title, companyEntry?.id ?? null, seniorityFor(title), doc.market],
+        "update people set title = coalesce(title, $2), current_company_id = coalesce(current_company_id, $3), seniority = coalesce(seniority, $4) where id = $1",
+        [personId, title, companyEntry?.id ?? null, seniorityFor(title)],
       );
     } else {
+      // people.country stays null: the document market is NOT the person's location (a German EPC
+      // manager quoted in a Saudi article is in Germany). Outreach rules fall back to the person's
+      // company country, then the buyer's, then the strictest rule (compliance.contactCountry).
       const inserted = await db.query<{ id: string }>(
-        "insert into people (full_name, normalized_name, current_company_id, title, seniority, country) values ($1, $2, $3, $4, $5, $6) returning id",
-        [fullName, normalized, companyEntry?.id ?? null, title, seniorityFor(title), doc.market],
+        "insert into people (full_name, normalized_name, current_company_id, title, seniority) values ($1, $2, $3, $4, $5) returning id",
+        [fullName, normalized, companyEntry?.id ?? null, title, seniorityFor(title)],
       );
       personId = inserted.rows[0].id;
     }
