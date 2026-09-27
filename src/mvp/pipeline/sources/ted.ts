@@ -12,6 +12,7 @@
  */
 import type { Discipline } from "@/mvp/types";
 import type { RawDoc, Source, SourceContext, StructuredFacts } from "../contracts";
+import { GENERIC_QUERY_TERMS } from "../filter";
 import { timedFetch } from "../read";
 import type { P1Output, P2Output } from "../schemas";
 
@@ -66,26 +67,47 @@ function yyyymmdd(date: Date): string {
   return date.toISOString().slice(0, 10).replace(/-/g, "");
 }
 
-/** Build the expert query for the run. Exported for tests. */
-export function buildTedQuery(terms: string[], countries: string[], leadKinds: string[], now = new Date()): string {
+/**
+ * CPV codes for the client's scope (pipes, fittings, pipeline works, valves).
+ * Checked against live TED results: broader parents (e.g. 44613 containers, 71311 civil engineering)
+ * pulled in municipal notices unrelated to EPC work, so only these narrow codes are used.
+ */
+export const TED_SCOPE_CPV = [
+  "44163100", // pipes
+  "44163200", // pipe fittings
+  "45231100", // general construction work for pipelines
+  "45231110", // pipelaying
+  "45231113", // pipeline relaying
+  "45231200", // oil and gas pipelines
+  "45231300", // water and sewage pipelines
+  "42131100", // valves defined by function
+  "42131200", // valves defined by construction
+  "42131400", // taps and valves
+];
+
+/** Scope words used in TED full-text search (English and Norwegian); never generic words like "contract". */
+const TED_DEFAULT_TERMS = ["pipeline", "line pipe", "piping", "valves", "rørledning"];
+
+/** Build the expert query for the run from scope terms only. Exported for tests. */
+export function buildTedQuery(terms: string[], countries: string[], leadKinds: string[], now = new Date(), windowDays = 180): string {
   const safe = terms
-    .map((t) => t.replace(/["\\()]/g, " ").trim())
-    .filter((t) => t.length >= 3)
+    .map((t) => t.replace(/["\\()~]/g, " ").trim())
+    .filter((t) => t.length >= 3 && !GENERIC_QUERY_TERMS.has(t.toLowerCase()))
     .slice(0, 5);
-  const words = safe.length ? safe : ["pipeline", "line pipe", "piping"];
+  const words = [...new Set([...safe, ...TED_DEFAULT_TERMS])].slice(0, 7);
   const ft = words.map((w) => `FT~"${w}"`).join(" OR ");
   const types: string[] = [];
   if (leadKinds.includes("supply_subcontract") || !leadKinds.length) types.push("can-standard");
   if (leadKinds.includes("bid") || !leadKinds.length) types.push("cn-standard");
-  const since = new Date(now.getTime() - 180 * 86_400_000);
-  return `(${ft}) AND buyer-country IN (${countries.join(" ")}) AND notice-type IN (${types.join(" ")}) AND publication-date>=${yyyymmdd(since)} SORT BY publication-date DESC`;
+  const since = new Date(now.getTime() - windowDays * 86_400_000);
+  return `(classification-cpv IN (${TED_SCOPE_CPV.join(" ")}) OR ${ft}) AND buyer-country IN (${countries.join(" ")}) AND notice-type IN (${types.join(" ")}) AND publication-date>=${yyyymmdd(since)} SORT BY publication-date DESC`;
 }
 
-/** CPV / keyword → discipline for the notice's package. */
+/** CPV / keyword → discipline for the notice's package. Plumbing and tanks on vehicles are not client scope. */
 export function disciplineFor(cpv: string[], text: string): Discipline {
-  if (cpv.some((c) => /^(4423|4416|45231[12]|4523122)/.test(c)) || /pipeline|line pipe|rørledning/i.test(text)) return "pipeline";
-  if (cpv.some((c) => /^(4213|4533|44115)/.test(c)) || /piping|plumbing|valve|rør/i.test(text)) return "piping";
-  if (cpv.some((c) => /^(4461|4211)/.test(c)) || /tank|vessel/i.test(text)) return "static_equipment";
+  if (cpv.some((c) => /^(4523111|4523112|4523113|452312|452313|4416310|4416320)/.test(c)) || /\bpipelines?\b|line pipe|rørledning|pipelaying/i.test(text)) return "pipeline";
+  if (cpv.some((c) => /^(421311|421312|421314)/.test(c)) || /\b(?:industrial|process) piping\b|\bpiping (?:works|fabrication|erection)\b|\bvalves?\b/i.test(text)) return "piping";
+  if (/\bpressure vessels?\b|\bheat exchangers?\b|\bstorage tanks?\b|\btank farm\b|\breactors?\b|\bdistillation columns?\b/i.test(text)) return "static_equipment";
   if (cpv.some((c) => /^4531/.test(c))) return "electrical";
   if (cpv.some((c) => /^45/.test(c))) return "construction_services";
   if (cpv.some((c) => /^71/.test(c))) return "engineering_services";
@@ -114,6 +136,8 @@ export function noticeToDoc(notice: TedNotice): RawDoc | null {
   const lines: string[] = [];
   const titleLine = `Title: ${title}.`;
   lines.push(titleLine);
+  const category = pick(notice["notice-title"])[0];
+  if (category && category !== title) lines.push(`Category: ${category}.`);
   const noticeLine = `Notice type: ${isAward ? "Contract award notice" : "Contract notice (call for tenders)"} ${pubNo}.`;
   lines.push(noticeLine);
   const buyerLine = buyers.length ? `Buyer: ${buyers.join("; ")}${market ? ` (${market})` : ""}.` : null;
@@ -130,7 +154,8 @@ export function noticeToDoc(notice: TedNotice): RawDoc | null {
   if (description) lines.push(`Description: ${description}`);
   const text = lines.join("\n");
 
-  const discipline = disciplineFor(cpv, `${title} ${description}`);
+  // Title and category only: descriptions mention pipes in passing (helicopters, containers).
+  const discipline = disciplineFor(cpv, `${title} ${pick(notice["notice-title"])[0] ?? ""}`);
   const stage = isAward ? "awarded" : "epc_tender";
   const buyer = buyers[0] ?? null;
   const p1: P1Output = {
@@ -191,16 +216,23 @@ export const tedSource: Source = {
       await ctx.log("TED skipped: no EU/EEA market selected");
       return [];
     }
-    const query = buildTedQuery(ctx.terms, countries, ctx.input.leadKinds);
-    await ctx.log(`TED query: ${query}`);
-    const res = await timedFetch(TED_SEARCH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ query, fields: FIELDS, limit: 20, scope: "ALL" }),
-    });
-    if (!res.ok) throw new Error(`TED HTTP ${res.status}: ${res.text.slice(0, 200)}`);
-    if (res.truncated) throw new Error("TED response too large");
-    const body = JSON.parse(res.text) as { notices?: TedNotice[] };
-    return (body.notices ?? []).map(noticeToDoc).filter((d): d is RawDoc => d !== null);
+    const search = async (windowDays: number): Promise<TedNotice[]> => {
+      const query = buildTedQuery(ctx.terms, countries, ctx.input.leadKinds, new Date(), windowDays);
+      await ctx.log(`TED query (${windowDays} days): ${query}`);
+      const res = await timedFetch(TED_SEARCH_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ query, fields: FIELDS, limit: 20, scope: "ALL" }),
+      });
+      if (!res.ok) throw new Error(`TED HTTP ${res.status}: ${res.text.slice(0, 200)}`);
+      if (res.truncated) throw new Error("TED response too large");
+      return (JSON.parse(res.text) as { notices?: TedNotice[] }).notices ?? [];
+    };
+    let notices = await search(180);
+    if (notices.length < 5) notices = await search(365); // widen to 12 months when results are few
+    // Keep only notices whose CPV codes or title/category are in scope (a description hit alone is noise).
+    return notices
+      .map(noticeToDoc)
+      .filter((d): d is RawDoc => d !== null && ["pipeline", "piping", "static_equipment"].includes(d.structured?.p2.packages[0]?.discipline ?? ""));
   },
 };

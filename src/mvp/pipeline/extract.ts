@@ -10,7 +10,7 @@
  * - Structured sources (TED) skip the models: their facts arrive pre-built and are labelled `rule`.
  * - A fact whose quote fails the check, or that model B disputes, is dropped (never stored).
  */
-import { getLLM, setMockExtractor, type LLMProvider, type LLMRequest } from "@/mvp/llm";
+import { EXTRACT_PASS_MODELS, getLLM, setMockExtractor, type LLMProvider, type LLMRequest } from "@/mvp/llm";
 import type { Queryable } from "@/mvp/db";
 import type { Discipline, PartyRole, ProcurementRoute, ProjectStage } from "@/mvp/types";
 import { DISCIPLINES, PARTY_ROLES } from "@/mvp/types";
@@ -134,7 +134,8 @@ export function buildPrompt(pass: PassName, chunk: string, url: string): LLMRequ
     system: SYSTEM,
     user: `PASS: ${pass}\nSchema: ${SCHEMAS[pass]}\nExamples:\n${EXAMPLES[pass]}\n<doc url="${url}">${chunk}</doc>`,
     json: true,
-    maxTokens: 1500,
+    // P3 runs on qwen, whose free tier allows ~1k output tokens per minute; people lists are short.
+    maxTokens: pass === "P3" ? 700 : 1500,
     temperature: 0,
     purpose: `extract_${pass}`,
   };
@@ -169,17 +170,19 @@ export function ensureMockExtractor(): void {
 // ───────────────────────── chunking ─────────────────────────
 
 const CHUNK_CHARS = 7_000;
+/** Live models: one ~4.5k-char chunk keeps a pass near 2k tokens (free tiers allow ~8k tokens/min per model). */
+export const LIVE_CHUNK_CHARS = 4_500;
 const TRIGGER_RE = /\b(?:tender|award|awarded|contract|order|subcontract|EPC|bid|line pipe|pipeline|piping|valves?)\b|مناقصة|ترسية|عقد/i;
 
 /** Relevance chunk (05 §4.1): the text around trigger terms, at most two chunks of ~7k chars. */
-export function relevanceChunks(text: string): string[] {
-  if (text.length <= CHUNK_CHARS) return [text];
+export function relevanceChunks(text: string, size = CHUNK_CHARS, max = 2): string[] {
+  if (text.length <= size) return [text];
   const chunks: string[] = [];
-  for (let start = 0; start < text.length && chunks.length < 2; start += CHUNK_CHARS - 500) {
-    const chunk = text.slice(start, start + CHUNK_CHARS);
+  for (let start = 0; start < text.length && chunks.length < max; start += size - 500) {
+    const chunk = text.slice(start, start + size);
     if (TRIGGER_RE.test(chunk)) chunks.push(chunk);
   }
-  return chunks.length ? chunks : [text.slice(0, CHUNK_CHARS)];
+  return chunks.length ? chunks : [text.slice(0, size)];
 }
 
 // ───────────────────────── running passes ─────────────────────────
@@ -245,45 +248,49 @@ interface PassResults {
 
 async function runModels(text: string, url: string, db: Queryable | undefined, runId: string | undefined, onNote?: (msg: string) => Promise<void>): Promise<PassResults> {
   ensureMockExtractor();
-  const chunks = relevanceChunks(text);
   const llmA = getLLM("extract_a", db);
   const llmB = getLLM("extract_b", db);
   const rulesMode = llmA.name === "mock";
+  const chunks = rulesMode ? relevanceChunks(text) : relevanceChunks(text, LIVE_CHUNK_CHARS, 1);
   const wantP2 = SCOPE_HINT.test(text);
   const wantP3 = PERSON_HINT.test(text);
 
-  const runAll = async (llm: LLMProvider) => {
+  // Model A on Groq uses one model per pass so the passes run in parallel on separate rate limits.
+  const passLLM = (pass: "P1" | "P2" | "P3"): LLMProvider => (llmA.name === "groq" ? getLLM("extract_a", db, EXTRACT_PASS_MODELS[pass]) : llmA);
+
+  const runAll = async (pick: (pass: "P1" | "P2" | "P3") => LLMProvider) => {
     const p1s: P1Output[] = [];
     const p2s: P2Output[] = [];
     const p3s: P3Output[] = [];
     for (const chunk of chunks) {
-      p1s.push((await runPass<P1Output>(llm, "P1", chunk, url, runId)) ?? EMPTY_P1);
-      if (wantP2) p2s.push((await runPass<P2Output>(llm, "P2", chunk, url, runId)) ?? EMPTY_P2);
-      if (wantP3) p3s.push((await runPass<P3Output>(llm, "P3", chunk, url, runId)) ?? EMPTY_P3);
+      const [p1, p2, p3] = await Promise.all([
+        runPass<P1Output>(pick("P1"), "P1", chunk, url, runId),
+        wantP2 ? runPass<P2Output>(pick("P2"), "P2", chunk, url, runId) : Promise.resolve(null),
+        wantP3 ? runPass<P3Output>(pick("P3"), "P3", chunk, url, runId) : Promise.resolve(null),
+      ]);
+      p1s.push(p1 ?? EMPTY_P1);
+      if (wantP2) p2s.push(p2 ?? EMPTY_P2);
+      if (wantP3) p3s.push(p3 ?? EMPTY_P3);
     }
     return { p1: mergeP1(p1s), p2: mergeP2(p2s), p3: mergeP3(p3s) };
   };
 
-  if (rulesMode) return { a: await runAll(llmA), b: null, mode: "rule", extractedBy: "rule:mock-rules" };
+  if (rulesMode) return { a: await runAll(() => llmA), b: null, mode: "rule", extractedBy: "rule:mock-rules" };
 
-  let a: PassResults["a"];
-  try {
-    a = await runAll(llmA);
-  } catch (error) {
+  const useB = llmB.name !== "mock" && llmB.name !== llmA.name;
+  const [aResult, bResult] = await Promise.allSettled([runAll(passLLM), useB ? runAll(() => llmB) : Promise.resolve(null)]);
+  if (aResult.status === "rejected") {
     // Quota exhausted or provider down: fall back to the rules extractor rather than stall the run.
+    const error = aResult.reason;
     await onNote?.(`Model A unavailable (${error instanceof Error ? error.message : String(error)}); using rules extractor`);
     const p1 = rulesP1(text);
     return { a: { p1, p2: rulesP2(text, p1), p3: rulesP3(text) }, b: null, mode: "rule", extractedBy: "rule:regex" };
   }
   let b: PassResults["b"] = null;
-  if (llmB.name !== "mock" && llmB.name !== llmA.name) {
-    try {
-      b = await runAll(llmB);
-    } catch (error) {
-      await onNote?.(`Model B unavailable (${error instanceof Error ? error.message : String(error)}); facts stay 'single'`);
-    }
-  }
-  return { a, b, mode: b ? "compare" : "single", extractedBy: `model:${llmA.name}/${llmA.model}` };
+  if (bResult.status === "fulfilled") b = bResult.value;
+  else await onNote?.(`Model B unavailable (${bResult.reason instanceof Error ? bResult.reason.message : String(bResult.reason)}); facts stay 'single'`);
+  const models = llmA.name === "groq" ? [...new Set(Object.values(EXTRACT_PASS_MODELS).map((m) => getLLM("extract_a", db, m).model))].join(",") : llmA.model;
+  return { a: aResult.value, b, mode: b ? "compare" : "single", extractedBy: `model:${llmA.name}/${models}` };
 }
 
 // ───────────────────────── check + agreement ─────────────────────────

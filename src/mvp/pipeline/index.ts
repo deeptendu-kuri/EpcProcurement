@@ -6,9 +6,10 @@ import type { RunCounters, RunInput, RunStage } from "@/mvp/types";
 import { activeRuns, failStaleRuns } from "./active-runs";
 import type { RawDoc, Source, SourceContext } from "./contracts";
 import { ensureMockExtractor, extractDocument, triage } from "./extract";
-import { detectMarkets, filterDocument, queryTerms } from "./filter";
+import { detectMarkets, filterDocument, findScope, hasTerm, queryTerms, scopeTermsFor } from "./filter";
 import { fetchPageText, storeDocument, type StoredDoc } from "./read";
 import { resolveDocument } from "./resolve";
+import { bingNewsSource } from "./sources/bing-news";
 import { fixturesSource } from "./sources/fixtures";
 import { gdeltSource } from "./sources/gdelt";
 import { rssSource } from "./sources/rss";
@@ -24,14 +25,14 @@ const READ_CONCURRENCY = 3;
 
 /** Live sources for a run (fixtures are the fallback). */
 export function liveSources(): Source[] {
-  return [tedSource, gdeltSource, rssSource];
+  return [tedSource, bingNewsSource, gdeltSource, rssSource];
 }
 
 /**
  * Start a "Search now" run (docs/mvp/12 §1 F1, 05, 06).
  *
  * Inserts a `runs` row (status 'queued' → 'running'), returns its id immediately, and continues in the
- * background: collect (TED, GDELT, RSS; fixtures when MVP_OFFLINE=1 or a source fails) → read → filter →
+ * background: collect (TED, Bing News, GDELT, RSS; fixtures when MVP_OFFLINE=1 or a source fails) → read → filter →
  * extract (getLLM('extract_a'/'extract_b'), mock in demo mode) → quote check → agreement → resolve →
  * graph, then calls `buildSignalsAndScore(runId)`. Progress is appended to `run_events` with
  * `RunCounters`; `runs.status` ends as 'done' or 'failed' (a scoring failure also ends as 'failed').
@@ -117,6 +118,31 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: nu
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** Documents sent to AI extraction per run (MVP_MAX_AI_DOCS, default 15). Structured notices need no AI. */
+export function maxAiDocsPerRun(): number {
+  const n = Number(process.env.MVP_MAX_AI_DOCS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 15;
+}
+
+const TITLE_ACTION = /\b(?:award|awarded|awards|wins|won|secures?|secured|bags?|order|orders|contract|tender|bid|rfq|prequalification)\b/i;
+
+/** Rank a news document for AI reading: buying action and scope in the headline, product words, freshness. */
+export function aiPriority(item: { raw: RawDoc; stored: { text: string } }, profile: ReturnType<typeof getClientProfile>): number {
+  const title = item.raw.title ?? "";
+  const text = item.stored.text;
+  const products = profile.products.filter((p) => p.active).flatMap((p) => p.keywords.map((k) => k.toLowerCase()));
+  let score = 0;
+  if (TITLE_ACTION.test(title)) score += 3;
+  if (findScope(title, scopeTermsFor(profile, []))) score += 2;
+  if (products.some((k) => hasTerm(text, k))) score += 2;
+  if (/\b(?:EPC|engineering, procurement and construction)\b/i.test(text)) score += 1;
+  if (item.raw.publishedAt) {
+    const ageDays = (Date.now() - new Date(item.raw.publishedAt).getTime()) / 86_400_000;
+    score += ageDays <= 30 ? 2 : ageDays <= 120 ? 1 : 0;
+  }
+  return score;
+}
 
 // ───────────────────────── the run ─────────────────────────
 
@@ -214,7 +240,8 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     // ── filter ──
     const relevant: Relevant[] = [];
     for (const { stored: doc, raw } of readable) {
-      if (doc.state === "known") {
+      // Known documents are skipped, except those deferred earlier by the AI cap (status still 'new').
+      if (doc.state === "known" && doc.status !== "new") {
         if (doc.status === "extracted") progress.counters.relevant++;
         continue;
       }
@@ -237,6 +264,19 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     }
     await progress.emit("filter", `${progress.counters.relevant} relevant of ${progress.counters.itemsRead} items read`);
     if (await isCancelled(db, runId)) return;
+
+    // ── AI cap ── free AI tiers allow a few documents a minute: read the most promising first.
+    const cap = maxAiDocsPerRun();
+    const needsAi = relevant.filter((r) => !r.raw.structured && !r.raw.isSample);
+    if (!mvpEnv.offline() && needsAi.length > cap) {
+      const ranked = [...needsAi].sort((a, b) => aiPriority(b, profile) - aiPriority(a, profile));
+      const deferred = new Set(ranked.slice(cap));
+      for (const item of deferred) {
+        await db.query("update source_documents set status = 'new', filter_reason = $2 where id = $1", [item.stored.id, "deferred: per-run AI limit (read in a later run)"]);
+      }
+      relevant.splice(0, relevant.length, ...relevant.filter((r) => !deferred.has(r)));
+      await progress.emit("info", `AI reads the ${cap} most promising of ${needsAi.length} news items this run (free AI limit); the other ${deferred.size} wait for the next run`);
+    }
 
     // ── extract → check → resolve ──
     if (relevant.length) await progress.emit("extract", `Extracting facts from ${relevant.length} documents`);

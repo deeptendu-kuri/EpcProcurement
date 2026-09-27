@@ -7,7 +7,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { mvpEnv } from "@/mvp/config/env";
 import type { RawDoc, Source, SourceContext } from "../contracts";
-import { ACTION_TERMS, SCOPE_TERMS, hasTerm } from "../filter";
+import { ACTION_TERMS, findScope, hasTerm, scopeTermsFor } from "../filter";
 import { hostOf, publisherKeyFor } from "../text";
 import { isHttpUrl } from "../net-guard";
 import { getText, politeWait, stripHtml } from "../read";
@@ -15,7 +15,11 @@ import { getText, politeWait, stripHtml } from "../read";
 export const DEFAULT_RSS_FEEDS = [
   "https://energy.economictimes.indiatimes.com/rss/topstories",
   "https://infra.economictimes.indiatimes.com/rss/topstories",
-  "https://www.zawya.com/sitemaps/en/rss",
+  "https://www.thehindubusinessline.com/economy/feeder/default.rss",
+  "https://saudigazette.com.sa/rssFeed/74",
+  "https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml",
+  "https://www.offshore-technology.com/feed/",
+  "https://www.pipeline-journal.net/rss.xml",
   "https://www.offshore-energy.biz/feed/",
 ];
 
@@ -78,7 +82,7 @@ export const rssSource: Source = {
     let failures = 0;
     const feeds = feedUrls();
     const actionTerms = [...ACTION_TERMS.en, ...ACTION_TERMS.ar, ...ACTION_TERMS.ms];
-    const scopeTerms = [...ctx.terms, ...SCOPE_TERMS];
+    const scopeTerms = scopeTermsFor(ctx.profile, ctx.terms);
     for (const feed of feeds) {
       try {
         const host = hostOf(feed) ?? feed;
@@ -88,7 +92,7 @@ export const rssSource: Source = {
         const items = parseFeed(res.text);
         for (const item of items) {
           const blurb = `${item.title}\n${item.description}`;
-          if (!actionTerms.some((t) => hasTerm(blurb, t)) || !scopeTerms.some((t) => hasTerm(blurb, t))) continue;
+          if (!actionTerms.some((t) => hasTerm(blurb, t)) || !findScope(blurb, scopeTerms)) continue;
           const long = item.description.length >= 600;
           docs.push({
             sourceKey: `rss:${hostOf(item.link) ?? host}`,

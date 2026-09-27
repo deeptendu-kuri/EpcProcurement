@@ -81,7 +81,9 @@ describe("provider selection", () => {
     expect(providerFor("extract_b")).toBe("cloudflare");
     expect(providerFor("judge")).toBe("cloudflare");
     expect(providerFor("draft")).toBe("groq");
-    expect(getLLM("extract_a", db).model).toBe("qwen/qwen3.8-27b");
+    expect(getLLM("extract_a", db).model).toBe("openai/gpt-oss-120b");
+    expect(getLLM("extract_a", db, "qwen/qwen3.8-27b").model).toBe("qwen/qwen3.8-27b");
+    expect(getLLM("draft", db).model).toBe("openai/gpt-oss-120b");
   });
 });
 
@@ -169,5 +171,29 @@ describe("quota accounting", () => {
     await getLLM("extract_a", db).complete({ system: "s", user: "u".repeat(40), json: true });
     const summary = await getUsageSummary(db);
     expect(summary.find((row) => row.provider === "mock")).toMatchObject({ calls: 1, budget: null });
+  });
+});
+
+describe("rate limits", () => {
+  it("parses Groq reset headers", async () => {
+    const { parseResetMs } = await import("./pacer");
+    expect(parseResetMs("4.755s")).toBe(4755);
+    expect(parseResetMs("1m26.4s")).toBe(86_400);
+    expect(parseResetMs("600ms")).toBe(600);
+    expect(parseResetMs("7")).toBe(7000);
+    expect(parseResetMs(null)).toBeNull();
+  });
+
+  it("retries a 429 after the reset the provider gives", async () => {
+    let calls = 0;
+    const fakeFetch = (async () => {
+      calls++;
+      if (calls === 1) return new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429, headers: { "retry-after": "0.01" } });
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const groq = createGroqProvider("gsk_x", "openai/gpt-oss-20b", fakeFetch);
+    const response = await groq.complete({ system: "s", user: "u" });
+    expect(response.text).toBe("ok");
+    expect(calls).toBe(2);
   });
 });

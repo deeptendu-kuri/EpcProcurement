@@ -4,9 +4,9 @@
  *
  * Role → provider (when keys exist):
  *   triage     Groq openai/gpt-oss-20b        → Cloudflare @cf/openai/gpt-oss-20b → mock
- *   extract_a  Groq qwen3.8-27b               → mock
+ *   extract_a  Groq, one model per pass (EXTRACT_PASS_MODELS) → mock
  *   extract_b  Cloudflare @cf/openai/gpt-oss-20b → mock  (never Groq: agreement needs a distinct provider)
- *   draft      Groq qwen3.8-27b               → Cloudflare → mock
+ *   draft      Groq openai/gpt-oss-120b        → Cloudflare → mock
  *   judge      Cloudflare @cf/openai/gpt-oss-20b → Groq openai/gpt-oss-20b → mock
  * Models can be overridden with LLM_MODEL__<ROLE> (e.g. LLM_MODEL__EXTRACT_A=openai/gpt-oss-120b).
  */
@@ -26,10 +26,21 @@ export { getUsageSummary, hasCapacity, usedToday, dailyBudget, recordUsage, type
 
 export const DEFAULT_MODELS: Record<LLMRole, { groq: string; cloudflare: string }> = {
   triage: { groq: "openai/gpt-oss-20b", cloudflare: "@cf/openai/gpt-oss-20b" },
-  extract_a: { groq: "qwen/qwen3.8-27b", cloudflare: "@cf/openai/gpt-oss-20b" },
+  extract_a: { groq: "openai/gpt-oss-120b", cloudflare: "@cf/openai/gpt-oss-20b" },
   extract_b: { groq: "openai/gpt-oss-20b", cloudflare: "@cf/openai/gpt-oss-20b" },
-  draft: { groq: "qwen/qwen3.8-27b", cloudflare: "@cf/openai/gpt-oss-20b" },
+  draft: { groq: "openai/gpt-oss-120b", cloudflare: "@cf/openai/gpt-oss-20b" },
   judge: { groq: "openai/gpt-oss-20b", cloudflare: "@cf/openai/gpt-oss-20b" },
+};
+
+/**
+ * Model A per extraction pass on Groq. Groq's free tier limits tokens per minute per model
+ * (~8k; qwen also ~1k output tokens/min), so the three passes of a document run in parallel on
+ * three different models instead of queueing on one. LLM_MODEL__EXTRACT_A overrides all passes.
+ */
+export const EXTRACT_PASS_MODELS: Record<"P1" | "P2" | "P3", string> = {
+  P1: "openai/gpt-oss-120b",
+  P2: "openai/gpt-oss-20b",
+  P3: "qwen/qwen3.8-27b",
 };
 
 const ORDER: Record<LLMRole, Exclude<ProviderName, "mock">[]> = {
@@ -53,21 +64,22 @@ export function providerFor(role: LLMRole): ProviderName {
   return "mock";
 }
 
-function modelFor(role: LLMRole, provider: Exclude<ProviderName, "mock">): string {
+function modelFor(role: LLMRole, provider: Exclude<ProviderName, "mock">, preferred?: string): string {
   const override = process.env[`LLM_MODEL__${role.toUpperCase()}`]?.trim();
-  return override || DEFAULT_MODELS[role][provider];
+  return override || (provider === "groq" && preferred) || DEFAULT_MODELS[role][provider];
 }
 
 /**
  * The provider for a role, wrapped with quota checks and usage recording.
  * Check `provider.name === "mock"` to know the answer is rules-based (label facts `rule`).
  * @param db optional database for usage rows (tests); defaults to getDb().
+ * @param groqModel preferred Groq model for this call (e.g. a pass model); env overrides still win.
  */
-export function getLLM(role: LLMRole, db?: Queryable): LLMProvider {
+export function getLLM(role: LLMRole, db?: Queryable, groqModel?: string): LLMProvider {
   const name = providerFor(role);
   let provider: LLMProvider;
   if (name === "groq") {
-    provider = createGroqProvider(mvpEnv.groqApiKey()!, modelFor(role, "groq"));
+    provider = createGroqProvider(mvpEnv.groqApiKey()!, modelFor(role, "groq", groqModel));
   } else if (name === "cloudflare") {
     provider = createCloudflareProvider(mvpEnv.cloudflareAccountId()!, mvpEnv.cloudflareApiToken()!, modelFor(role, "cloudflare"));
   } else {

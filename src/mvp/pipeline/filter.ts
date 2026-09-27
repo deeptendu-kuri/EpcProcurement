@@ -42,12 +42,53 @@ export const ACTION_TERMS = {
   ms: ["tender", "sebut harga", "anugerah", "dianugerahkan", "kontrak", "perolehan"],
 } as const;
 
-/** Discipline and product synonyms (scope check). Product keywords from the client profile are added. */
+/**
+ * Discipline and product synonyms (scope check). Product keywords from the client profile are added.
+ * Only industrial scope words: generic words ("EPC", "contract", "tanks") are buying actions, not scope.
+ */
 export const SCOPE_TERMS = [
-  "pipeline", "pipelines", "piping", "line pipe", "linepipe", "api 5l", "valve", "valves", "static equipment", "epc",
-  "mechanical works", "mechanical and piping", "pressure vessel", "storage tank", "tanks", "pipe", "pipes", "gas transmission",
-  "water transmission", "خط أنابيب", "أنابيب", "saluran paip", "paip",
+  "pipeline", "pipelines", "piping", "line pipe", "linepipe", "api 5l", "valve", "valves", "static equipment",
+  "mechanical works", "mechanical and piping", "pressure vessel", "pressure vessels", "storage tank", "storage tanks", "tank farm",
+  "heat exchanger", "heat exchangers", "pipe", "pipes", "pipelaying", "pipe laying", "pipe-laying", "flowline", "flowlines",
+  "gas transmission", "water transmission", "cross-country pipeline", "spool fabrication",
+  "rørledning", "rørledninger", "خط أنابيب", "أنابيب", "saluran paip", "paip",
 ];
+
+/**
+ * Words that say nothing about scope. They are dropped from the run query so that a query such as
+ * "pipeline EPC contract" searches for pipelines, not for any contract.
+ */
+export const GENERIC_QUERY_TERMS = new Set([
+  "contract", "contracts", "tender", "tenders", "epc", "award", "awarded", "awards", "project", "projects", "work", "works",
+  "order", "orders", "supply", "supplies", "bid", "bids", "procurement", "services", "service", "company", "companies",
+  "new", "lead", "leads", "opportunity", "opportunities", "subcontract", "subcontracts", "rfq", "rfp", "construction",
+]);
+
+/** Figurative uses of "pipeline" (deal/IPO/hotel pipelines) removed before the scope check. */
+const FIGURATIVE_PIPELINE = [
+  /\b(?:ipo|deal|deals|hotel|hotels|property|real estate|project|projects|order|sales|talent|drug|investment|investments|renewables?|re|ai|data cent(?:re|er)s?|content|product|funding|launch|policy|development|tech|m&a|capacity|contract|contracts|housing|infrastructure|room|rooms|film|pharma|clinical|export|hiring|revenue|bid|tender|opportunity)\s+pipelines?\b/gi,
+  /\bpipelines? of (?:projects|deals|orders|ipos|investments|talent|contracts|opportunities|hotels|rooms)\b/gi,
+  /\bin the pipeline\b/gi,
+];
+
+/** Text with figurative "pipeline" phrases removed (for the scope check only). */
+export function scopeText(text: string): string {
+  return FIGURATIVE_PIPELINE.reduce((t, re) => t.replace(re, " "), text);
+}
+
+/** Scope terms for a run: query terms (minus generic words), active product keywords, core disciplines, SCOPE_TERMS. */
+export function scopeTermsFor(profile: ClientProfile, queryTermList: string[]): string[] {
+  const productTerms = profile.products.filter((p) => p.active).flatMap((p) => p.keywords.map((k) => k.toLowerCase()));
+  const disciplineTerms = profile.disciplines.map((d) => d.replace(/_/g, " "));
+  return [...new Set([...queryTermList.filter((t) => !GENERIC_QUERY_TERMS.has(t)), ...productTerms, ...disciplineTerms, ...SCOPE_TERMS])];
+}
+
+/** First scope term in the text (figurative "pipeline" ignored), or null. */
+export function findScope(text: string, terms: readonly string[]): string | null {
+  const t = scopeText(text);
+  for (const term of terms) if (hasTerm(t, term)) return term;
+  return null;
+}
 
 /** Country, city and demonym names per market (market check). */
 export const MARKET_TERMS: Record<MarketCode, string[]> = {
@@ -96,7 +137,8 @@ export function queryTerms(query: string): string[] {
   const parts = query
     .toLowerCase()
     .split(/[,;/|]+|\bor\b|\band\b/)
-    .map((p) => p.replace(/["']/g, "").trim())
+    // Drop generic words ("pipeline EPC contract" → "pipeline"; "EPC contract" → nothing).
+    .map((p) => p.replace(/["']/g, " ").split(/\s+/).filter((w) => w && !GENERIC_QUERY_TERMS.has(w)).join(" "))
     .filter((p) => p.length >= 3);
   const words = parts.flatMap((p) => (p.split(/\s+/).length > 2 ? p.split(/\s+/).filter((w) => w.length >= 4) : []));
   return [...new Set([...parts, ...words])];
@@ -120,9 +162,7 @@ export function filterDocument(input: FilterInput): FilterResult {
   const action = firstTerm(text, [...ACTION_TERMS.en, ...ACTION_TERMS.ar, ...ACTION_TERMS.ms]);
   if (!action) return { verdict: "drop", reason: "no buying action term", markets: [] };
 
-  const productTerms = input.profile.products.filter((p) => p.active).flatMap((p) => p.keywords.map((k) => k.toLowerCase()));
-  const disciplineTerms = [...input.profile.disciplines, ...input.profile.adjacent_disciplines].map((d) => d.replace(/_/g, " "));
-  const scope = firstTerm(text, [...input.queryTerms, ...productTerms, ...disciplineTerms, ...SCOPE_TERMS]);
+  const scope = findScope(text, scopeTermsFor(input.profile, input.queryTerms));
   if (!scope) return { verdict: "drop", reason: `no scope term (action: ${action})`, markets: [] };
 
   const mentioned = detectMarkets(text);

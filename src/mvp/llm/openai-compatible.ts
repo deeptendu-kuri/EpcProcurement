@@ -1,6 +1,11 @@
+import { acquire, paceLimitsFor, parseResetMs } from "./pacer";
 import { LLMHttpError, type LLMRequest, type LLMResponse, type ProviderName } from "./types";
 
 export const LLM_TIMEOUT_MS = 60_000;
+/** Retries after a 429 (waiting for the reset the provider tells us). */
+export const RATE_LIMIT_RETRIES = 2;
+/** Longest wait for a rate-limit reset before giving up (daily limits reset much later). */
+const MAX_RESET_WAIT_MS = 65_000;
 
 interface ChatCompletionResponse {
   choices?: { message?: { content?: string | null } }[];
@@ -34,25 +39,41 @@ export async function chatCompletion(options: {
     ...extraBody,
   };
 
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
-  });
+  const limits = paceLimitsFor(provider, model);
+  const estimateIn = estimateTokens(request.system + request.user);
+  const estimateOut = request.maxTokens ?? 1000;
+  for (let attempt = 0; ; attempt++) {
+    const settle = limits ? await acquire(`${provider}:${model}`, limits, estimateIn + estimateOut, estimateOut) : null;
+    const response = await fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+    });
 
-  const payload = (await response.json().catch(() => ({}))) as ChatCompletionResponse;
-  if (!response.ok) {
-    const detail = typeof payload.error === "string" ? payload.error : payload.error?.message;
-    throw new LLMHttpError(provider, response.status, `${provider} ${response.status}: ${detail ?? response.statusText}`);
+    const payload = (await response.json().catch(() => ({}))) as ChatCompletionResponse;
+    if (!response.ok) {
+      settle?.(estimateIn, 0);
+      const detail = typeof payload.error === "string" ? payload.error : payload.error?.message;
+      if (response.status === 429 && attempt < RATE_LIMIT_RETRIES) {
+        const headers = response.headers;
+        // Per-minute token resets are short; a long wait means a daily limit, so give up instead.
+        const wait = parseResetMs(headers?.get?.("retry-after")) ?? parseResetMs(headers?.get?.("x-ratelimit-reset-tokens"));
+        // Retry only when the provider says when the limit resets (Groq sends reset headers).
+        if (wait !== null && wait <= MAX_RESET_WAIT_MS) {
+          await new Promise((resolve) => setTimeout(resolve, Math.max(250, wait) + 250));
+          continue;
+        }
+      }
+      throw new LLMHttpError(provider, response.status, `${provider} ${response.status}: ${detail ?? response.statusText}`);
+    }
+
+    const text = payload.choices?.[0]?.message?.content ?? "";
+    const tokensIn = payload.usage?.prompt_tokens ?? estimateIn;
+    const tokensOut = payload.usage?.completion_tokens ?? estimateTokens(text);
+    settle?.(tokensIn + tokensOut, tokensOut);
+    return { text: stripThinking(text), tokensIn, tokensOut };
   }
-
-  const text = payload.choices?.[0]?.message?.content ?? "";
-  return {
-    text: stripThinking(text),
-    tokensIn: payload.usage?.prompt_tokens ?? estimateTokens(request.system + request.user),
-    tokensOut: payload.usage?.completion_tokens ?? estimateTokens(text),
-  };
 }
 
 /** Rough token estimate (≈4 chars per token) for providers that omit usage, and for the mock. */
