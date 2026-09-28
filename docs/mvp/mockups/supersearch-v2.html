@@ -1,0 +1,181 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SuperSearch mockup</title>
+<style>
+:root{--line:#e7e9f0;--muted:#6b7280;--ink:#111827;--blue:#2563eb;--blue-50:#eff4ff;--bg:#fafbfc}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 "Segoe UI",Inter,system-ui,sans-serif;color:var(--ink);background:#fff}
+.app{display:grid;grid-template-columns:64px 300px 1fr;height:100vh;overflow:hidden}
+.rail{border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:18px}
+.logo{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;display:grid;place-items:center;font-weight:700}
+.ri{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;color:#475569;font-size:17px}
+.ri.on{background:var(--blue-50);color:var(--blue)}
+.filters{border-right:1px solid var(--line);overflow:auto;padding:0 18px 30px}
+.fh{display:flex;justify-content:space-between;align-items:center;height:64px;border-bottom:1px solid var(--line);margin:0 -18px 6px;padding:0 18px}
+.fh h1{font-size:20px;margin:0}
+.grp{border-bottom:1px solid var(--line);padding:12px 0}
+.gt{display:flex;align-items:center;gap:10px;font-size:15px;color:#1f2937}
+.gt .ic{width:20px;text-align:center;color:#64748b}.gt .car{margin-left:auto;color:#94a3b8;font-size:12px}
+.sub{font-size:12px;color:var(--muted);margin:8px 0 4px 30px}
+.chips{margin-left:30px;display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:var(--blue-50);color:var(--blue);border-radius:6px;padding:3px 8px;font-size:12.5px}
+.chip.off{background:#f3f4f6;color:#6b7280}
+.inp{margin:6px 0 0 30px;border-bottom:1px solid var(--line);color:#9ca3af;font-size:13px;padding:4px 0}
+.tog{margin:8px 0 0 30px;font-size:13px;display:flex;gap:8px;align-items:center}
+.sw{width:30px;height:16px;border-radius:9px;background:#111827;position:relative}.sw:after{content:"";position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff}
+.main{display:flex;flex-direction:column;overflow:hidden;background:#fff}
+.top{height:64px;border-bottom:1px solid var(--line);display:flex;align-items:flex-end;padding:0 24px;gap:34px}
+.tab{padding:0 2px 18px;font-size:16px;color:#64748b}.tab.on{color:var(--blue);font-weight:600;border-bottom:2px solid var(--blue)}
+.top .right{margin-left:auto;align-self:center;display:flex;gap:12px;align-items:center;color:#64748b;font-size:13px}
+.pill{border:1px solid var(--line);border-radius:8px;padding:7px 12px;color:#334155}
+.bar{display:flex;align-items:center;gap:14px;padding:18px 24px 8px}
+.count{color:#374151}.count b{color:#111827}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:13px}.seg span{padding:6px 12px}.seg .on{background:#111827;color:#fff}
+.btn{border:1px solid var(--line);border-radius:8px;padding:7px 12px;font-size:13px;background:#fff;color:#334155}
+.cta{margin-left:auto;background:linear-gradient(90deg,#3b82f6,#8b5cf6);color:#fff;border:0;border-radius:10px;padding:11px 20px;font-weight:600;font-size:14px}
+.note{padding:0 24px 12px;color:var(--blue);font-size:13.5px}
+.tw{padding:0 24px;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{font-weight:500;color:#6b7280;text-align:left;font-size:12px;letter-spacing:.03em;text-transform:uppercase;padding:10px 10px;border:1px solid var(--line);background:#fcfcfd}
+td{padding:11px 10px;border:1px solid var(--line);vertical-align:top}
+tr.sel td{background:#f5f8ff}
+.co{display:flex;gap:10px;align-items:center}.av{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700;flex:none}
+.nm{font-weight:600}.sm{font-size:12px;color:var(--muted)}
+.tp{display:inline-block;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.t-sup{background:#fdf2f8;color:#be185d}.t-epc{background:#ecfdf5;color:#047857}.t-dis{background:#fff7ed;color:#c2410c}.t-own{background:#f1f5f9;color:#475569}.t-ten{background:#eef2ff;color:#4338ca}
+.sc{font-weight:700}.conf{font-size:11.5px;color:#b45309}
+/* sidebar */
+.shade{position:fixed;inset:0 0 0 364px;background:rgba(15,23,42,.18)}
+.side{position:fixed;top:0;right:0;width:600px;height:100vh;background:#fff;box-shadow:-12px 0 40px rgba(15,23,42,.18);display:flex;flex-direction:column}
+.sh{padding:18px 22px 14px;border-bottom:1px solid var(--line)}
+.sh .row{display:flex;gap:12px;align-items:flex-start}
+.big{width:44px;height:44px;border-radius:10px;background:#0f766e;color:#fff;display:grid;place-items:center;font-weight:700}
+.sh h2{margin:0;font-size:18px;line-height:1.25}.x{margin-left:auto;color:#94a3b8;font-size:18px}
+.meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center}
+.ring{margin-left:auto;text-align:right}.ring b{font-size:24px}.ring span{color:#6b7280}
+.sb{overflow:auto;padding:14px 22px 90px}
+.card{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.card h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280}
+.hero{background:linear-gradient(180deg,#f0fdf4,#fff);border-color:#bbf7d0}
+.hero p{margin:0;font-size:15px;color:#064e3b}
+.fit{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px dashed var(--line)}.fit:last-child{border:0}
+.g{color:#047857;font-weight:600}.m{color:#b45309;font-weight:600}.n{color:#b91c1c;font-weight:600}
+.tl{display:flex;align-items:center;gap:0;margin-top:4px}.st{flex:1;text-align:center;font-size:12px}.dot{width:12px;height:12px;border-radius:50%;margin:0 auto 5px;background:#cbd5e1}.dot.on{background:#16a34a;box-shadow:0 0 0 4px #dcfce7}.dot.now{background:#2563eb;box-shadow:0 0 0 4px #dbeafe}
+.ln{height:2px;background:#e2e8f0;flex:.6;margin-top:-18px}
+.per{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #f1f5f9}.per:last-child{border:0}
+.pa{width:32px;height:32px;border-radius:50%;background:#e2e8f0;display:grid;place-items:center;font-size:12px;color:#475569;flex:none}
+.tag{font-size:11px;border-radius:6px;padding:2px 7px;background:#f1f5f9;color:#475569;white-space:nowrap}
+.tag.b{background:#dbeafe;color:#1d4ed8}.tag.a{background:#fef3c7;color:#92400e}
+.lnk{color:var(--blue);font-size:12.5px;white-space:nowrap}
+.q{background:#fffbeb;border-left:3px solid #f59e0b;padding:8px 10px;border-radius:6px;font-size:13px;margin:6px 0}
+.foot{position:absolute;bottom:0;left:0;right:0;border-top:1px solid var(--line);background:#fff;padding:12px 22px;display:flex;gap:10px}
+.fbtn{border-radius:9px;padding:9px 14px;font-weight:600;font-size:13.5px;border:1px solid var(--line);background:#fff}
+.good{background:#16a34a;color:#fff;border-color:#16a34a}.pri{background:#2563eb;color:#fff;border-color:#2563eb;margin-left:auto}
+.hide{display:none}
+.lab{position:fixed;left:380px;bottom:10px;background:#111827;color:#fff;font-size:12px;padding:4px 10px;border-radius:6px;opacity:.85}
+</style></head>
+<body>
+<style>
+.t-mfr{background:#fdf2f8;color:#be185d}.warn{font-size:11.5px;color:#b91c1c}
+.cc{font-size:12.5px}.cc b{color:#111827}
+.org{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:13px}.org:last-child{border:0}
+.org .who{flex:1}.cnt{font-size:12px;color:#6b7280;white-space:nowrap}
+.sec{font-size:11px;color:#94a3b8;margin:10px 0 2px;text-transform:uppercase;letter-spacing:.06em}
+</style>
+<div class="app">
+ <nav class="rail">
+  <div class="logo">⚡</div>
+  <div class="ri" title="Overview">▦</div>
+  <div class="ri on" title="SuperSearch">⌕</div>
+  <div class="ri" title="Lead lists">☰</div>
+  <div class="ri" title="Pipeline">▥</div>
+  <div class="ri" title="Messages">✉</div>
+  <div class="ri" title="Settings">⚙</div>
+ </nav>
+ <aside class="filters">
+  <div class="fh"><h1>SuperSearch</h1><span style="color:#94a3b8">⇤</span></div>
+  <div class="grp"><div class="gt"><span class="ic">◎</span>Location<span class="car">▲</span></div>
+   <div class="sub">Is any of</div><div class="chips"><span class="chip">Saudi Arabia ✕</span><span class="chip">India ✕</span><span class="chip">UAE ✕</span><span class="chip">Malaysia ✕</span></div>
+   <div class="sub">Is not any of</div><div class="inp">Add country, region or city…</div>
+   <div class="tog">Company HQ <span class="sw"></span> Project site</div></div>
+  <div class="grp"><div class="gt"><span class="ic">⌂</span>Buyer role<span class="car">▲</span></div>
+   <div class="sub">Is any of</div><div class="chips"><span class="chip">EPC contractor ✕</span><span class="chip">Subcontractor ✕</span><span class="chip">Manufacturer ✕</span></div>
+   <div class="chips" style="margin-top:6px"><span class="chip off">+ Project owner</span><span class="chip off">+ Distributor</span><span class="chip off">+ Fabricator</span></div></div>
+  <div class="grp"><div class="gt"><span class="ic">▣</span>What we can sell them<span class="car">▲</span></div>
+   <div class="sub">From your product catalogue</div><div class="chips"><span class="chip">Fittings &amp; flanges ✕</span><span class="chip">Valves ✕</span><span class="chip">Coating materials ✕</span><span class="chip off">+ Welding consumables</span></div>
+   <div class="tog">Hide competitors <span class="sw"></span></div></div>
+  <div class="grp"><div class="gt"><span class="ic">↯</span>Buying signal<span class="car">▲</span></div>
+   <div class="chips" style="margin-top:8px"><span class="chip">Won an order ✕</span><span class="chip">Won a contract ✕</span><span class="chip off">+ Open tender</span><span class="chip off">+ Expansion</span></div>
+   <div class="sub">Happened in</div><div class="chips"><span class="chip">Last 90 days ✕</span></div></div>
+  <div class="grp"><div class="gt"><span class="ic">☺</span>Contacts<span class="car">▲</span></div>
+   <div class="sub">Department</div><div class="chips"><span class="chip">Procurement ✕</span><span class="chip">Projects ✕</span><span class="chip">QA/QC ✕</span></div>
+   <div class="sub">Buying role</div><div class="chips"><span class="chip">Decision maker ✕</span><span class="chip off">+ Buyer</span><span class="chip off">+ Technical approver</span></div></div>
+  <div class="grp"><div class="gt"><span class="ic">⛭</span>Industry and project type<span class="car">▼</span></div></div>
+  <div class="grp"><div class="gt"><span class="ic">$</span>Order / project value<span class="car">▼</span></div></div>
+  <div class="grp"><div class="gt"><span class="ic">≈</span>Lookalike company<span class="car">▼</span></div></div>
+  <div class="grp"><div class="gt"><span class="ic">⤒</span>Upload company list<span class="car"></span></div></div>
+  <div class="grp"><div class="gt"><span class="ic">⚖</span>Contact rules by country<span class="car">▼</span></div></div>
+  <div class="grp"><div class="gt"><span class="ic">★</span>Lead quality and score<span class="car">▼</span></div></div>
+ </aside>
+ <main class="main">
+  <div class="top"><div class="tab on">SuperSearch</div><div class="tab">Lead Lists</div>
+   <div class="right">Updated 12 min ago <span class="pill">Saved searches ▾</span></div></div>
+  <div class="bar"><div class="count"><b>6</b> buyers found · <b>38</b> contacts to approach (<b>4</b> found)</div>
+   <div class="seg"><span class="on">Buyers</span><span>Contacts</span></div>
+   <span class="btn">☐ Select all</span><span class="btn">+ Add to list</span><span class="btn">⤓ Export</span>
+   <button class="cta">✦ Find contacts</button></div>
+  <div class="note">ⓘ 34 contacts not found yet — "Find contacts" searches for each company's buying team.</div>
+  <div class="tw"><table>
+   <thead><tr><th style="width:34px"></th><th>Buyer</th><th>Buyer role</th><th>Why they buy now</th><th>What we can sell them</th><th>Location</th><th>Score</th><th>Contacts</th></tr></thead>
+   <tbody>
+   <tr class="sel"><td>☑</td><td><div class="co"><span class="av" style="background:#0f766e">EP</span><div><div class="nm">East Pipes (EPIC)</div><div class="sm">Pipe mill</div></div></div></td><td><span class="tp t-mfr">Manufacturer</span></td><td>Won Saudi Aramco pipe order · SAR 771M · Sep 2026</td><td>Coating materials, welding consumables, fittings<div class="warn">⚠ Makes line pipe — competitor for pipe</div></td><td>Saudi Arabia</td><td><span class="sc">57</span><div class="conf">Medium</div></td><td class="cc"><b>1</b> of 6 found</td></tr>
+   <tr><td>☐</td><td><div class="co"><span class="av" style="background:#1d4ed8">DI</span><div><div class="nm">Desco Infratech</div><div class="sm">Pipeline contractor</div></div></div></td><td><span class="tp t-epc">EPC contractor</span></td><td>Won Adani Total Gas pipeline EPC contract · Sep 2026</td><td>Line pipe, fittings &amp; flanges, valves, coating</td><td>India</td><td><span class="sc">57</span><div class="conf">Medium</div></td><td class="cc"><b>0</b> of 8 found</td></tr>
+   <tr><td>☐</td><td><div class="co"><span class="av" style="background:#0369a1">EN</span><div><div class="nm">Enproserve Group Bhd</div><div class="sm">Oil &amp; gas contractor</div></div></div></td><td><span class="tp t-epc">EPC contractor</span></td><td>Won PETRONAS Carigali onshore pipeline contract · Oct 2025</td><td>Line pipe, valves, fittings &amp; flanges</td><td>Malaysia</td><td><span class="sc">46</span><div class="conf">Medium</div></td><td class="cc"><b>0</b> of 8 found</td></tr>
+   <tr><td>☐</td><td><div class="co"><span class="av" style="background:#b45309">BM</span><div><div class="nm">Bilfinger Middle East</div><div class="sm">Industrial services</div></div></div></td><td><span class="tp t-dis">Subcontractor</span></td><td>Working on the new jet-fuel pipeline to Al-Maktoum airport</td><td>Fittings &amp; flanges, valves, fasteners</td><td>UAE</td><td><span class="sc">48</span><div class="conf">Medium</div></td><td class="cc"><b>0</b> of 6 found</td></tr>
+   <tr><td>☐</td><td><div class="co"><span class="av" style="background:#475569">SA</span><div><div class="nm">Saudi Aramco</div><div class="sm">Oil &amp; gas company</div></div></div></td><td><span class="tp t-own">Project owner</span></td><td>Ordering pipe for a new pipeline · contractor not known yet</td><td>Get on their approved vendor list</td><td>Saudi Arabia</td><td><span class="sc">54</span><div class="conf">Medium</div></td><td class="cc"><b>0</b> of 4 found</td></tr>
+   <tr><td>☐</td><td><div class="co"><span class="av" style="background:#4338ca">TK</span><div><div class="nm">Trondheim kommune</div><div class="sm">Municipality</div></div></div></td><td><span class="tp t-ten">Project owner · open tender</span></td><td>Tender open: renovation of water pipelines</td><td>Pipes, fittings, valves</td><td>Norway</td><td><span class="sc">65</span><div class="conf">Medium</div></td><td class="cc"><b>1</b> of 2 found</td></tr>
+   </tbody></table></div>
+ </main>
+</div>
+
+<div id="sidebar">
+<div class="shade"></div>
+<section class="side">
+ <div class="sh"><div class="row"><div class="big">EP</div>
+  <div><h2>East Pipes Integrated Company for Industry (EPIC)</h2>
+   <div class="meta"><span class="tp t-mfr">Buyer · Manufacturer (pipe mill)</span><span class="tag">Saudi Arabia</span><span class="tag">Listed on Tadawul</span></div></div>
+  <div class="ring"><b>57</b><span>/100</span><div class="conf">Medium confidence</div></div><span class="x">✕</span></div></div>
+ <div class="sb">
+  <div class="card hero"><h3>Why they will buy now</h3>
+   <p><b>EPIC won a SAR 771M (≈ USD 205M) pipe order from Saudi Aramco</b>, to deliver within 6 months. To make and deliver it, they must buy materials, consumables and services in the next few weeks.</p></div>
+  <div class="card"><h3>What we can sell them <span style="text-transform:none;letter-spacing:0;color:#94a3b8">· from your catalogue</span></h3>
+   <div class="fit"><span>Coating materials (3LPE / FBE)<div class="sm">Pipes are coated before delivery</div></span><span class="g">● Good fit</span></div>
+   <div class="fit"><span>Welding consumables (SAW wire &amp; flux)<div class="sm">Used to weld the pipe seams</div></span><span class="g">● Good fit</span></div>
+   <div class="fit"><span>Fittings &amp; flanges<div class="sm">Often supplied together with pipe</div></span><span class="m">● Possible</span></div>
+   <div class="fit"><span>Line pipe<div class="sm">Hidden from outreach</div></span><span class="n">✕ Competitor — they make it</span></div></div>
+  <div class="card"><h3>When they buy</h3>
+   <div class="tl"><div class="st"><div class="dot on"></div>Order won<br><span class="sm">22 Sep 2026</span></div><div class="ln"></div>
+   <div class="st"><div class="dot now"></div><b>Materials &amp; consumables</b><br><span class="sm">Oct – Nov 2026</span></div><div class="ln"></div>
+   <div class="st"><div class="dot"></div>Coating &amp; testing<br><span class="sm">Nov 2026 – Jan 2027</span></div><div class="ln"></div>
+   <div class="st"><div class="dot"></div>Delivery<br><span class="sm">~Mar 2027</span></div></div></div>
+  <div class="card"><h3>Buying team at EPIC <span style="text-transform:none;letter-spacing:0;color:#94a3b8">· 1 of 6 found</span></h3>
+   <div class="per"><div class="pa">?</div><div style="flex:1"><b>Head of procurement / supply chain</b><div class="sm">Signs off new vendors</div></div><span class="tag b">Decision maker</span><span class="lnk">Find →</span></div>
+   <div class="per"><div class="pa">?</div><div style="flex:1"><b>Buyer — raw materials &amp; consumables</b><div class="sm">Raises the purchase orders</div></div><span class="tag">Buyer</span><span class="lnk">Find →</span></div>
+   <div class="per"><div class="pa">?</div><div style="flex:1"><b>QA/QC manager</b><div class="sm">Approves new materials and suppliers</div></div><span class="tag">Technical approver</span><span class="lnk">Find →</span></div>
+   <div class="per"><div class="pa">?</div><div style="flex:1"><b>Production / plant manager</b><div class="sm">Uses the materials; can recommend</div></div><span class="tag">Influencer</span><span class="lnk">Find →</span></div>
+   <div class="per"><div class="pa">MD</div><div style="flex:1"><b>Mohammed Darweesh</b> · Acting CEO<div class="sm">Named in news ⓘ · approves large orders</div></div><span class="tag a">Approver · likely</span></div>
+   <div class="per"><div class="pa">⌂</div><div style="flex:1"><b>Vendor registration</b><div class="sm">Official way to become an EPIC supplier</div></div><span class="lnk">Find page →</span></div></div>
+  <div class="card"><h3>Other buyers on this project <span style="text-transform:none;letter-spacing:0;color:#94a3b8">· more people to approach</span></h3>
+   <div class="org"><span class="tp t-own">Owner</span><span class="who"><b>Saudi Aramco</b> — approved vendor list, pipeline project team</span><span class="cnt">0 of 4 · Find</span></div>
+   <div class="org"><span class="tp t-epc">EPC</span><span class="who"><b>Pipeline contractor</b> — not identified yet</span><span class="cnt">Research</span></div>
+   <div class="org"><span class="tp t-dis">Sub</span><span class="who"><b>Coating / testing subcontractors</b> — not identified yet</span><span class="cnt">Research</span></div>
+   <div class="org"><span class="tp t-mfr">Group</span><span class="who"><b>Welspun Corp</b> — parent group, central buying</span><span class="cnt">0 of 3 · Find</span></div></div>
+  <div class="card"><h3>How to reach them — Saudi Arabia</h3>
+   <div class="sm" style="font-size:13px;color:#374151">Cold email needs consent (PDPL). Best route: vendor registration, or call the main office and ask for procurement.</div></div>
+  <div class="card"><h3>Proof (2 sources)</h3>
+   <div class="q">“The Welspun Aramco order is a steel-pipe manufacturing and supply contract <b>signed by East Pipes Integrated Company for Industry, or EPIC, with Saudi Arabian Oil Co</b>.”</div>
+   <div class="sm">lapaasvoice.com · 22 Sep 2026 · quote checked ✓ · <span class="lnk">Open article ↗</span></div></div>
+ </div>
+ <div class="foot"><button class="fbtn good">✓ Good lead</button><button class="fbtn">✕ Not relevant</button><button class="fbtn">+ Add to list</button><button class="fbtn pri">Open full page →</button></div>
+</section>
+</div>
+<script>if(location.hash==='#deep'){document.querySelector('.sb').scrollTop=620}if(location.hash==='#list'){document.getElementById('sidebar').classList.add('hide')}</script>
+</body></html>
