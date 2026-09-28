@@ -395,8 +395,11 @@ export interface ScoreBreakdown {
   unknown: string[];
 }
 
-/** Who the lead is about (13 §11): an EPC contractor, a subcontractor, a supplier that won an order, or a project owner. */
-export const BUYER_TYPES = ["epc_contractor", "subcontractor", "supplier", "owner"] as const;
+/**
+ * Who the lead is about (14 §2): the six buyer roles. `supplier` is legacy (13 §11, rows scored before
+ * migration 004); migration 004 maps it to `manufacturer` or `distributor` and scoring never writes it.
+ */
+export const BUYER_TYPES = ["owner", "epc_contractor", "subcontractor", "manufacturer", "fabricator", "distributor", "supplier"] as const;
 export type BuyerType = (typeof BUYER_TYPES)[number];
 
 export interface LeadRow {

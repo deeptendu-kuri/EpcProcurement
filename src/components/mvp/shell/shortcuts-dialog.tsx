@@ -4,12 +4,12 @@ import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 
 export const SHORTCUTS: { keys: string[]; label: string }[] = [
-  { keys: ["/"], label: "Search leads" },
-  { keys: ["j", "k"], label: "Move down / up in the leads list" },
-  { keys: ["Enter"], label: "Preview the selected lead" },
-  { keys: ["o"], label: "Open the selected lead" },
-  { keys: ["a"], label: "Accept the selected lead" },
-  { keys: ["r"], label: "Reject the selected lead" },
+  { keys: ["/"], label: "Search buyers" },
+  { keys: ["j", "k"], label: "Move down / up in a list" },
+  { keys: ["Enter"], label: "Preview the selected buyer" },
+  { keys: ["o"], label: "Open the selected buyer" },
+  { keys: ["a"], label: "Mark the selected buyer a good lead" },
+  { keys: ["r"], label: "Mark the selected buyer not relevant" },
   { keys: ["?"], label: "Show these shortcuts" },
   { keys: ["Esc"], label: "Close a panel or the tour" },
 ];

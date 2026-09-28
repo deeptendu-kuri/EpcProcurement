@@ -27,10 +27,12 @@ export interface LeadViewProps {
   productNames: string[];
   /** Company-address outreach rule for the buyer's country (companyOutreachRules), used for a company-level draft. */
   companyOutreach: OutreachRule | null;
+  /** Shown under the header, above the detail sections (the buyer's five questions, docs/mvp/14 §10). */
+  top?: React.ReactNode;
 }
 
 /** The lead page (09 §4.3, 12 F3/F4). Every fact carries an ⓘ that opens its quote and source. */
-export function LeadView({ detail, productNames, companyOutreach }: LeadViewProps) {
+export function LeadView({ detail, productNames, companyOutreach, top }: LeadViewProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [draftOpen, setDraftOpen] = useState(false);
@@ -69,6 +71,7 @@ export function LeadView({ detail, productNames, companyOutreach }: LeadViewProp
           onDraftEmail={() => setDraftOpen(true)}
           draftBlocked={draftBlockedReason(contacts)}
         />
+        {top}
         <RejectedBanner gates={detail.gates} leadClass={lead.class} status={lead.status} rejectReason={lead.reject_reason} />
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="flex min-w-0 flex-col gap-3">
@@ -79,7 +82,7 @@ export function LeadView({ detail, productNames, companyOutreach }: LeadViewProp
             <SupplyChainSection detail={detail} />
             <PeopleSection detail={detail} />
             <BuyerHistorySection insights={detail.buyerInsights} buyerName={buyer.canonical_name} />
-            <Section id="score" title="Score breakdown">
+            <Section id="score" title="Buyer fit breakdown">
               <ScoreBreakdown breakdown={detail.breakdown} score={lead.score} />
             </Section>
             <ComplianceSection

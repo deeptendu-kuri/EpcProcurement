@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { CheckCircle2, Info, XCircle } from "lucide-react";
+import { getCatalogue, getStrengths } from "@/mvp/config/buyers-config";
 import { getClientProfile } from "@/mvp/config/profile";
 import { marketName } from "@/mvp/config/markets";
 import { disciplineLabel, formatDate, formatMoney } from "@/components/mvp/labels";
@@ -36,21 +38,141 @@ function List({ items, empty = "None" }: { items: string[]; empty?: string }) {
   return items.length ? <>{items.join(", ")}</> : <span className="text-[#98a2b3]">{empty}</span>;
 }
 
-/** Settings (read-only in the slice): the client profile that drives matching, scoring and compliance. */
-export default function SettingsPage() {
+const TABS = [
+  { id: "profile", label: "Company profile" },
+  { id: "catalogue", label: "Catalogue" },
+  { id: "strengths", label: "Strengths" },
+] as const;
+type SettingsTab = (typeof TABS)[number]["id"];
+
+function ExampleNote({ children }: { children: React.ReactNode }) {
+  return (
+    <p role="note" className="rounded-lg border border-[#fedf89] bg-[#fffaeb] px-3 py-2 text-sm font-semibold text-[#b54708]">
+      {children}
+    </p>
+  );
+}
+
+/** Product catalogue (docs/mvp/14 §3): what "What we can sell them" matches against. */
+function CatalogueTab() {
+  let catalogue: ReturnType<typeof getCatalogue> | null = null;
+  try {
+    catalogue = getCatalogue();
+  } catch (error) {
+    console.error("[settings] catalogue unavailable", error);
+  }
+  if (!catalogue) return <Card title="Catalogue"><p className="text-[#98a2b3]">The catalogue could not be read.</p></Card>;
+  const categories = [...new Set(catalogue.items.map((item) => item.category))];
+  return (
+    <div className="flex flex-col gap-4">
+      {catalogue.isExample ? <ExampleNote>Example — replace with your own. This is an example catalogue of pipes and construction materials; edit it to match what you really sell.</ExampleNote> : null}
+      {categories.map((category) => (
+        <Card key={category} title={category}>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="table-head">
+                <tr>
+                  <th className="px-2 py-2 font-semibold">Item</th>
+                  <th className="px-2 py-2 font-semibold">Standards</th>
+                  <th className="px-2 py-2 font-semibold">Customs (HS) headings</th>
+                  <th className="px-2 py-2 font-semibold">Matching words</th>
+                </tr>
+              </thead>
+              <tbody>
+                {catalogue.items
+                  .filter((item) => item.category === category)
+                  .map((item) => (
+                    <tr key={item.id} className="data-table-row align-top">
+                      <td className="px-2 py-2 font-semibold text-[#101828]">{item.name}</td>
+                      <td className="px-2 py-2"><List items={item.standards} empty="—" /></td>
+                      <td className="px-2 py-2 tabular-nums"><List items={item.hs} empty="—" /></td>
+                      <td className="px-2 py-2 text-xs"><List items={item.keywords.slice(0, 8)} empty="—" />{item.keywords.length > 8 ? ` +${item.keywords.length - 8} more` : ""}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/** Strengths (docs/mvp/14 §4): "Why you" only shows one when its condition matches verified facts. */
+function StrengthsTab() {
+  let config: ReturnType<typeof getStrengths> | null = null;
+  try {
+    config = getStrengths();
+  } catch (error) {
+    console.error("[settings] strengths unavailable", error);
+  }
+  if (!config) return <Card title="Strengths"><p className="text-[#98a2b3]">The strengths could not be read.</p></Card>;
+  return (
+    <div className="flex flex-col gap-4">
+      {config.isExample ? <ExampleNote>Example — replace with your own. “Why you” shows a strength to a buyer only when its condition is met by verified facts.</ExampleNote> : null}
+      <Card title="Your strengths">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-sm">
+            <thead className="table-head">
+              <tr>
+                <th className="px-2 py-2 font-semibold">Strength</th>
+                <th className="px-2 py-2 font-semibold">A benefit to the buyer when…</th>
+              </tr>
+            </thead>
+            <tbody>
+              {config.strengths.map((strength) => (
+                <tr key={strength.id} className="data-table-row align-top">
+                  <td className="px-2 py-2 font-semibold text-[#101828]">{strength.text}</td>
+                  <td className="px-2 py-2">{strength.when || <span className="text-[#98a2b3]">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+interface SettingsPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+/** Settings (read-only for now): the company profile, the product catalogue and your strengths. */
+export default async function SettingsPage({ searchParams }: SettingsPageProps) {
+  const params = await searchParams;
+  const requested = typeof params.tab === "string" ? params.tab : "profile";
+  const tab: SettingsTab = TABS.some((item) => item.id === requested) ? (requested as SettingsTab) : "profile";
   const profile = getClientProfile();
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Settings"
-        subtitle="The company profile that drives matching, scoring and compliance."
+        subtitle="Your company profile, what you sell and why buyers should choose you."
         actions={
           <span className="chip">
             <Info size={13} aria-hidden /> Read-only for now
           </span>
         }
-      />
+      >
+        <nav aria-label="Settings sections" className="segmented-control self-start">
+          {TABS.map((item) => (
+            <Link key={item.id} href={item.id === "profile" ? "/settings" : `/settings?tab=${item.id}`} aria-current={tab === item.id ? "page" : undefined} className="segmented-item">
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </PageHeader>
+
+      {tab === "catalogue" ? <CatalogueTab /> : tab === "strengths" ? <StrengthsTab /> : <ProfileTab profile={profile} />}
+    </div>
+  );
+}
+
+function ProfileTab({ profile }: { profile: ReturnType<typeof getClientProfile> }) {
+  return (
+    <div className="flex flex-col gap-4">
 
       {profile.is_example ? (
         <p role="note" className="rounded-lg border border-[#fedf89] bg-[#fffaeb] px-3 py-2 text-sm font-semibold text-[#b54708]">

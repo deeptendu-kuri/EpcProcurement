@@ -80,9 +80,9 @@ describe("supplier orders become supplier leads (07 §1, 13 §11)", () => {
     await ingest(order(771), "https://paper-two.example/epic-sep", "paper-two.example", "2026-09-21T06:00:00.000Z");
     const all = await leads();
     const supplier = all.find((l) => /East Pipes/i.test(l.buyer));
-    expect(supplier?.buyer_type).toBe("supplier");
+    expect(supplier?.buyer_type).toBe("manufacturer");
     expect(supplier?.kind).toBe("supply_subcontract");
-    expect((supplier?.reasons as Reason[])[0].text).toMatch(/^Won a steel pipe order from .*Aramco worth SAR 771M \(21 Sep 2026\) — suppliers buy inputs and services now$/);
+    expect((supplier?.reasons as Reason[])[0].text).toMatch(/^Won a steel pipe order from .*Aramco worth SAR 771M \(21 Sep 2026\) — they buy materials, consumables and services to deliver it$/);
 
     const owner = all.find((l) => /Aramco/i.test(l.buyer));
     expect(owner?.buyer_type).toBe("owner");

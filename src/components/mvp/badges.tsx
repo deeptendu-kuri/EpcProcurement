@@ -13,14 +13,14 @@ export function ConfidenceChip({ band }: { band: ConfidenceBand | null }) {
   if (!band) {
     return (
       <span className="inline-flex items-center whitespace-nowrap rounded-full border border-[#e4e7ec] bg-[#f9fafb] px-2 py-px text-xs font-medium text-[#6b7280]">
-        Confidence not known
+        How sure: not known
       </span>
     );
   }
   return (
     <span
       className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-px text-xs font-semibold ${BAND_STYLES[band]}`}
-      title="How much we trust the facts behind this lead"
+      title="How sure we are about the facts behind this buyer"
     >
       {BAND_LABELS[band]}
     </span>
@@ -33,7 +33,7 @@ export function ScoreBadge({ score, size = "md" }: { score: number | null; size?
   return (
     <span
       className={`inline-flex items-baseline gap-0.5 font-bold tabular-nums text-[#111827] ${big ? "text-2xl" : "text-lg"}`}
-      aria-label={score === null ? "Not scored" : `Score ${score} out of 100`}
+      aria-label={score === null ? "No buyer fit yet" : `Buyer fit ${score} out of 100`}
     >
       {score ?? "–"}
       {big ? <span className="text-sm font-semibold text-[#667085]">/ 100</span> : null}
@@ -67,9 +67,12 @@ const BUYER_TYPE_STYLES: Record<BuyerType, string> = {
   subcontractor: "border-[#b9e6fe] bg-[#f0f9ff] text-[#026aa2]",
   supplier: "border-[#fcceee] bg-[#fdf2fa] text-[#c11574]",
   owner: "border-[#d0d5dd] bg-[#f9fafb] text-[#344054]",
+  manufacturer: "border-[#fcceee] bg-[#fdf2fa] text-[#c11574]",
+  fabricator: "border-[#fedf89] bg-[#fffaeb] text-[#b54708]",
+  distributor: "border-[#abefc6] bg-[#ecfdf3] text-[#067647]",
 };
 
-/** EPC contractor / Subcontractor / Supplier / Owner (13 §11). Nothing for leads scored before it existed. */
+/** EPC contractor / Subcontractor / Manufacturer / Project owner (14 §1). Nothing for leads scored before it existed. */
 export function BuyerTypeBadge({ type }: { type: BuyerType | null | undefined }) {
   if (!type) return null;
   return (

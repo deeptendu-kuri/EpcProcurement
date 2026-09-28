@@ -11,7 +11,7 @@ import { TABS, activeFilters, type FilterKey, type LeadsTab, type LeadsUrlState 
 export const TAB_LABELS: Record<LeadsTab, string> = { ...CLASS_LABELS, all: "All" };
 
 const ADDED_LABELS = { "24h": "Last 24 h", "7d": "Last 7 days", "30d": "Last 30 days" } as const;
-const SORT_LABELS = { latest: "Latest", score: "Highest score", closing: "Closing soon" } as const;
+const SORT_LABELS = { latest: "Latest", score: "Highest buyer fit", closing: "Closing soon" } as const;
 const SOURCE_LABELS: Record<string, string> = { live: "Live", sample: "Sample" };
 const MIN_SCORES = [40, 50, 60, 70, 80];
 
@@ -114,7 +114,7 @@ const RESET: Record<FilterKey, Change> = {
 export function ClassTabs({ state, counts, onChange }: { state: LeadsUrlState; counts: Record<LeadClass, number>; onChange: (change: Change) => void }) {
   const all = (Object.values(counts) as number[]).reduce((sum, value) => sum + value, 0);
   return (
-    <div role="tablist" aria-label="Lead classes" className="segmented-control" data-tour="leads-tabs">
+    <div role="tablist" aria-label="Buyer stages" className="segmented-control" data-tour="leads-tabs">
       {TABS.map((tab) => {
         const selected = state.tab === tab;
         const count = tab === "all" ? all : counts[tab];
@@ -256,7 +256,7 @@ export function FilterBar({
     <>
       <FilterSelect
         id={`${p}-conf`}
-        label="Confidence"
+        label="How sure we are"
         value={state.confidence}
         allLabel="Any"
         options={facetOptions(facets.confidence, (value) => BAND_LABELS[value as keyof typeof BAND_LABELS] ?? value, state.confidence)}

@@ -93,7 +93,7 @@ export function LeadRail({
       return;
     }
     toast.show({
-      message: to === "rejected" ? "Lead rejected" : `Status: ${STATUS_LABELS[to]}`,
+      message: to === "rejected" ? "Marked not relevant" : `Status: ${STATUS_LABELS[to]}`,
       action: { label: "Undo", onClick: () => void setStatusTo(previous) },
     });
   };
@@ -111,7 +111,7 @@ export function LeadRail({
   const blocked = draftBlockedReason(contacts);
 
   return (
-    <aside className="flex flex-col gap-3 lg:sticky lg:top-[14rem] lg:max-h-[calc(100vh-15rem)] lg:overflow-y-auto" data-tour="lead-rail" aria-label="Lead actions">
+    <aside className="flex flex-col gap-3 lg:sticky lg:top-[14rem] lg:max-h-[calc(100vh-15rem)] lg:overflow-y-auto" data-tour="lead-rail" aria-label="Buyer actions">
       <RailCard title="Status">
         <label htmlFor="rail-status" className="sr-only">Status</label>
         <select
@@ -148,7 +148,7 @@ export function LeadRail({
                   void setStatusTo("rejected", reason);
                 }}
               >
-                Reject
+                Not relevant
               </button>
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPendingReject(false)}>Cancel</button>
             </div>
@@ -215,7 +215,7 @@ export function LeadRail({
         </ul>
       </RailCard>
 
-      <RailCard title="Compliance to bid">
+      <RailCard title="Can you sell to them?">
         {compliance.length ? (
           <>
             <div className="grid grid-cols-3 gap-2 text-center">

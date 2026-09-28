@@ -1,0 +1,233 @@
+{
+  "_note": "Example needs map (docs/mvp/14 section 5): buyer role (+ situation) -> catalogue items -> buying window in months after the trigger date. Special item tokens: $package-pipes = the pipes this project type uses; $product-range = catalogue items the buyer is known to stock.",
+  "isExample": true,
+  "packagePipes": {
+    "pipeline": ["line-pipe"],
+    "plant": ["cs-process-pipe", "ss-duplex-pipe", "alloy-pipe"],
+    "water": ["di-pipe", "hdpe-pipe", "grp-pipe"],
+    "drilling": ["octg"],
+    "default": ["cs-process-pipe", "line-pipe"]
+  },
+  "rules": [
+    {
+      "id": "epc-pipeline", "role": "epc_contractor", "situation": "pipeline", "label": "EPC contractor — pipeline", "trigger": "Contract won",
+      "groups": [
+        { "label": "Long-lead items", "from": 0, "to": 3, "items": [
+          { "id": "line-pipe", "fit": "good", "why": "Line pipe is the first long-lead order on a pipeline" },
+          { "id": "ball-valves", "fit": "good", "why": "Mainline and station valves are long-lead" },
+          { "id": "gate-globe-check", "fit": "possible", "why": "Station and tie-in valves" },
+          { "id": "induction-bends", "fit": "good", "why": "Bends are ordered with the line pipe" }
+        ] },
+        { "label": "Fittings, bolting & corrosion", "from": 2, "to": 9, "items": [
+          { "id": "bw-fittings", "fit": "good", "why": "Tie-ins and stations need fittings" },
+          { "id": "flanges", "fit": "good", "why": "Often supplied together with pipe" },
+          { "id": "stud-bolts", "fit": "possible", "why": "Bolting for every flanged joint" },
+          { "id": "gaskets", "fit": "possible", "why": "Gaskets for every flanged joint" },
+          { "id": "field-joint-coating", "fit": "good", "why": "Every girth weld needs field joint coating" },
+          { "id": "cathodic-protection", "fit": "possible", "why": "Buried pipelines need cathodic protection" }
+        ] },
+        { "label": "Construction consumables", "from": 3, "to": 18, "items": [
+          { "id": "welding-consumables", "fit": "good", "why": "Used to weld the girth joints during construction" },
+          { "id": "abrasives", "fit": "possible", "why": "Used during welding and coating" },
+          { "id": "paints", "fit": "possible", "why": "Above-ground sections and stations are painted" }
+        ] }
+      ]
+    },
+    {
+      "id": "epc-plant", "role": "epc_contractor", "situation": "plant", "label": "EPC contractor — plant or facility", "trigger": "Contract won",
+      "groups": [
+        { "label": "Piping & valves", "from": 1, "to": 6, "items": [
+          { "id": "cs-process-pipe", "fit": "good", "why": "Process piping is the bulk of plant piping" },
+          { "id": "ss-duplex-pipe", "fit": "possible", "why": "Corrosive and utility services use stainless / duplex" },
+          { "id": "alloy-pipe", "fit": "possible", "why": "High-temperature lines use alloy pipe" },
+          { "id": "gate-globe-check", "fit": "good", "why": "Every process line needs isolation valves" },
+          { "id": "ball-valves", "fit": "good", "why": "Process isolation valves" },
+          { "id": "butterfly-valves", "fit": "possible", "why": "Cooling water and utility lines" },
+          { "id": "control-relief-valves", "fit": "possible", "why": "Control and safety valves for the process" },
+          { "id": "spools", "fit": "possible", "why": "Prefabricated spools cut site work" }
+        ] },
+        { "label": "Fittings, bolting & steel", "from": 3, "to": 12, "items": [
+          { "id": "bw-fittings", "fit": "good", "why": "Process piping needs fittings" },
+          { "id": "forged-fittings", "fit": "good", "why": "Small-bore piping uses forged fittings" },
+          { "id": "flanges", "fit": "good", "why": "Often supplied together with pipe" },
+          { "id": "stud-bolts", "fit": "possible", "why": "Bolting for every flanged joint" },
+          { "id": "gaskets", "fit": "possible", "why": "Gaskets for every flanged joint" },
+          { "id": "structural-steel", "fit": "possible", "why": "Pipe racks and structures" },
+          { "id": "plates", "fit": "possible", "why": "Tanks, vessels and platforms" },
+          { "id": "gratings-handrails", "fit": "possible", "why": "Platforms, walkways and pipe supports" }
+        ] },
+        { "label": "E&I, insulation & paint", "from": 6, "to": 24, "items": [
+          { "id": "cables", "fit": "possible", "why": "Power and control cabling" },
+          { "id": "cable-trays", "fit": "possible", "why": "Cable routing across the plant" },
+          { "id": "instruments", "fit": "possible", "why": "Gauges and transmitters on every unit" },
+          { "id": "insulation", "fit": "possible", "why": "Hot and cold lines are insulated" },
+          { "id": "paints", "fit": "possible", "why": "Steel and piping are painted" }
+        ] }
+      ]
+    },
+    {
+      "id": "epc-water", "role": "epc_contractor", "situation": "water", "label": "EPC / contractor — water and sewage", "trigger": "Contract won",
+      "groups": [
+        { "label": "Pipes, valves & pumps", "from": 0, "to": 6, "items": [
+          { "id": "di-pipe", "fit": "good", "why": "Water mains use ductile iron pipe" },
+          { "id": "hdpe-pipe", "fit": "good", "why": "Distribution and sewer lines use HDPE" },
+          { "id": "grp-pipe", "fit": "possible", "why": "Large-diameter water lines use GRP" },
+          { "id": "pvc-pipe", "fit": "possible", "why": "Small-diameter networks use uPVC" },
+          { "id": "butterfly-valves", "fit": "good", "why": "Water lines are isolated with butterfly valves" },
+          { "id": "gate-globe-check", "fit": "possible", "why": "Gate and check valves on the network" },
+          { "id": "pumps", "fit": "possible", "why": "Pumping stations need pumps" }
+        ] },
+        { "label": "Fittings & bolting", "from": 2, "to": 9, "items": [
+          { "id": "flanges", "fit": "possible", "why": "Often supplied together with pipe" },
+          { "id": "bw-fittings", "fit": "possible", "why": "Steel sections and stations need fittings" },
+          { "id": "gaskets", "fit": "possible", "why": "Gaskets for every flanged joint" },
+          { "id": "stud-bolts", "fit": "possible", "why": "Bolting for every flanged joint" }
+        ] }
+      ]
+    },
+    {
+      "id": "sub-piping", "role": "subcontractor", "situation": "piping", "label": "Subcontractor — piping / mechanical", "trigger": "Subcontract won",
+      "groups": [
+        { "label": "Pipe & fittings", "from": 0, "to": 6, "items": [
+          { "id": "$package-pipes", "fit": "good", "why": "Pipe for their package" },
+          { "id": "bw-fittings", "fit": "good", "why": "Fittings for their package" },
+          { "id": "forged-fittings", "fit": "possible", "why": "Small-bore connections" },
+          { "id": "flanges", "fit": "good", "why": "Often supplied together with pipe" }
+        ] },
+        { "label": "Bolting & consumables", "from": 1, "to": 9, "items": [
+          { "id": "stud-bolts", "fit": "possible", "why": "Bolting for every flanged joint" },
+          { "id": "gaskets", "fit": "possible", "why": "Gaskets for every flanged joint" },
+          { "id": "welding-consumables", "fit": "good", "why": "Piping crews weld every joint" },
+          { "id": "gratings-handrails", "fit": "possible", "why": "Pipe supports for their lines" }
+        ] }
+      ]
+    },
+    {
+      "id": "sub-civil", "role": "subcontractor", "situation": "civil", "label": "Subcontractor — civil / structural", "trigger": "Subcontract won",
+      "groups": [
+        { "label": "Steel & rebar", "from": 0, "to": 6, "items": [
+          { "id": "rebar", "fit": "good", "why": "Foundations and concrete work need rebar" },
+          { "id": "structural-steel", "fit": "good", "why": "Structures and pipe racks" },
+          { "id": "plates", "fit": "possible", "why": "Base plates and embedded items" }
+        ] }
+      ]
+    },
+    {
+      "id": "sub-electrical", "role": "subcontractor", "situation": "electrical", "label": "Subcontractor — electrical & instrumentation", "trigger": "Subcontract won",
+      "groups": [
+        { "label": "Cables & instruments", "from": 3, "to": 12, "items": [
+          { "id": "cables", "fit": "good", "why": "Power and control cabling for their package" },
+          { "id": "cable-trays", "fit": "good", "why": "Cable routing for their package" },
+          { "id": "instruments", "fit": "possible", "why": "Field instruments for their package" }
+        ] }
+      ]
+    },
+    {
+      "id": "sub-insulation", "role": "subcontractor", "situation": "insulation", "label": "Subcontractor — insulation / painting", "trigger": "Subcontract won",
+      "groups": [
+        { "label": "Insulation & paint", "from": 6, "to": 18, "items": [
+          { "id": "insulation", "fit": "good", "why": "Insulation and cladding for their package" },
+          { "id": "paints", "fit": "good", "why": "Protective paint for their package" }
+        ] }
+      ]
+    },
+    {
+      "id": "sub-coating", "role": "subcontractor", "situation": "coating", "label": "Subcontractor — coating / testing", "trigger": "Subcontract won",
+      "groups": [
+        { "label": "Coating materials", "from": 0, "to": 6, "items": [
+          { "id": "coating-materials", "fit": "good", "why": "Coating applicators buy coating powders" },
+          { "id": "field-joint-coating", "fit": "good", "why": "Field joints are coated on site" },
+          { "id": "abrasives", "fit": "possible", "why": "Pipes are blasted before coating" }
+        ] }
+      ]
+    },
+    {
+      "id": "mfr-pipe-mill", "role": "manufacturer", "situation": "pipe_mill", "label": "Manufacturer — pipe mill", "trigger": "Order won",
+      "groups": [
+        { "label": "Materials & consumables", "from": 0, "to": 2, "items": [
+          { "id": "plates", "fit": "good", "why": "Plate / coil is the raw material for the pipe" },
+          { "id": "welding-consumables", "fit": "good", "why": "Used to weld the pipe seams" },
+          { "id": "abrasives", "fit": "possible", "why": "Used for bevelling and surface preparation" }
+        ] },
+        { "label": "Coating & testing", "from": 1.5, "to": 4, "items": [
+          { "id": "coating-materials", "fit": "good", "why": "Pipes are coated before delivery" }
+        ] },
+        { "label": "Together with pipe", "from": 1, "to": 4, "items": [
+          { "id": "bw-fittings", "fit": "possible", "why": "Often supplied together with pipe" },
+          { "id": "flanges", "fit": "possible", "why": "Often supplied together with pipe" }
+        ] }
+      ],
+      "delivery": { "label": "Delivery", "months": 6 }
+    },
+    {
+      "id": "mfr-valve", "role": "manufacturer", "situation": "valve_maker", "label": "Manufacturer — valve or equipment maker", "trigger": "Order won",
+      "groups": [
+        { "label": "Parts & bolting", "from": 0, "to": 3, "items": [
+          { "id": "stud-bolts", "fit": "good", "why": "Body bolting for every valve" },
+          { "id": "gaskets", "fit": "good", "why": "Body and bonnet gaskets" },
+          { "id": "forged-fittings", "fit": "possible", "why": "Bypass and drain connections" },
+          { "id": "instruments", "fit": "possible", "why": "Gauges and transmitters on skids" }
+        ] }
+      ]
+    },
+    {
+      "id": "mfr-equipment", "role": "manufacturer", "situation": "equipment_maker", "label": "Manufacturer — equipment maker", "trigger": "Order won",
+      "groups": [
+        { "label": "Parts & bolting", "from": 0, "to": 3, "items": [
+          { "id": "stud-bolts", "fit": "good", "why": "Bolting for the equipment" },
+          { "id": "gaskets", "fit": "good", "why": "Gaskets for nozzles and covers" },
+          { "id": "forged-fittings", "fit": "possible", "why": "Nozzle and small-bore connections" },
+          { "id": "instruments", "fit": "possible", "why": "Gauges and transmitters on the equipment" },
+          { "id": "plates", "fit": "possible", "why": "Shells and heads are made from plate" }
+        ] }
+      ]
+    },
+    {
+      "id": "fabricator", "role": "fabricator", "situation": null, "label": "Fabricator / spool shop", "trigger": "Order won",
+      "groups": [
+        { "label": "Pipe, fittings & steel", "from": 0, "to": 6, "items": [
+          { "id": "cs-process-pipe", "fit": "good", "why": "Spools are cut from process pipe" },
+          { "id": "ss-duplex-pipe", "fit": "possible", "why": "Stainless and duplex spools" },
+          { "id": "bw-fittings", "fit": "good", "why": "Every spool has fittings" },
+          { "id": "forged-fittings", "fit": "possible", "why": "Small-bore branches" },
+          { "id": "flanges", "fit": "good", "why": "Spools end in flanges" },
+          { "id": "plates", "fit": "possible", "why": "Supports and fabricated items" },
+          { "id": "structural-steel", "fit": "possible", "why": "Supports and skids" },
+          { "id": "welding-consumables", "fit": "good", "why": "The shop welds every joint" }
+        ] }
+      ]
+    },
+    {
+      "id": "distributor", "role": "distributor", "situation": null, "label": "Distributor / stockist", "trigger": "Big order won",
+      "groups": [
+        { "label": "Resale stock", "from": 0, "to": 3, "items": [
+          { "id": "$product-range", "fit": "good", "why": "They stock and resell it" }
+        ] }
+      ],
+      "continuous": true
+    },
+    {
+      "id": "owner-drilling", "role": "owner", "situation": "drilling", "label": "Owner — upstream drilling", "trigger": "Drilling programme",
+      "groups": [
+        { "label": "Casing & tubing", "from": 0, "to": 6, "items": [
+          { "id": "octg", "fit": "good", "why": "Drilling programmes buy casing and tubing" }
+        ] }
+      ]
+    },
+    {
+      "id": "owner", "role": "owner", "situation": null, "label": "Project owner", "trigger": "Project announced",
+      "groups": [
+        { "label": "Vendor registration", "from": 0, "to": 3, "items": [] },
+        { "label": "Owner-supplied long-lead items", "from": 0, "to": 9, "items": [
+          { "id": "line-pipe", "fit": "possible", "why": "Owners often buy line pipe themselves" },
+          { "id": "ball-valves", "fit": "possible", "why": "Owners often buy mainline valves themselves" },
+          { "id": "gate-globe-check", "fit": "possible", "why": "Owner-supplied valves" }
+        ] },
+        { "label": "Maintenance spares", "from": 6, "to": 24, "items": [
+          { "id": "gaskets", "fit": "possible", "why": "Maintenance spares" },
+          { "id": "stud-bolts", "fit": "possible", "why": "Maintenance spares" }
+        ] }
+      ]
+    }
+  ]
+}

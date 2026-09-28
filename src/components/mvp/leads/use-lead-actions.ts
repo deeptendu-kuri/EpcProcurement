@@ -42,9 +42,9 @@ export function useLeadActions() {
         await patchLead(id, { status: to, ...(to === "rejected" ? { rejectReason: options.rejectReason ?? "other" } : {}) });
         const message =
           to === "rejected"
-            ? `Lead rejected${options.rejectReason ? ` (${REJECT_REASON_LABELS[options.rejectReason]})` : ""}`
+            ? `Marked not relevant${options.rejectReason ? ` (${REJECT_REASON_LABELS[options.rejectReason]})` : ""}`
             : to === "accepted" && from === "new"
-              ? "Lead accepted"
+              ? "Marked as a good lead"
               : `Moved to ${STATUS_LABELS[to]}`;
         toast.show({
           message: options.label ? `${message}: ${options.label}` : message,
@@ -67,7 +67,7 @@ export function useLeadActions() {
         refresh();
       } catch (error) {
         setOverride(id, null); // roll back
-        toast.show({ message: error instanceof Error ? error.message : "Could not update the lead.", tone: "error" });
+        toast.show({ message: error instanceof Error ? error.message : "Could not update the buyer.", tone: "error" });
       } finally {
         setBusy((current) => {
           const next = { ...current };

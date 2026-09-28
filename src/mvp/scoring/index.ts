@@ -17,7 +17,7 @@ import type {
   SignalRow,
 } from "@/mvp/types";
 import { buildCandidates } from "./candidates";
-import { IDENTIFY_EPC_TASK, buyerTypeFor, ownerOrderReason, ownerOrderWithoutEpc, supplierReason } from "./buyer-type";
+import { IDENTIFY_EPC_TASK, buyerTypeFor, isSupplyRole, ownerOrderReason, ownerOrderWithoutEpc, supplierReason } from "./buyer-type";
 import { classifyLead, findSub, researchTasks, totalScore } from "./classify";
 import { computeConfidence } from "./confidence";
 import { SCORING_CONFIG } from "./config";
@@ -41,7 +41,7 @@ export interface LeadScore {
   confidence: number;
   band: ConfidenceBand;
   leadClass: LeadClass;
-  /** Who the lead is about (13 §11). */
+  /** Who the lead is about: one of the six buyer roles (14 §2). */
   buyerType: BuyerType;
   reasons: Reason[];
   /** Sub-criteria to research (07 §8); "G5" first when the lead needs a second independent source. */
@@ -91,7 +91,7 @@ export function scoreContext(ctx: ScoringContext): LeadScore {
   const leading: Reason[] = [];
   let finalClass = leadClass;
   const tasks = capped ? [...cappedBy, ...researchTasks(breakdown.criteria, "research")] : researchTasks(breakdown.criteria, leadClass);
-  if (leadClass !== "rejected" && buyerType === "supplier") {
+  if (leadClass !== "rejected" && isSupplyRole(buyerType)) {
     const reason = supplierReason(ctx);
     if (reason) leading.push(reason);
   }

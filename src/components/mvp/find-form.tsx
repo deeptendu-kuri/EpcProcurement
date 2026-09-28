@@ -13,8 +13,8 @@ type KindChoice = "both" | LeadKind;
 
 const KIND_OPTIONS: { value: KindChoice; label: string }[] = [
   { value: "both", label: "Both" },
-  { value: "bid", label: "Tenders to bid" },
-  { value: "supply_subcontract", label: "Supply / subcontract" },
+  { value: "bid", label: "Open tenders" },
+  { value: "supply_subcontract", label: "Companies that won work" },
 ];
 
 interface TicketBody {

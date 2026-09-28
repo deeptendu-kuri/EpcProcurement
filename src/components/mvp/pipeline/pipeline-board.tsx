@@ -55,7 +55,7 @@ function BoardCard({
       <div className="flex items-start gap-2">
         <GripVertical size={14} className="mt-0.5 shrink-0 cursor-grab text-[#c3c7cf] group-hover:text-[#9ca3af]" aria-hidden />
         <div className="min-w-0 flex-1">
-          <Link href={`/leads/${lead.id}`} className="block text-[0.8125rem] font-semibold leading-snug text-[#111827] hover:underline">
+          <Link href={`/buyers/${lead.id}`} className="block text-[0.8125rem] font-semibold leading-snug text-[#111827] hover:underline">
             {lead.buyerName}
             {lead.projectName ? <span className="font-normal text-[#6b7280]"> → {lead.projectName}</span> : null}
           </Link>
@@ -121,7 +121,7 @@ export function PipelineBoard({ items }: { items: LeadListItem[] }) {
           return (
             <li
               key={status}
-              aria-label={`${STATUS_LABELS[status]}: ${count} ${count === 1 ? "lead" : "leads"}`}
+              aria-label={`${STATUS_LABELS[status]}: ${count} ${count === 1 ? "buyer" : "buyers"}`}
               onDragOver={(event) => {
                 if (!draggingId) return;
                 event.preventDefault();
@@ -149,7 +149,7 @@ export function PipelineBoard({ items }: { items: LeadListItem[] }) {
                   </h2>
                   <p className="text-xs text-[#9ca3af]">{COLUMN_HINT[status]}</p>
                 </div>
-                {averageScore !== null ? <span className="text-xs tabular-nums text-[#9ca3af]" title="Average score">avg {averageScore}</span> : null}
+                {averageScore !== null ? <span className="text-xs tabular-nums text-[#9ca3af]" title="Average buyer fit">avg {averageScore}</span> : null}
               </div>
               <ul className="flex min-h-24 flex-col gap-2">
                 {cards.map((lead) => (
@@ -167,7 +167,7 @@ export function PipelineBoard({ items }: { items: LeadListItem[] }) {
                     onMove={(to) => move(lead.id, to)}
                   />
                 ))}
-                {!cards.length ? <li className="board-empty">{draggingId ? "Drop here" : "No leads"}</li> : null}
+                {!cards.length ? <li className="board-empty">{draggingId ? "Drop here" : "No buyers"}</li> : null}
               </ul>
             </li>
           );

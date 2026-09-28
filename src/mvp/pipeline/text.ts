@@ -306,6 +306,23 @@ export function knownCompany(name: string): { key: string; country: string | nul
   return null;
 }
 
+/** Words that mark a part of a company rather than another company ("Welspun Corp Associate"). */
+const VARIANT_WORDS = new Set(["associate", "associates", "unit", "units", "division", "subsidiary", "arm"]);
+
+/**
+ * Variant key of a company name (14 §11): the normalised name without trailing "associate / unit /
+ * division / subsidiary" words — "Welspun Corp Associate" and "Welspun Corp Unit" → "welspun".
+ * null when nothing was stripped (the normalised name is already the key).
+ */
+export function companyVariantKey(name: string): string | null {
+  const tokens = normalizeCompanyName(name).split(" ").filter(Boolean);
+  let end = tokens.length;
+  while (end > 1 && VARIANT_WORDS.has(tokens[end - 1])) end--;
+  if (end === tokens.length) return null;
+  const key = tokens.slice(0, end).join(" ");
+  return key.length >= 2 ? key : null;
+}
+
 /**
  * Matching keys of a company name: the normalised main name, each normalised alias, and the
  * well-known group ("known:aramco"). Two names that share a key are the same company.
@@ -316,6 +333,9 @@ export function companyKeys(name: string): { keys: string[]; hasAlias: boolean }
   for (const part of [main, ...aliases]) {
     const key = normalizeCompanyName(part);
     if (key.length >= 2) keys.add(key);
+    // Name variants (14 §11): "Welspun Corp Associate" / "Welspun Corp Unit" share the key "welspun".
+    const variant = companyVariantKey(part);
+    if (variant) keys.add(variant);
   }
   const known = knownCompany(name);
   if (known) keys.add(`known:${known.key}`);

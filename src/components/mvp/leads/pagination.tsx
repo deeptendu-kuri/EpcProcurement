@@ -12,10 +12,11 @@ export function Pagination({
   onSize,
 }: {
   page: number;
-  size: PageSize;
+  size: number;
   total: number;
   onPage: (page: number) => void;
-  onSize: (size: PageSize) => void;
+  /** Omit to hide the page-size picker (fixed page size). */
+  onSize?: (size: PageSize) => void;
 }) {
   const { from, to, pages } = pageRange(page, size, total);
   return (
@@ -24,14 +25,14 @@ export function Pagination({
         Showing <span className="font-semibold text-[#111827]">{from}–{to}</span> of <span className="font-semibold text-[#111827]">{total}</span>
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor="page-size" className="flex items-center gap-1.5">
+        {onSize ? <label htmlFor="page-size" className="flex items-center gap-1.5">
           Per page
           <select id="page-size" value={size} onChange={(event) => onSize(Number(event.target.value) as PageSize)} className="control h-8 px-2 text-sm">
             {PAGE_SIZES.map((value) => (
               <option key={value} value={value}>{value}</option>
             ))}
           </select>
-        </label>
+        </label> : null}
         <div className="flex items-center gap-1">
           <button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)} className="btn btn-secondary btn-sm" aria-label="Previous page">
             <ChevronLeft size={14} aria-hidden />

@@ -1,0 +1,19 @@
+{
+  "_note": "Examples only — replace or extend with your own list (docs/mvp/14 section 6). Companies whose products are known: used for the competitor check (a buyer that makes or stocks an item is a competitor for it), sub-role labels and parent groups. 'makes' holds catalogue item ids.",
+  "isExample": true,
+  "companies": [
+    { "names": ["East Pipes Integrated Company for Industry", "East Pipes Integrated Co for Industry", "East Pipes", "EPIC"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["line-pipe"], "parentGroup": "Welspun Corp", "listed": "Tadawul", "country": "SA" },
+    { "names": ["Welspun Corp", "Welspun Corp Ltd", "Welspun"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["line-pipe", "di-pipe", "ss-duplex-pipe", "plates"], "parentGroup": null, "listed": "NSE", "country": "IN" },
+    { "names": ["Jindal SAW", "Jindal Saw Ltd"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["line-pipe", "di-pipe", "cs-process-pipe"], "parentGroup": null, "listed": "NSE", "country": "IN" },
+    { "names": ["Man Industries", "Man Industries (India) Ltd"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["line-pipe"], "parentGroup": null, "listed": "NSE", "country": "IN" },
+    { "names": ["Ratnamani Metals & Tubes", "Ratnamani"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["line-pipe", "ss-duplex-pipe", "cs-process-pipe"], "parentGroup": null, "listed": "NSE", "country": "IN" },
+    { "names": ["Maharashtra Seamless", "Maharashtra Seamless Ltd"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["cs-process-pipe", "octg", "line-pipe"], "parentGroup": null, "listed": "NSE", "country": "IN" },
+    { "names": ["Arabian Pipes", "Arabian Pipes Company"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["line-pipe"], "parentGroup": null, "listed": "Tadawul", "country": "SA" },
+    { "names": ["Tenaris"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["octg", "line-pipe", "cs-process-pipe"], "parentGroup": null, "listed": null, "country": null },
+    { "names": ["Vallourec"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["octg", "cs-process-pipe", "alloy-pipe"], "parentGroup": null, "listed": null, "country": null },
+    { "names": ["Electrosteel Castings"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["di-pipe"], "parentGroup": null, "listed": "NSE", "country": "IN" },
+    { "names": ["AVK", "AVK Holding"], "role": "manufacturer", "subRole": "valve_maker", "makes": ["butterfly-valves", "gate-globe-check"], "parentGroup": null, "listed": null, "country": null },
+    { "names": ["Petrolvalves"], "role": "manufacturer", "subRole": "valve_maker", "makes": ["ball-valves", "gate-globe-check"], "parentGroup": null, "listed": null, "country": null },
+    { "names": ["Desco Infratech"], "role": "epc_contractor", "subRole": "pipeline", "makes": [], "parentGroup": null, "listed": null, "country": "IN" }
+  ]
+}

@@ -5,11 +5,11 @@ import { useEffect, useState } from "react";
 export const LEAD_SECTIONS = [
   { id: "why", label: "Why" },
   { id: "project", label: "Project" },
-  { id: "supply-chain", label: "Supply chain" },
+  { id: "supply-chain", label: "Project chain" },
   { id: "people", label: "People" },
   { id: "buyer-history", label: "Buyer history" },
-  { id: "score", label: "Score" },
-  { id: "compliance", label: "Compliance" },
+  { id: "score", label: "Buyer fit" },
+  { id: "compliance", label: "Can you sell?" },
   { id: "activity", label: "Activity" },
 ] as const;
 

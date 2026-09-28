@@ -3,7 +3,7 @@ import type { BuyerType, LeadClass, LeadKind, LeadListItem } from "@/mvp/types";
 
 const CLASS: Record<LeadClass, string> = { genuine: "Genuine", research: "Needs research", watch: "Watching", rejected: "Rejected" };
 const KIND: Record<LeadKind, string> = { bid: "Bid", supply_subcontract: "Supply / subcontract" };
-const BUYER: Record<BuyerType, string> = { epc_contractor: "EPC contractor", subcontractor: "Subcontractor", supplier: "Supplier", owner: "Owner" };
+const BUYER: Record<BuyerType, string> = { epc_contractor: "EPC contractor", subcontractor: "Subcontractor", supplier: "Supplier", owner: "Project owner", manufacturer: "Manufacturer", fabricator: "Fabricator", distributor: "Distributor" };
 
 export const CSV_HEADER = [
   "Lead ID", "Class", "Score", "Confidence", "Type", "Products", "Buyer", "Buyer type", "Buyer country", "Project", "Project country",

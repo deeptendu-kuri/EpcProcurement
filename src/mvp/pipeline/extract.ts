@@ -18,7 +18,8 @@ import { agreementFor, valuesAgree, type AgreementLabel, type ValueKind } from "
 import type { StructuredFacts } from "./contracts";
 import { verifyQuote } from "./quote-check";
 import { classifyAward, disciplineIn, isParentInDoc, isParentMention, rulesP1, rulesP2, rulesP3, splitSentences } from "./rules-extract";
-import { mentionsCompany, monthYear, parseDate, sentenceAround, shortCompanyName, tidyCompanyName, wordCount } from "./text";
+import { mentionsCompany, monthYear, parseDate, parseMoney, sentenceAround, shortCompanyName, tidyCompanyName, wordCount } from "./text";
+import { isImplausibleValue, isPlaceName } from "./merge";
 import {
   EMPTY_P1, EMPTY_P2, EMPTY_P3, P0Schema, P1Schema, P2Schema, P3Schema, parseJsonLoose,
   type P1Output, type P2Output, type P3Output, type PassName, type RawFact,
@@ -421,6 +422,12 @@ const vals = (facts: (RawFact | undefined)[]) => facts.map((f) => f?.value ?? nu
 
 export { tidyCompanyName };
 
+/** A value fact above USD 20B for one order is implausible (a misread unit or a national budget): dropped (14 §11). */
+function dropImplausible(fact: VerifiedFact | null): VerifiedFact | null {
+  if (!fact) return null;
+  return isImplausibleValue(parseMoney(fact.value)?.usd) ? null : fact;
+}
+
 /** A verified company-name fact after name hygiene (tidyCompanyName), or null when it is not a company. */
 function tidyNameFact(fact: VerifiedFact | null): VerifiedFact | null {
   if (!fact) return null;
@@ -439,6 +446,8 @@ export function checkAndAgree(text: string, results: PassResults): ExtractedDoc 
   for (const company of a.p1.companies) {
     const name = tidyNameFact(c.fact(company.name, "name", vals(bCompanies.map((x) => x.name)), false, "company"));
     if (!name) continue;
+    // A place mistaken for a company ("a new plant in Ruwais") is not a buyer (14 §11).
+    if (isPlaceName(name.value, text)) continue;
     let role: PartyRole | "unknown" = (PARTY_ROLES as readonly string[]).includes(company.role) ? (company.role as PartyRole) : "unknown";
     let roleFact: VerifiedFact | null = null;
     if (role !== "unknown" && company.role_quote) {
@@ -467,7 +476,7 @@ export function checkAndAgree(text: string, results: PassResults): ExtractedDoc 
     location: c.fact(a.p1.location, "text", [bp1?.location?.value], false, "location"),
     stage: null,
     stageFact: c.stage(a.p1.stage, a.p1.stage_quote, bp1 && bp1.stage !== "unknown" ? bp1.stage : null),
-    value: c.fact(a.p1.contract_value, "number", [bp1?.contract_value?.value], true, "value"),
+    value: dropImplausible(c.fact(a.p1.contract_value, "number", [bp1?.contract_value?.value], true, "value")),
     awardDate: c.fact(a.p1.award_date, "date", [bp1?.award_date?.value], true, "award date"),
     tenderRef: c.fact(a.p1.tender_ref, "enum", [bp1?.tender_ref?.value], false, "tender ref"),
     closingDate: c.fact(a.p1.closing_date, "date", [bp1?.closing_date?.value], true, "closing date"),

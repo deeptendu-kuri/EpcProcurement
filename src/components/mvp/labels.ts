@@ -20,15 +20,16 @@ import type {
 } from "@/mvp/types";
 
 export const CLASS_LABELS: Record<LeadClass, string> = {
-  genuine: "Genuine",
-  research: "Needs research",
-  watch: "Watching",
-  rejected: "Rejected",
+  genuine: "Ready to approach",
+  research: "Check first",
+  watch: "Early — keep an eye",
+  rejected: "Not a buyer",
 };
 export const CLASS_ORDER: LeadClass[] = ["genuine", "research", "watch", "rejected"];
 
-export const KIND_LABELS: Record<LeadKind, string> = { bid: "Bid", supply_subcontract: "Supply / subcontract" };
-export const KIND_SHORT: Record<LeadKind, string> = { bid: "Bid", supply_subcontract: "Supply" };
+/** Internal kinds are not shown as such (14 §1); where a kind must be named, use these plain words. */
+export const KIND_LABELS: Record<LeadKind, string> = { bid: "Open tender", supply_subcontract: "Won work" };
+export const KIND_SHORT: Record<LeadKind, string> = { bid: "Open tender", supply_subcontract: "Won work" };
 
 export const BAND_LABELS: Record<ConfidenceBand, string> = { high: "High", medium: "Medium", low: "Low" };
 
@@ -36,20 +37,26 @@ export const BAND_LABELS: Record<ConfidenceBand, string> = { high: "High", mediu
 export const BUYER_TYPE_LABELS: Record<BuyerType, string> = {
   epc_contractor: "EPC contractor",
   subcontractor: "Subcontractor",
-  supplier: "Supplier",
-  owner: "Owner",
+  supplier: "Manufacturer", // never "supplier" (14 §1)
+  owner: "Project owner",
+  manufacturer: "Manufacturer",
+  fabricator: "Fabricator",
+  distributor: "Distributor",
 };
 export const BUYER_TYPE_HINTS: Record<BuyerType, string> = {
   epc_contractor: "Won the main contract: buys materials and subcontracts packages",
   subcontractor: "Won a subcontract: buys materials for its package",
-  supplier: "Won a supply order: buys inputs and services to deliver it",
+  supplier: "Won an order: buys materials and services to make and deliver it",
   owner: "Owns the project or runs the tender",
+  manufacturer: "Makes products (e.g. pipe mill, valve maker): buys raw materials and consumables",
+  fabricator: "Fabricator / spool shop: buys pipe, fittings, flanges and consumables",
+  distributor: "Distributor / stockist: buys stock for resale",
 };
 
 export const STATUS_LABELS: Record<LeadStatus, string> = {
   new: "New",
-  accepted: "Accepted",
-  rejected: "Rejected",
+  accepted: "Good lead",
+  rejected: "Not relevant",
   contacted: "Contacted",
   rfq: "RFQ received",
   quoted: "Quoted",
@@ -117,7 +124,7 @@ export const PARTY_ROLE_LABELS: Record<PartyRole, string> = {
   main_epc: "Main EPC contractor",
   consortium_member: "Consortium partner",
   subcontractor: "Subcontractor",
-  supplier: "Supplier",
+  supplier: "Manufacturer / distributor",
   logistics: "Logistics",
   financier: "Financier",
 };

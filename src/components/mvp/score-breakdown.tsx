@@ -34,7 +34,7 @@ export function ScoreBreakdown({
   const subCount = criteria.reduce((sum, criterion) => sum + (criterion.subs?.length ?? 0), 0);
   const total = criteria.reduce((sum, criterion) => sum + (criterion.total ?? 0), 0);
 
-  if (!criteria.length) return <p className="text-sm text-[#98a2b3]">This lead has not been scored yet.</p>;
+  if (!criteria.length) return <p className="text-sm text-[#98a2b3]">This buyer has no buyer fit yet.</p>;
 
   return (
     <div>

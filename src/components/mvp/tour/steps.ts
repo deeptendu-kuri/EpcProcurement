@@ -4,8 +4,8 @@
  * fall back to `emptyElement` (the "Load sample leads" button) when there are none.
  */
 
-/** "lead" = the page of one lead (the controller picks the best lead). */
-export type TourPage = "/overview" | "/find" | "/leads" | "/pipeline" | "lead";
+/** "lead" = the full page of one buyer (the controller picks the best one). */
+export type TourPage = "/overview" | "/find" | "/search" | "/pipeline" | "lead";
 
 export interface TourStep {
   id: string;
@@ -15,15 +15,15 @@ export interface TourStep {
   title: string;
   description: string;
   side?: "top" | "right" | "bottom" | "left";
-  /** The step only makes sense with leads in the database. */
+  /** The step only makes sense with buyers in the database. */
   needsLeads?: boolean;
-  /** Highlighted instead when there are no leads. */
+  /** Highlighted instead when there are no buyers. */
   emptyElement?: string;
-  /** Shown instead of `description` when there are no leads. */
+  /** Shown instead of `description` when there are no buyers. */
   emptyDescription?: string;
 }
 
-const NO_LEADS = "There are no leads yet. Click “Load sample leads” to try the tool with clearly badged sample data, or run a search on Find.";
+const NO_LEADS = "There are no buyers yet. Click “Load sample buyers” to try the tool with clearly badged sample data, or run a live search.";
 
 export const TOUR_STEPS: TourStep[] = [
   {
@@ -31,7 +31,7 @@ export const TOUR_STEPS: TourStep[] = [
     page: "/overview",
     title: "Welcome",
     description:
-      "This tool finds companies that are about to buy what you sell – tenders to bid and projects to supply – and shows the proof behind every fact. This tour takes about two minutes.",
+      "This tool finds companies that are about to buy what you sell – pipes, fittings, valves and other construction materials – and shows the proof behind every fact. This tour takes about two minutes.",
   },
   {
     id: "overview",
@@ -39,23 +39,23 @@ export const TOUR_STEPS: TourStep[] = [
     element: "overview-kpis",
     title: "Your overview",
     description:
-      "New leads this week, genuine leads, tenders closing soon and leads in your pipeline. “Updated x min ago” shows when the data last refreshed; saved searches refresh it automatically.",
+      "New buyers this week, buyers ready to approach, tenders closing soon and buyers in your pipeline. “Updated x min ago” shows when the data last refreshed; saved searches refresh it automatically.",
     side: "bottom",
   },
   {
     id: "find-query",
     page: "/find",
     element: "find-query",
-    title: "Type what you offer",
-    description: "Plain words are enough, e.g. “line pipe” or “piping works”. The chips below come from your products in Settings.",
+    title: "Run a live search",
+    description: "“Search now” opens this page. Plain words are enough, e.g. “line pipe” or “piping works”. The chips below come from your products in Settings.",
     side: "bottom",
   },
   {
     id: "find-markets",
     page: "/find",
     element: "find-markets",
-    title: "Markets and lead type",
-    description: "Pick the countries to search, and whether you want tenders to bid, supply / subcontract work, or both.",
+    title: "Markets",
+    description: "Pick the countries to search, and whether you want open tenders, companies that just won work, or both.",
     side: "top",
   },
   {
@@ -72,36 +72,37 @@ export const TOUR_STEPS: TourStep[] = [
     page: "/find",
     element: "find-save",
     title: "Save this search",
-    description: "Save a search to refresh it automatically every 6, 12 or 24 hours while the app runs. New leads then appear without you asking.",
+    description: "Save a search to refresh it automatically every 6, 12 or 24 hours while the app runs. New buyers then appear without you asking.",
     side: "top",
   },
   {
-    id: "leads-tabs",
-    page: "/leads",
-    element: "leads-tabs",
-    title: "Your leads, sorted by class",
+    id: "search-filters",
+    page: "/search",
+    element: "search-filters",
+    title: "SuperSearch filters",
     description:
-      "Genuine: checked and worth contacting. Needs research: promising, but facts are missing. Watching: too early or too weak for now. Rejected: failed a check – the reason is shown.",
+      "Narrow the buyers by location, buyer role, what you can sell them, buying signal and contacts. Each filter has “Is any of” and “Is not any of”. Competitors – companies that make what you sell – are hidden by default.",
+    side: "right",
+  },
+  {
+    id: "search-count",
+    page: "/search",
+    element: "search-count",
+    title: "Buyers and the people to approach",
+    description:
+      "How many buyers match, and how many contacts their buying teams have (and how many we found). Switch between Buyers and Contacts, save buyers to a Lead list, export them, or use Find contacts for the missing people.",
     side: "bottom",
     needsLeads: true,
     emptyElement: "load-sample",
     emptyDescription: NO_LEADS,
   },
   {
-    id: "leads-filters",
-    page: "/leads",
-    element: "leads-filters",
-    title: "Filters, Latest and pages",
+    id: "search-open",
+    page: "/search",
+    element: "search-first-row",
+    title: "Open a buyer",
     description:
-      "Filter by category, market, type, stage, status or date added – the numbers show how many leads each option has. Sort by Latest, Highest score or Closing soon, and page through 10, 25 or 50 at a time.",
-    side: "bottom",
-  },
-  {
-    id: "leads-preview",
-    page: "/leads",
-    element: "leads-first-row",
-    title: "Quick preview",
-    description: "Click a lead for a quick preview with its reasons and proof. Accept or reject it there, or open the full lead page.",
+      "Click a buyer for the side panel: why they will buy now, what you can sell them, when they buy, their buying team and the proof. Mark it Good lead or Not relevant there, or open the full page.",
     side: "bottom",
     needsLeads: true,
     emptyElement: "load-sample",
@@ -111,8 +112,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: "lead-why",
     page: "lead",
     element: "lead-why",
-    title: "Why this lead, with proof",
-    description: "Each reason has an ⓘ button. It opens the exact quote, the source and a link to the page it came from.",
+    title: "Five questions, with proof",
+    description:
+      "Who is buying, why now, what they’ll buy from you, why you, and who to talk to and when. Each fact has an ⓘ button that opens the exact quote, the source and a link to the page it came from.",
     side: "bottom",
     needsLeads: true,
     emptyDescription: NO_LEADS,
@@ -121,9 +123,9 @@ export const TOUR_STEPS: TourStep[] = [
     id: "lead-score",
     page: "lead",
     element: "lead-rail",
-    title: "Score, confidence, compliance and contact rules",
+    title: "Buyer fit, how sure we are, and contact rules",
     description:
-      "The score (0–100) adds up five checks – see Score for each one. Confidence says how much we trust the facts. The side panel sums up compliance to bid and the contact rules of each person’s country.",
+      "Buyer fit (0–100) adds up five checks. “How sure we are” says how much we trust the facts. The side panel answers “Can you sell to them?” and shows the contact rules of each person’s country.",
     side: "left",
     needsLeads: true,
     emptyDescription: NO_LEADS,
@@ -134,9 +136,9 @@ export const TOUR_STEPS: TourStep[] = [
     // The first column header: the whole board is taller than the screen and would scroll under the top bar.
     element: "pipeline-first-column",
     emptyElement: "pipeline-board",
-    title: "Draft email, then move leads to a deal",
+    title: "Draft email, then move buyers to a deal",
     description:
-      "On a lead, Draft email writes a short first email for a contact (turned off when that country needs consent first). Then follow each lead here: drag a card from New to Won, or use its status menu.",
+      "On a buyer, Draft email writes a short first email for a contact (turned off when that country needs consent first). Then follow each buyer here: drag a card from New to Won, or use its status menu.",
     side: "bottom",
   },
 ];
@@ -155,7 +157,7 @@ export function tourSelector(element: string): string {
 
 /** The URL of a step's page (null when it needs a lead and none is known). */
 export function stepPath(step: TourStep, leadId: string | null): string | null {
-  if (step.page === "lead") return leadId ? `/leads/${leadId}` : null;
+  if (step.page === "lead") return leadId ? `/buyers/${leadId}` : null;
   return step.page;
 }
 

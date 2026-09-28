@@ -33,12 +33,12 @@ export function LoadSampleButton({ variant = "secondary", className = "" }: { va
     try {
       const ticket = await apiJson<TicketResponse>("/api/mvp/sample", { method: "POST" });
       toast.show({
-        message: ticket.position > 0 ? `Sample leads will load after the search in progress.` : "Loading sample leads…",
+        message: ticket.position > 0 ? `Sample buyers will load after the search in progress.` : "Loading sample buyers…",
       });
       emit(EVENTS.refreshStatus);
       router.push(progressHref(ticket));
     } catch (error) {
-      toast.show({ message: error instanceof Error ? error.message : "Sample leads could not be loaded.", tone: "error" });
+      toast.show({ message: error instanceof Error ? error.message : "Sample buyers could not be loaded.", tone: "error" });
     } finally {
       setBusy(false);
     }
@@ -51,10 +51,10 @@ export function LoadSampleButton({ variant = "secondary", className = "" }: { va
       disabled={busy}
       data-tour="load-sample"
       className={`btn ${variant === "primary" ? "btn-primary" : "btn-secondary"} ${className}`}
-      title="Adds example leads built from fictional documents, marked “Sample data”"
+      title="Adds example buyers built from fictional documents, marked “Sample data”"
     >
       {busy ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <FlaskConical size={15} aria-hidden />}
-      Load sample leads
+      Load sample buyers
     </button>
   );
 }
@@ -86,13 +86,13 @@ export function EmptyState({
         {showFind ? (
           <Link href="/find" className="btn btn-primary">
             <Search size={15} aria-hidden />
-            Find opportunities
+            Run a live search
           </Link>
         ) : null}
         {showSample ? <LoadSampleButton /> : null}
         {children}
       </div>
-      {showSample ? <p className="text-xs text-[#9ca3af]">Sample leads come from fictional example documents and are marked “Sample data”.</p> : null}
+      {showSample ? <p className="text-xs text-[#9ca3af]">Sample buyers come from fictional example documents and are marked “Sample data”.</p> : null}
     </div>
   );
 }

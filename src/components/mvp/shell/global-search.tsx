@@ -80,8 +80,8 @@ export function GlobalSearch() {
     } else if (event.key === "Enter") {
       event.preventDefault();
       const hit = results[active];
-      if (hit) go(`/leads/${hit.id}`);
-      else if (query.trim()) go(`/leads?tab=all&status=all&q=${encodeURIComponent(query.trim())}`);
+      if (hit) go(`/buyers/${hit.id}`);
+      else if (query.trim()) go(`/search?q=${encodeURIComponent(query.trim())}`);
     } else if (event.key === "Escape") {
       setOpen(false);
       event.currentTarget.blur();
@@ -101,7 +101,7 @@ export function GlobalSearch() {
         aria-controls={listId}
         aria-autocomplete="list"
         aria-activedescendant={showList && active >= 0 ? `${listId}-${active}` : undefined}
-        aria-label="Search leads by company or project"
+        aria-label="Search buyers by company or project"
         placeholder="Search company or project…"
         value={query}
         onChange={(event) => {
@@ -125,7 +125,7 @@ export function GlobalSearch() {
         <ul
           id={listId}
           role="listbox"
-          aria-label="Matching leads"
+          aria-label="Matching buyers"
           className="pop-in absolute left-0 right-0 top-[calc(100%+6px)] z-50 max-h-80 overflow-auto rounded-xl border border-[var(--line)] bg-white p-1 shadow-lg"
         >
           {results.length ? (
@@ -138,7 +138,7 @@ export function GlobalSearch() {
                 onMouseEnter={() => setActive(index)}
                 onMouseDown={(event) => {
                   event.preventDefault();
-                  go(`/leads/${result.id}`);
+                  go(`/buyers/${result.id}`);
                 }}
                 className={`flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm ${index === active ? "bg-[var(--accent-soft)]" : ""}`}
               >
@@ -153,7 +153,7 @@ export function GlobalSearch() {
               </li>
             ))
           ) : (
-            <li className="px-3 py-3 text-sm text-[#6b7280]">{loading ? "Searching…" : "No leads match. Press Enter to search all leads."}</li>
+            <li className="px-3 py-3 text-sm text-[#6b7280]">{loading ? "Searching…" : "No buyers match. Press Enter to search SuperSearch."}</li>
           )}
         </ul>
       ) : null}

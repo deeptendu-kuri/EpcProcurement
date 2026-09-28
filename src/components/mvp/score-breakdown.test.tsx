@@ -76,6 +76,6 @@ describe("ScoreBreakdown", () => {
 
   it("says when the lead is not scored", () => {
     render(<ScoreBreakdown breakdown={{ criteria: [], unknown: [] }} score={null} />);
-    expect(screen.getByText("This lead has not been scored yet.")).toBeTruthy();
+    expect(screen.getByText("This buyer has no buyer fit yet.")).toBeTruthy();
   });
 });

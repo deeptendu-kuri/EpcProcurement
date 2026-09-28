@@ -84,7 +84,7 @@ export function LeadsTable({
 }) {
   return (
     <div className="card overflow-x-auto">
-      <table className="crm-table table-fixed min-w-[900px]" aria-label="Leads">
+      <table className="crm-table table-fixed min-w-[900px]" aria-label="Buyers">
         <colgroup>
           <col className="w-[64px]" />
           <col className="w-[104px]" />
@@ -97,8 +97,8 @@ export function LeadsTable({
         </colgroup>
         <thead>
           <tr>
-            <th scope="col">Score</th>
-            <th scope="col">Confidence</th>
+            <th scope="col">Buyer fit</th>
+            <th scope="col">How sure</th>
             <th scope="col">Company → Project</th>
             <th scope="col">Country</th>
             <th scope="col">Type · Stage</th>
@@ -138,7 +138,7 @@ export function LeadsTable({
                   {lead.confidenceBand ? (
                     <ConfidenceChip band={lead.confidenceBand} />
                   ) : (
-                    <span className="text-[#9ca3af]" title="Confidence not known">
+                    <span className="text-[#9ca3af]" title="How sure: not known">
                       –
                     </span>
                   )}
@@ -192,7 +192,7 @@ export function LeadsTable({
                 >
                   <span className="relative inline-flex items-center gap-0.5">
                     {status === "new" ? (
-                      <button type="button" disabled={busy} onClick={() => actions.onAccept(lead)} className="btn btn-ghost btn-sm btn-icon" aria-label={`Accept ${lead.buyerName}`} title="Accept (a)">
+                      <button type="button" disabled={busy} onClick={() => actions.onAccept(lead)} className="btn btn-ghost btn-sm btn-icon" aria-label={`Good lead: ${lead.buyerName}`} title="Good lead (a)">
                         <Check size={15} aria-hidden />
                       </button>
                     ) : null}
@@ -202,15 +202,15 @@ export function LeadsTable({
                         disabled={busy}
                         onClick={() => onRejectOpenChange(menuOpen ? null : lead.id)}
                         className="btn btn-ghost btn-sm btn-icon"
-                        aria-label={`Reject ${lead.buyerName}`}
+                        aria-label={`Not relevant: ${lead.buyerName}`}
                         aria-haspopup="menu"
                         aria-expanded={menuOpen}
-                        title="Reject (r)"
+                        title="Not relevant (r)"
                       >
                         <X size={15} aria-hidden />
                       </button>
                     ) : null}
-                    <Link href={`/leads/${lead.id}`} className="btn btn-ghost btn-sm btn-icon" aria-label={`Open ${lead.buyerName}`} title="Open (o)">
+                    <Link href={`/buyers/${lead.id}`} className="btn btn-ghost btn-sm btn-icon" aria-label={`Open ${lead.buyerName}`} title="Open (o)">
                       <ArrowRight size={15} aria-hidden />
                     </Link>
                     {menuOpen ? (

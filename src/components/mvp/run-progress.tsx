@@ -19,7 +19,7 @@ export function runTitle(run: Pick<RunRow, "adhoc_query"> | null): string {
 
 /**
  * Live progress for one run (09 §4.1): polls GET /api/mvp/runs/[id] every 2 s, shows the latest message,
- * the counters line and the 4-step bar, then "See new leads →" when done. Cancel is not supported yet.
+ * the counters line and the 4-step bar, then "See the buyers →" when done. Cancel is not supported yet.
  */
 export function RunProgress({ runId, onFinished }: { runId: string; onFinished?: (run: RunRow) => void }) {
   const [run, setRun] = useState<RunRow | null>(null);
@@ -132,10 +132,10 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
       {finished ? (
         <div className="mt-3 flex justify-end">
           <Link
-            href={`/leads?run=${runId}`}
+            href="/search"
             className="btn-primary focus-ring inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold"
           >
-            See new leads
+            See the buyers
             <ArrowRight size={15} aria-hidden />
           </Link>
         </div>

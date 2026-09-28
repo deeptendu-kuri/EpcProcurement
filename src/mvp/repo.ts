@@ -838,3 +838,7 @@ export async function leadExists(id: string): Promise<boolean> {
   const { rows } = await getDb().query("select 1 from leads where id = $1", [id]);
   return rows.length > 0;
 }
+
+// ───────────────────────── buyers (docs/mvp/14) ─────────────────────────
+
+export { confirmContact, getBuyerView, searchBuyers, searchContacts } from "@/mvp/buyers";

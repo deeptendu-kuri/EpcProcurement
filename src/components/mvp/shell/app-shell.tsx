@@ -4,14 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Building2,
   CircleHelp,
   CircleUser,
   Compass,
   FlaskConical,
-  Inbox,
   Keyboard,
   LayoutDashboard,
+  ListChecks,
   Loader2,
   LogOut,
   Menu,
@@ -21,6 +20,7 @@ import {
   Settings,
   SquareKanban,
   X,
+  Zap,
 } from "lucide-react";
 import type { AppStatus } from "@/mvp/types";
 import { apiJson } from "../api-client";
@@ -31,13 +31,17 @@ import { ShortcutsDialog } from "./shortcuts-dialog";
 import { statusLabel } from "./time-ago";
 import { ToastProvider } from "./toast";
 
+/** Menu (docs/mvp/14 §10): Overview · SuperSearch · Lead lists · Pipeline · Settings · Help. */
 const NAV = [
-  { href: "/overview", label: "Overview", icon: LayoutDashboard, tour: "nav-overview" },
-  { href: "/find", label: "Find", icon: Search, tour: "nav-find" },
-  { href: "/leads", label: "Leads", icon: Inbox, tour: "nav-leads" },
-  { href: "/pipeline", label: "Pipeline", icon: SquareKanban, tour: "nav-pipeline" },
-  { href: "/settings", label: "Settings", icon: Settings, tour: "nav-settings" },
+  { href: "/overview", label: "Overview", icon: LayoutDashboard, tour: "nav-overview", also: [] as string[] },
+  { href: "/search", label: "SuperSearch", icon: Search, tour: "nav-search", also: ["/buyers"] },
+  { href: "/lists", label: "Lead lists", icon: ListChecks, tour: "nav-lists", also: [] as string[] },
+  { href: "/pipeline", label: "Pipeline", icon: SquareKanban, tour: "nav-pipeline", also: [] as string[] },
+  { href: "/settings", label: "Settings", icon: Settings, tour: "nav-settings", also: [] as string[] },
 ] as const;
+
+/** Pages that use the whole screen (own top bar and filter panel, like the mockup). */
+const FULL_BLEED = ["/search", "/lists"];
 
 const COLLAPSED_KEY = "mvp.sidebar.collapsed";
 const STATUS_POLL_MS = 60_000;
@@ -94,8 +98,8 @@ function useStatus(initial: AppStatus): StatusContextValue {
   return useMemo(() => ({ status, refresh, now }), [status, refresh, now]);
 }
 
-function isActive(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(`${href}/`);
+function isActive(pathname: string, href: string, also: readonly string[] = []): boolean {
+  return [href, ...also].some((base) => pathname === base || pathname.startsWith(`${base}/`));
 }
 
 function Menu_({ label, icon, children, align = "left", collapsed = false, tour }: {
@@ -182,9 +186,9 @@ function SidebarContent({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className={`flex h-14 shrink-0 items-center gap-2.5 border-b border-[var(--line)] ${collapsed ? "justify-center px-2" : "px-4"}`}>
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-white shadow-sm">
-          <Building2 size={16} aria-hidden />
+      <div className={`flex h-16 shrink-0 items-center gap-2.5 ${collapsed ? "justify-center px-2" : "border-b border-[var(--line)] px-4"}`}>
+        <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#2563eb] to-[#7c3aed] text-white shadow-sm">
+          <Zap size={17} aria-hidden />
         </span>
         {!collapsed ? <span className="min-w-0 flex-1 truncate text-sm font-bold text-[#111827]">Buyer Intelligence</span> : null}
         {onToggleCollapsed && !collapsed ? (
@@ -194,10 +198,10 @@ function SidebarContent({
         ) : null}
       </div>
 
-      <nav aria-label="Main navigation" className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
+      <nav aria-label="Main navigation" className={`flex flex-1 flex-col overflow-y-auto p-2 ${collapsed ? "items-center gap-2" : "gap-0.5"}`}>
         {NAV.map((item) => {
-          const active = isActive(pathname, item.href);
-          const badge = item.href === "/leads" && newGenuine > 0 ? newGenuine : null;
+          const active = isActive(pathname, item.href, item.also);
+          const badge = item.href === "/search" && newGenuine > 0 ? newGenuine : null;
           return (
             <Link
               key={item.href}
@@ -206,17 +210,17 @@ function SidebarContent({
               aria-current={active ? "page" : undefined}
               title={collapsed ? item.label : undefined}
               data-tour={item.tour}
-              className={`nav-item relative ${collapsed ? "justify-center" : ""}`}
+              className={`nav-item relative ${collapsed ? "h-10 w-10 justify-center rounded-[10px] px-0" : ""}`}
             >
               <item.icon size={17} aria-hidden />
               <span className={collapsed ? "sr-only" : "flex-1"}>{item.label}</span>
               {badge ? (
                 <span
                   className={`count-badge count-badge-accent ${collapsed ? "absolute -right-0.5 -top-0.5 scale-90" : ""}`}
-                  title={`${badge} new genuine ${badge === 1 ? "lead" : "leads"}`}
+                  title={`${badge} new ${badge === 1 ? "buyer" : "buyers"} ready to approach`}
                 >
                   {badge > 99 ? "99+" : badge}
-                  <span className="sr-only"> new genuine leads</span>
+                  <span className="sr-only"> new buyers ready to approach</span>
                 </span>
               ) : null}
             </Link>
@@ -260,6 +264,13 @@ function SidebarContent({
             </>
           )}
         </Menu_>
+        <Menu_ label="Account" icon={<CircleUser size={17} aria-hidden />} collapsed={collapsed}>
+          {() => (
+            <form method="post" action="/api/mvp/logout">
+              <MenuItem icon={<LogOut size={15} aria-hidden />}>Log out</MenuItem>
+            </form>
+          )}
+        </Menu_>
         {onToggleCollapsed && collapsed ? (
           <button type="button" onClick={onToggleCollapsed} aria-label="Expand sidebar" title="Expand sidebar" className="nav-item justify-center">
             <PanelLeftOpen size={17} />
@@ -279,14 +290,15 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
   const pathname = usePathname() ?? "/";
   const statusValue = useStatus(initialStatus);
   const { status, now } = statusValue;
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
     // Restore the collapsed sidebar after hydration (per browser).
     const timer = setTimeout(() => {
-      if (safeStorage.get(COLLAPSED_KEY) === "1") setCollapsed(true);
+      // The icon rail is the default (mockup); "0" = the person expanded it.
+      if (safeStorage.get(COLLAPSED_KEY) === "0") setCollapsed(false);
     }, 0);
     return () => clearTimeout(timer);
   }, []);
@@ -324,6 +336,7 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
   if (pathname === "/login") return <>{children}</>;
 
   const searching = status.queue.running || status.queue.waiting > 0;
+  const fullBleed = FULL_BLEED.some((base) => pathname === base || pathname.startsWith(`${base}/`));
 
   return (
     <StatusContext.Provider value={statusValue}>
@@ -366,7 +379,7 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
           ) : null}
 
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-[var(--line)] bg-white/90 px-3 backdrop-blur sm:gap-3 lg:px-6">
+            <header className={`sticky top-0 z-30 flex h-14 items-center ${fullBleed ? "md:hidden" : ""} gap-2 border-b border-[var(--line)] bg-white/90 px-3 backdrop-blur sm:gap-3 lg:px-6`}>
               {/* Wrapper carries md:hidden: the unlayered .btn display rule would beat a utility on the button itself. */}
               <span className="contents md:hidden">
                 <button type="button" onClick={() => setMobileOpen(true)} aria-label="Open menu" className="btn btn-ghost btn-icon">
@@ -383,24 +396,23 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
                   {searching ? <Loader2 size={13} className="animate-spin text-[var(--accent)]" aria-hidden /> : null}
                   {searching ? "Searching…" : statusLabel(status.lastFinishedAt, now)}
                 </span>
-                <Link href="/find" className="btn btn-primary" data-tour="topbar-search-now">
+                <Link href="/find" className="btn btn-primary" data-tour="topbar-search-now" title="Run a live search for new buyers">
                   <Search size={15} aria-hidden />
                   <span className="hidden sm:inline">Search now</span>
                 </Link>
-                <Menu_ label="Account" icon={<CircleUser size={18} aria-hidden />} align="right" collapsed>
-                  {() => (
-                    <form method="post" action="/api/mvp/logout">
-                      <MenuItem icon={<LogOut size={15} aria-hidden />}>Log out</MenuItem>
-                    </form>
-                  )}
-                </Menu_>
               </div>
             </header>
 
             <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 outline-none">
-              <div key={pathname} className="fade-in mx-auto w-full max-w-[1440px] px-4 py-5 lg:px-6">
-                {children}
-              </div>
+              {fullBleed ? (
+                <div key={pathname} className="fade-in w-full">
+                  {children}
+                </div>
+              ) : (
+                <div key={pathname} className="fade-in mx-auto w-full max-w-[1440px] px-4 py-5 lg:px-6">
+                  {children}
+                </div>
+              )}
             </main>
           </div>
         </div>

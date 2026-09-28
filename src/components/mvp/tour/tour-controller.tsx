@@ -134,11 +134,11 @@ export function TourController() {
     end(false);
     try {
       const ticket = await apiJson<{ ticketId: string; runId: string | null }>("/api/mvp/sample", { method: "POST" });
-      toast.show({ message: "Loading sample leads… Take the tour again from Help when they are ready." });
+      toast.show({ message: "Loading sample buyers… Take the tour again from Help when they are ready." });
       router.push(ticket.runId ? `/find?run=${ticket.runId}` : `/find?ticket=${encodeURIComponent(ticket.ticketId)}`);
       emit(EVENTS.refreshStatus);
     } catch (error) {
-      toast.show({ message: error instanceof Error ? error.message : "Sample leads could not be loaded.", tone: "error" });
+      toast.show({ message: error instanceof Error ? error.message : "Sample buyers could not be loaded.", tone: "error" });
     }
   }, [end, router, toast]);
 
@@ -208,7 +208,7 @@ export function TourController() {
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = "tour-sample-btn";
-                button.textContent = "Load sample leads";
+                button.textContent = "Load sample buyers";
                 button.addEventListener("click", () => void loadSample());
                 popover.description.appendChild(document.createElement("br"));
                 popover.description.appendChild(button);

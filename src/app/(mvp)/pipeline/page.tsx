@@ -32,17 +32,17 @@ export default async function PipelinePage({ searchParams }: PipelinePageProps) 
   const filtered = Boolean(state.q || state.market || state.category || state.kind);
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="Pipeline" subtitle="Drag a lead to its next step, or use its status menu. Every move is saved in the lead's activity." />
+      <PageHeader title="Pipeline" subtitle="Drag a buyer to its next step, or use its status menu. Every move is saved in the buyer's activity." />
       {any.total > 0 ? <PipelineFilters state={state} facets={facets} /> : null}
       {items.length ? (
         <PipelineBoard items={items} />
       ) : filtered ? (
         <div data-tour="pipeline-board">
-          <EmptyState icon={<SquareKanban size={20} aria-hidden />} title="No leads match these filters" text="Clear a filter to see more of your pipeline." />
+          <EmptyState icon={<SquareKanban size={20} aria-hidden />} title="No buyers match these filters" text="Clear a filter to see more of your pipeline." />
         </div>
       ) : (
         <div data-tour="pipeline-board">
-          <EmptyState icon={<SquareKanban size={20} aria-hidden />} title="No leads in the pipeline yet" text="Accept leads on the Leads page, or load sample leads to try the board." showSample />
+          <EmptyState icon={<SquareKanban size={20} aria-hidden />} title="No buyers in the pipeline yet" text="Mark buyers as “Good lead” on SuperSearch, or load sample buyers to try the board." showSample />
         </div>
       )}
     </div>

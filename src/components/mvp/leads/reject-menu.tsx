@@ -48,7 +48,7 @@ export function RejectMenu({
       onClick={(event) => event.stopPropagation()}
       className={`pop-in absolute ${drop === "up" ? "bottom-[calc(100%+4px)]" : "top-[calc(100%+4px)]"} z-50 w-48 rounded-xl border border-[var(--line)] bg-white p-1 text-left shadow-lg ${align === "right" ? "right-0" : "left-0"}`}
     >
-      <p className="px-2.5 pb-1 pt-1.5 text-xs font-semibold text-[#6b7280]">Why reject it?</p>
+      <p className="px-2.5 pb-1 pt-1.5 text-xs font-semibold text-[#6b7280]">Why is it not relevant?</p>
       {REJECT_REASONS.map((reason) => (
         <button
           key={reason}

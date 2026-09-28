@@ -77,17 +77,17 @@ export function RejectedBanner({ gates, leadClass, status, rejectReason }: {
           failed.length ? (
             failed.map((gate) => (
               <p key={gate.id}>
-                <span className="font-bold">Rejected: {FAILED_CHECK_TITLES[gate.id] ?? "a required check failed"}.</span>{" "}
+                <span className="font-bold">Not a buyer: {FAILED_CHECK_TITLES[gate.id] ?? "a required check failed"}.</span>{" "}
                 {gate.why}
               </p>
             ))
           ) : (
-            <p className="font-bold">Rejected: a required check failed.</p>
+            <p className="font-bold">Not a buyer: a required check failed.</p>
           )
         ) : null}
         {userRejected ? (
           <p>
-            <span className="font-bold">You rejected this lead</span>
+            <span className="font-bold">You marked this buyer not relevant</span>
             {rejectReason ? `: ${rejectReasonLabel(rejectReason)}` : "."}
           </p>
         ) : null}
@@ -100,13 +100,13 @@ export function RejectedBanner({ gates, leadClass, status, rejectReason }: {
 
 export function WhySection({ reasons, signals }: { reasons: Reason[]; signals: SignalRow[] }) {
   return (
-    <Section id="why" title="Why this lead">
+    <Section id="why" title="Why this buyer">
       {reasons.length ? (
         <ul className="list-disc space-y-1 pl-5">
           {reasons.map((reason, index) => (
             <li key={index}>
               {reason.text}
-              <EvidenceButton ids={reason.evidenceIds} label="Why this lead" />
+              <EvidenceButton ids={reason.evidenceIds} label="Why this buyer" />
             </li>
           ))}
         </ul>
@@ -137,7 +137,7 @@ export function ProjectSection({ detail }: { detail: LeadDetail }) {
   if (!project) {
     return (
       <Section id="project" title="Project">
-        <NotFound text="No project linked to this lead yet." />
+        <NotFound text="No project linked to this buyer yet." />
       </Section>
     );
   }
@@ -261,7 +261,7 @@ function PackageNode({ pkg, isLead, parties, facts }: { pkg: PackageView; isLead
     <li className={`rounded-lg border p-2.5 ${isLead ? "border-[#84adff] bg-[#f5f8ff]" : "border-[#edf1f6]"}`}>
       <p>
         <span className="font-bold text-[#101828]">{pkg.name}</span>
-        {isLead ? <span className="ml-2 rounded bg-[#2563eb] px-1.5 py-0.5 text-xs font-bold text-white">This lead</span> : null}
+        {isLead ? <span className="ml-2 rounded bg-[#2563eb] px-1.5 py-0.5 text-xs font-bold text-white">This buyer</span> : null}
         <EvidenceButton ids={factIds(facts, "package", pkg.id)} label={pkg.name} />
       </p>
       <p className="text-sm text-[#475467]">{meta.join(" · ")}</p>
@@ -300,7 +300,7 @@ export function SupplyChainSection({ detail }: { detail: LeadDetail }) {
   const empty = !ownerName && !mains.length && !packages.length && !others.length;
 
   return (
-    <Section id="supply-chain" title="Supply chain">
+    <Section id="supply-chain" title="Project chain">
       {empty ? (
         <NotFound text="No contractors or packages found yet." />
       ) : (
@@ -536,7 +536,7 @@ export function ComplianceSection({ items, eligibility }: { items: ChecklistItem
   return (
     <Section
       id="compliance"
-      title="Compliance to bid / supply"
+      title="Can you sell to them?"
       aside={eligibility ? <span className="tabular-nums">Eligibility: {eligibility.points ?? "?"} / {eligibility.max}</span> : undefined}
     >
       {missingHard ? (

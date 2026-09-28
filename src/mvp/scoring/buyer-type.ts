@@ -1,52 +1,78 @@
 /**
- * Buyer type of a lead (docs/mvp/13 §11, 07 §1): who the lead is about.
+ * Buyer role of a lead (docs/mvp/14 §2, was 13 §11 buyer type): who the lead is about.
  *
- * - supplier       — a manufacturer / distributor that won a supply order. The client can sell it
- *                    inputs and services for that order, so it is a buyer too.
- * - subcontractor  — a company that won a subcontract.
- * - epc_contractor — the main EPC contractor or a consortium member.
  * - owner          — the project owner or tendering authority.
+ * - epc_contractor — the main EPC contractor or a consortium member.
+ * - subcontractor  — a company that won a subcontract.
+ * - manufacturer / fabricator / distributor — a company that won a supply order (the old
+ *   `supplier`). It buys raw materials, consumables and resale stock to deliver it, so it is a buyer
+ *   too. Which of the three comes from the text / name / company types (buyers/roles.ts).
  *
- * Buyer type never changes the gates or the score (07); it labels the lead and adds its first reason.
+ * The role never changes the gates or the score (07); it labels the lead and adds its first reason.
  */
 import type { BuyerType, PartyRole, Reason } from "@/mvp/types";
+import { supplierRoleFor } from "@/mvp/buyers/roles";
 import { buyerParties, type ScoringContext } from "./context";
 import { awardDate } from "./gates";
 import { formatDay, unique } from "./util";
 
-const ROLE_TYPE: Partial<Record<PartyRole, BuyerType>> = {
-  supplier: "supplier",
-  subcontractor: "subcontractor",
-  main_epc: "epc_contractor",
-  consortium_member: "epc_contractor",
-  owner: "owner",
-};
+/** Roles of a company that won a supply order (14 §2). */
+export const SUPPLY_ROLES: readonly BuyerType[] = ["manufacturer", "fabricator", "distributor"];
 
-/** Pure: the buyer type from the buyer's roles on the project, its trigger signals and company types. */
-export function buyerTypeFor(ctx: Pick<ScoringContext, "kind" | "buyer" | "project" | "parties" | "triggerSignals">): BuyerType {
+/** True for manufacturer / fabricator / distributor (and the legacy `supplier`). */
+export function isSupplyRole(type: BuyerType | null | undefined): boolean {
+  return type === "supplier" || (type !== null && type !== undefined && SUPPLY_ROLES.includes(type));
+}
+
+type RoleCtx = Pick<ScoringContext, "kind" | "buyer" | "project" | "parties" | "triggerSignals"> & Partial<Pick<ScoringContext, "packages" | "leadPackage">>;
+
+/** Text that says what a supplying company does: its party scope, package names and trigger summaries. */
+function supplierText(ctx: RoleCtx): string {
+  const parties = buyerParties(ctx as ScoringContext);
+  return [
+    ...parties.map((p) => p.scope_text ?? ""),
+    ...(ctx.leadPackage ? [ctx.leadPackage] : (ctx.packages ?? [])).flatMap((p) => [p.name, p.scope_text ?? ""]),
+    ...ctx.triggerSignals.map((s) => s.summary),
+  ].join(" ");
+}
+
+function supplyRole(ctx: RoleCtx): BuyerType {
+  return supplierRoleFor(ctx.buyer.canonical_name, ctx.buyer.types ?? [], supplierText(ctx));
+}
+
+/** Pure: the buyer role from the buyer's roles on the project, its trigger signals and company types. */
+export function buyerTypeFor(ctx: RoleCtx): BuyerType {
   const roles = buyerParties(ctx as ScoringContext).map((p) => p.role);
   // The role behind the trigger: an award to a supplier is a supply order; a subcontract signal is a subcontract.
   if (ctx.triggerSignals.some((s) => s.type === "subcontract_awarded") && roles.includes("subcontractor")) return "subcontractor";
   if (ctx.triggerSignals.some((s) => s.type === "contract_awarded")) {
     if (roles.includes("main_epc") || roles.includes("consortium_member")) return "epc_contractor";
-    if (roles.includes("supplier")) return "supplier";
+    if (roles.includes("supplier")) return supplyRole(ctx);
   }
   if (ctx.project?.owner_company_id === ctx.buyer.id || roles.includes("owner")) return "owner";
-  for (const role of ["subcontractor", "main_epc", "consortium_member", "supplier"] as PartyRole[])
-    if (roles.includes(role)) return ROLE_TYPE[role]!;
+  if (roles.includes("subcontractor")) return "subcontractor";
+  if (roles.includes("main_epc") || roles.includes("consortium_member")) return "epc_contractor";
+  if (roles.includes("supplier")) return supplyRole(ctx);
   // Buyer of a tender or of a supply order it placed.
+  const types = ctx.buyer.types ?? [];
   if (ctx.kind === "bid" || ctx.triggerSignals.some((s) => s.type === "supply_order_announced")) {
-    const types = ctx.buyer.types ?? [];
     if (types.includes("main_epc")) return "epc_contractor";
     if (types.includes("subcontractor")) return "subcontractor";
     return "owner";
   }
-  const types = ctx.buyer.types ?? [];
-  if (types.includes("manufacturer")) return "supplier";
+  if (types.includes("manufacturer") || types.includes("fabricator") || types.includes("stockist_trader")) return supplyRole(ctx);
   if (types.includes("subcontractor")) return "subcontractor";
   if (types.includes("owner")) return "owner";
   return "epc_contractor";
 }
+
+/** Party role → buyer role word, kept for callers that label parties. */
+export const PARTY_ROLE_BUYER: Partial<Record<PartyRole, BuyerType>> = {
+  main_epc: "epc_contractor",
+  consortium_member: "epc_contractor",
+  subcontractor: "subcontractor",
+  owner: "owner",
+};
 
 const CURRENCY_FMT = (amount: number, currency: string): string => {
   const units: [number, string][] = [[1e9, "B"], [1e6, "M"], [1e3, "K"]];
@@ -81,7 +107,7 @@ export function supplierReason(ctx: ScoringContext): Reason | null {
   const date = awardDate(ctx);
   const evidenceIds = unique(ctx.triggerSignals.flatMap((s) => s.evidence_ids ?? [])).filter((id) => ctx.evidence[id]);
   return {
-    text: `Won ${articleFor(itemLabel(item))} ${itemLabel(item)} order${client}${value}${date ? ` (${formatDay(date)})` : ""} — suppliers buy inputs and services now`,
+    text: `Won ${articleFor(itemLabel(item))} ${itemLabel(item)} order${client}${value}${date ? ` (${formatDay(date)})` : ""} — they buy materials, consumables and services to deliver it`,
     evidenceIds,
   };
 }

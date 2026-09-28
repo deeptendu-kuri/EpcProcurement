@@ -228,7 +228,7 @@ export function DraftPanel({
                   {sent ? "Marked as sent" : "Mark as sent"}
                 </button>
               </div>
-              <p className="text-xs text-[#667085]">Send it from your own mail app, then mark it as sent so the lead history stays complete.</p>
+              <p className="text-xs text-[#667085]">Send it from your own mail app, then mark it as sent so the buyer history stays complete.</p>
             </>
           ) : null}
 

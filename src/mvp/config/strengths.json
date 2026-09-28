@@ -1,0 +1,56 @@
+{
+  "_note": "Example strengths — replace with your own (docs/mvp/14 section 4). 'Why you' only shows a strength when its condition matches verified facts about the buyer.",
+  "isExample": true,
+  "homeCountries": ["AE"],
+  "strengths": [
+    {
+      "id": "stock-hubs",
+      "text": "Stock in Jebel Ali (UAE), Dammam (KSA) and Mumbai (India) for standard sizes",
+      "when": "the buyer or site is in or near those countries",
+      "condition": {
+        "type": "near_hub",
+        "hubs": [
+          { "country": "AE", "place": "Jebel Ali", "near": ["OM", "QA", "BH", "KW"] },
+          { "country": "SA", "place": "Dammam", "near": ["BH", "KW", "QA"] },
+          { "country": "IN", "place": "Mumbai", "near": [] }
+        ]
+      }
+    },
+    {
+      "id": "fast-delivery",
+      "text": "Ex-stock delivery in 1–2 weeks; mill orders in 8–14 weeks",
+      "when": "the order or project has a short delivery time (9 months or less) or is urgent",
+      "condition": { "type": "short_delivery", "maxMonths": 9 }
+    },
+    {
+      "id": "one-stop",
+      "text": "One vendor for pipe, fittings, flanges, valves, bolting and gaskets",
+      "when": "the buyer needs 3 or more catalogue categories",
+      "condition": { "type": "min_categories", "min": 3 }
+    },
+    {
+      "id": "certified",
+      "text": "Mill test certificates (EN 10204 3.1/3.2), third-party inspection supported; ISO 9001",
+      "when": "the project names standards or specs (API, ASTM, NACE, ISO) or the owner is an oil & gas major",
+      "condition": { "type": "specs_or_major", "majors": ["aramco", "adnoc", "qatarenergy", "petronas", "ongc", "iocl", "equinor", "kpc", "koc", "pdo", "shell", "totalenergies", "bp", "exxonmobil", "chevron", "eni", "gail"] }
+    },
+    {
+      "id": "approved-vendor",
+      "text": "Registered with major owners' vendor lists (example: ADNOC, Aramco)",
+      "when": "the project owner uses an approved vendor list (oil & gas owners)",
+      "condition": { "type": "owner_in", "owners": ["adnoc", "aramco"] }
+    },
+    {
+      "id": "local-content",
+      "text": "ICV certificate (UAE) and IKTVA registration (KSA) (example)",
+      "when": "the owner scores local content (Aramco, ADNOC, QatarEnergy, PDO, India public tenders)",
+      "condition": { "type": "local_content", "owners": ["aramco", "adnoc", "qatarenergy", "pdo"], "publicTenderCountries": ["IN"] }
+    },
+    {
+      "id": "delivery-to-site",
+      "text": "Delivery to site or port, with export documents",
+      "when": "the site or delivery port is known, or the buyer is in another country",
+      "condition": { "type": "site_or_export" }
+    }
+  ]
+}

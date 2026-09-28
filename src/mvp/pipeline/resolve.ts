@@ -19,6 +19,7 @@ import type {
   BuyingRole, CompanyType, Discipline, PartyRole, ProjectStage, Seniority, SourceTier,
 } from "@/mvp/types";
 import type { ExtractedDoc, VerifiedFact } from "./extract";
+import { plausibleMoney, sameOrder, toUsd, valuesClose } from "./merge";
 import { detectMarkets } from "./filter";
 import { isParentInDoc, isParentMention } from "./rules-extract";
 import {
@@ -311,10 +312,10 @@ class Resolver {
 
   /**
    * True when an existing project is a different contract than the incoming order: award dates more
-   * than 30 days apart, or values in the same currency more than 10% apart (13 §11). Only checked for
+   * than 30 days apart, or USD values more than 15% apart (14 §11). Only checked for
    * orders (supply orders and awards whose project name was derived), where one buyer places many.
    */
-  private async differentOrder(projectId: string, awardDate: string | null, money: ReturnType<typeof parseMoney>): Promise<boolean> {
+  private async differentOrder(projectId: string, awardDate: string | null, money: ReturnType<typeof parseMoney>, compareValues = true): Promise<boolean> {
     const { rows } = await this.db.query<{ award: string | null; estimated_value: number | null; currency: string | null }>(
       `select (select min(event_date)::text from project_stage_events where project_id = p.id and stage = 'awarded') as award,
               p.estimated_value, p.currency
@@ -327,22 +328,55 @@ class Resolver {
       const days = Math.abs(Date.parse(awardDate) - Date.parse(row.award)) / 86_400_000;
       if (days > 30) return true;
     }
-    if (money && row.estimated_value && row.currency && row.currency.toUpperCase() === money.currency.toUpperCase()) {
-      const a = Number(row.estimated_value);
-      const b = money.amount;
-      if (Math.abs(a - b) / Math.max(a, b) > 0.1) return true;
+    if (compareValues && money && row.estimated_value && row.currency) {
+      // Values are compared in USD, so one order reported in SAR and in INR is still one order (14 §11).
+      const a = toUsd(Number(row.estimated_value), row.currency);
+      const b = money.usd ?? toUsd(money.amount, money.currency);
+      if (a && b) return !valuesClose(a, b);
+      if (row.currency.toUpperCase() === money.currency.toUpperCase()) return !valuesClose(Number(row.estimated_value), money.amount);
     }
     return false;
   }
 
-  async project(ex: ExtractedDoc, ownerId: string | null, awardDate: string | null = null, isOrder = false): Promise<string | null> {
+  /**
+   * An existing project that is the same order as the incoming one although its name differs (14 §11):
+   * same owner, same awardee (buyer), a shared discipline, award within 30 days and USD value within 15%.
+   */
+  private async sameOrderProject(
+    ownerId: string | null, country: string | null, awardDate: string | null, money: ReturnType<typeof parseMoney>,
+    order: { awardeeIds: string[]; disciplines: string[] },
+  ): Promise<string | null> {
+    if (!ownerId || !order.awardeeIds.length) return null;
+    const { rows } = await this.db.query<{ id: string; company_id: string; value_usd: number | null; award: string | null; disciplines: string[] | null }>(
+      `select p.id, pp.company_id, p.value_usd,
+              (select min(event_date)::text from project_stage_events where project_id = p.id and stage = 'awarded') as award,
+              (select array_agg(distinct discipline) from packages where project_id = p.id) as disciplines
+         from projects p join project_parties pp on pp.project_id = p.id
+        where p.owner_company_id = $1 and p.country is not distinct from $2 and pp.company_id = any($3::uuid[])
+        limit 50`,
+      [ownerId, country, order.awardeeIds],
+    );
+    for (const row of rows) {
+      const incoming = { buyerId: row.company_id, ownerId, products: order.disciplines, awardDate, amount: money?.amount ?? null, currency: money?.currency ?? null, usd: money?.usd ?? null };
+      const existing = { buyerId: row.company_id, ownerId, products: row.disciplines ?? [], awardDate: row.award, amount: null, currency: null, usd: row.value_usd };
+      // Both sides need a date or a value, otherwise any two orders of one buyer would merge.
+      if (!(awardDate && row.award) && !(incoming.usd && existing.usd)) continue;
+      if (sameOrder(incoming, existing)) return row.id;
+    }
+    return null;
+  }
+
+  async project(
+    ex: ExtractedDoc, ownerId: string | null, awardDate: string | null = null, isOrder = false,
+    order: { awardeeIds: string[]; disciplines: string[] } = { awardeeIds: [], disciplines: [] },
+  ): Promise<string | null> {
     const nameFact = ex.project.name;
     if (!nameFact) return null;
     const name = nameFact.value.replace(/\s+/g, " ").trim();
     const normalized = normalizeProjectName(name);
     const country = projectCountry(ex, this.doc.market);
     const stage = ex.project.stage;
-    const money = parseMoney(ex.project.value?.value);
+    const money = plausibleMoney(parseMoney(ex.project.value?.value));
     const closing = parseDate(ex.project.closingDate?.value);
     const tenderRef = ex.project.tenderRef?.value ?? null;
     const sector = sectorFor(`${name} ${this.doc.text.slice(0, 2000)}`);
@@ -365,10 +399,13 @@ class Resolver {
     ranked.push(...fuzzy.sort((a, b) => b.score - a.score).map((f) => f.id));
     let id: string | null = null;
     for (const candidate of ranked) {
-      if (isOrder && (await this.differentOrder(candidate, awardDate, money))) continue;
+      // Values only tell orders apart when the project is the order itself (a derived "<Buyer> <product>
+      // order" name); an order on a named project is part of it, whatever its value.
+      if (isOrder && (await this.differentOrder(candidate, awardDate, money, nameFact.extractedBy === "rule:derived"))) continue;
       id = candidate;
       break;
     }
+    if (!id && isOrder) id = await this.sameOrderProject(ownerId, country, awardDate, money, order);
 
     const specsPatch: Record<string, unknown> = {};
     if (closing) specsPatch.closing_date = closing;
@@ -514,11 +551,14 @@ export async function resolveDocument(db: Queryable, doc: DocContext, ex: Extrac
   const stage = ex.project.stage;
   const reportsAward = stage === "awarded" || ex.companies.some((c) => AWARDEE.includes(c.role as PartyRole) && c.roleFact && /award|won|wins|win|secur|bag|order|contract|signed/i.test(c.roleFact.quote));
   const awardDate = awardDateFor(parseDate(ex.project.awardDate?.value), doc.publishedAt, reportsAward && stage !== "completed");
-  const money = parseMoney(ex.project.value?.value);
+  const money = plausibleMoney(parseMoney(ex.project.value?.value));
   const isOrder = ex.project.name?.extractedBy === "rule:derived" || ex.companies.some((c) => c.role === "supplier" && c.roleFact);
 
   // Project + stage event
-  const projectId = await r.project(ex, owner?.id ?? null, awardDate, isOrder);
+  const projectId = await r.project(ex, owner?.id ?? null, awardDate, isOrder, {
+    awardeeIds: [...suppliers, ...epcs, ...subs].map((c) => c.id),
+    disciplines: [...new Set(ex.packages.map((p) => p.discipline))],
+  });
   if (projectId && owner) await r.link("project", projectId, "owner_company_id", owner.roleFact ?? owner.fact);
 
   // Packages

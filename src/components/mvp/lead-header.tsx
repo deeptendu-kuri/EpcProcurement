@@ -22,8 +22,8 @@ export interface LeadHeaderProps {
 export function LeadHeader({ lead, buyerName, projectName, productLabel, onDraftEmail, draftBlocked }: LeadHeaderProps) {
   return (
     <header className="sticky top-14 z-20 -mx-4 -mt-5 border-b border-[var(--line)] bg-white/95 px-4 pb-3 pt-3 backdrop-blur lg:-mx-6 lg:px-6">
-      <Link href="/leads" className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-3)] hover:text-[var(--foreground)]">
-        <ArrowLeft size={13} aria-hidden /> Leads
+      <Link href="/search" className="mb-1 inline-flex items-center gap-1 text-xs font-semibold text-[var(--text-3)] hover:text-[var(--foreground)]">
+        <ArrowLeft size={13} aria-hidden /> SuperSearch
       </Link>
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
