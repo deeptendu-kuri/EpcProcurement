@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ArrowRight, CalendarClock, Check, Eye, X } from "lucide-react";
 import { marketName } from "@/mvp/config/markets";
 import { REJECT_REASONS, type LeadListItem, type RejectReason } from "@/mvp/types";
-import { ConfidenceChip, NewBadge, SampleBadge, ScoreBadge } from "./badges";
+import { BuyerTypeBadge, ConfidenceChip, NewBadge, SampleBadge, ScoreBadge } from "./badges";
 import { KIND_SHORT, REJECT_REASON_LABELS, STATUS_LABELS, formatDate } from "./labels";
 
 export interface LeadCardProps {
@@ -51,6 +51,7 @@ export function LeadCard({ lead, selected, busy, rejectOpen, onRejectOpenChange,
           {KIND_SHORT[lead.kind]}
           {product ? ` · ${product}` : ""}
         </span>
+        <BuyerTypeBadge type={lead.buyerType} />
         {lead.isSample ? <SampleBadge /> : null}
       </div>
 

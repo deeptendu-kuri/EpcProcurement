@@ -1,11 +1,12 @@
 import { marketName } from "@/mvp/config/markets";
-import type { LeadClass, LeadKind, LeadListItem } from "@/mvp/types";
+import type { BuyerType, LeadClass, LeadKind, LeadListItem } from "@/mvp/types";
 
 const CLASS: Record<LeadClass, string> = { genuine: "Genuine", research: "Needs research", watch: "Watching", rejected: "Rejected" };
 const KIND: Record<LeadKind, string> = { bid: "Bid", supply_subcontract: "Supply / subcontract" };
+const BUYER: Record<BuyerType, string> = { epc_contractor: "EPC contractor", subcontractor: "Subcontractor", supplier: "Supplier", owner: "Owner" };
 
 export const CSV_HEADER = [
-  "Lead ID", "Class", "Score", "Confidence", "Type", "Products", "Buyer", "Buyer country", "Project", "Project country",
+  "Lead ID", "Class", "Score", "Confidence", "Type", "Products", "Buyer", "Buyer type", "Buyer country", "Project", "Project country",
   "Package", "Closing date", "Status", "Reasons", "Evidence URLs", "Sample data", "Created",
 ];
 
@@ -25,6 +26,7 @@ export function leadsToCsv(items: LeadListItem[], evidenceUrls: Record<string, s
     KIND[lead.kind],
     lead.productNames.join("; "),
     lead.buyerName,
+    lead.buyerType ? BUYER[lead.buyerType] : "",
     lead.buyerCountry ? marketName(lead.buyerCountry) : "",
     lead.projectName ?? "",
     lead.projectCountry ? marketName(lead.projectCountry) : "",

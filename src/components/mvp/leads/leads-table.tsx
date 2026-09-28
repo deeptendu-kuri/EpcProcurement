@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowRight, Check, X } from "lucide-react";
 import { marketName } from "@/mvp/config/markets";
 import type { LeadListItem, LeadStatus, RejectReason } from "@/mvp/types";
-import { ConfidenceChip, SampleBadge } from "../badges";
+import { BuyerTypeBadge, ConfidenceChip, SampleBadge } from "../badges";
 import { KIND_SHORT, STAGE_LABELS, STATUS_LABELS, disciplineLabel, formatDate, formatShortDate } from "../labels";
 import { RejectMenu } from "./reject-menu";
 
@@ -159,6 +159,7 @@ export function LeadsTable({
                     {lead.projectName ? <span className="font-normal text-[#6b7280]"> → {lead.projectName}</span> : null}
                   </button>
                   <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-[#6b7280]">
+                    <BuyerTypeBadge type={lead.buyerType} />
                     <span className="truncate">{lead.productNames[0] ?? lead.packageName ?? ""}</span>
                     {lead.isSample ? <SampleBadge /> : null}
                   </span>

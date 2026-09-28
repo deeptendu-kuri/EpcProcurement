@@ -80,14 +80,14 @@ describe("news award → candidate → lead", () => {
   it("an EPC award with no named project yields project, owner, awardee role, package, signal and a Needs-research lead", async () => {
     const { ex } = await ingest(AWARD, "https://news-one.example/desco-award", "news-one.example", "IN");
     expect(ex.project.stage).toBe("awarded");
-    expect(ex.project.name?.value).toBe("Adani Total Gas pipeline contract – Desco Infratech");
+    expect(ex.project.name?.value).toBe("Adani Total Gas pipeline EPC contract");
     expect(ex.companies.find((c) => c.name.value === "Desco Infratech")?.role).toBe("main_epc");
     expect(ex.companies.find((c) => c.name.value === "Adani Total Gas")?.role).toBe("owner");
 
     const project = (await db.query<{ name: string; country: string; current_stage: string; owner: string }>(
       "select p.name, p.country, p.current_stage, c.canonical_name as owner from projects p join companies c on c.id = p.owner_company_id",
     )).rows;
-    expect(project).toEqual([{ name: "Adani Total Gas pipeline contract – Desco Infratech", country: "IN", current_stage: "awarded", owner: "Adani Total Gas" }]);
+    expect(project).toEqual([{ name: "Adani Total Gas pipeline EPC contract", country: "IN", current_stage: "awarded", owner: "Adani Total Gas" }]);
     const packages = (await db.query<{ discipline: string; owner: string }>(
       "select k.discipline, c.canonical_name as owner from packages k join companies c on c.id = k.package_owner_company_id",
     )).rows;
@@ -198,7 +198,7 @@ describe("rules extractor on news headlines (07 §2)", () => {
       ["Adani Total Gas", "owner", "rule"],
     ]);
     expect(ex.project.stage).toBe("awarded");
-    expect(ex.project.name?.value).toBe("Adani Total Gas pipeline contract – Desco Infratech");
+    expect(ex.project.name?.value).toBe("Adani Total Gas pipeline EPC contract");
     expect(ex.packages[0]).toMatchObject({ discipline: "pipeline", owner: { value: "Desco Infratech" } });
   });
 });
@@ -307,7 +307,7 @@ describe("entity resolution: aliases, project country, parent companies", () => 
       extractedBy: "model:test",
     });
     const derived = deriveFromAward(ex, text);
-    expect(derived.project.name?.value).toBe("Saudi Aramco pipeline supply contract – EPIC");
+    expect(derived.project.name?.value).toBe("Aramco steel pipe order");
     expect(derived.packages[0].owner?.value).toBe("Saudi Aramco");
   });
 });

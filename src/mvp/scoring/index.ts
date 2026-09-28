@@ -5,6 +5,7 @@
 import { getDb, type Queryable } from "@/mvp/db";
 import { getProductById, getActiveProducts } from "@/mvp/config/profile";
 import type {
+  BuyerType,
   ConfidenceBand,
   GateResult,
   LeadClass,
@@ -16,6 +17,7 @@ import type {
   SignalRow,
 } from "@/mvp/types";
 import { buildCandidates } from "./candidates";
+import { IDENTIFY_EPC_TASK, buyerTypeFor, ownerOrderReason, ownerOrderWithoutEpc, supplierReason } from "./buyer-type";
 import { classifyLead, findSub, researchTasks, totalScore } from "./classify";
 import { computeConfidence } from "./confidence";
 import { SCORING_CONFIG } from "./config";
@@ -39,6 +41,8 @@ export interface LeadScore {
   confidence: number;
   band: ConfidenceBand;
   leadClass: LeadClass;
+  /** Who the lead is about (13 §11). */
+  buyerType: BuyerType;
   reasons: Reason[];
   /** Sub-criteria to research (07 §8); "G5" first when the lead needs a second independent source. */
   researchTasks: string[];
@@ -82,13 +86,30 @@ export function scoreContext(ctx: ScoringContext): LeadScore {
     for (const product of getActiveProducts()) if (disciplines.has(product.discipline)) productIds.add(product.id);
   }
 
+  // Buyer type (13 §11): labels the lead and adds its first reason; never changes gates or score.
+  const buyerType = buyerTypeFor(ctx);
+  const leading: Reason[] = [];
+  let finalClass = leadClass;
+  const tasks = capped ? [...cappedBy, ...researchTasks(breakdown.criteria, "research")] : researchTasks(breakdown.criteria, leadClass);
+  if (leadClass !== "rejected" && buyerType === "supplier") {
+    const reason = supplierReason(ctx);
+    if (reason) leading.push(reason);
+  }
+  // An owner that ordered materials while no EPC contractor is known: watch it and find the EPC.
+  if (leadClass !== "rejected" && ownerOrderWithoutEpc(ctx, buyerType)) {
+    if (finalClass === "genuine" || finalClass === "research") finalClass = "watch";
+    leading.push(ownerOrderReason(ctx));
+    tasks.unshift(IDENTIFY_EPC_TASK);
+  }
+
   return {
     gates,
     breakdown,
     score,
     confidence,
     band,
-    leadClass,
+    leadClass: finalClass,
+    buyerType,
     reasons:
       leadClass === "rejected"
         ? [
@@ -96,9 +117,14 @@ export function scoreContext(ctx: ScoringContext): LeadScore {
             ...topReasons(breakdown.criteria),
           ].slice(0, 3)
         : capped
-          ? [{ text: capReason, evidenceIds: signalEvidenceIds }, ...topReasons(breakdown.criteria)].slice(0, 3)
-          : topReasons(breakdown.criteria),
-    researchTasks: capped ? [...cappedBy, ...researchTasks(breakdown.criteria, "research")] : researchTasks(breakdown.criteria, leadClass),
+          ? [
+              ...leading,
+              // "Needs research: …" only on a Needs-research lead; a Watching lead keeps the task without the label.
+              { text: finalClass === "research" ? capReason : capReason.replace(/^Needs research: (\w)/, (_, ch: string) => ch.toUpperCase()), evidenceIds: signalEvidenceIds },
+              ...topReasons(breakdown.criteria),
+            ].slice(0, 3)
+          : [...leading, ...topReasons(breakdown.criteria)].slice(0, Math.max(3, leading.length + 2)),
+    researchTasks: unique(tasks),
     isSample: keyIds.length > 0 && keyIds.every((id) => ctx.evidence[id]?.isSample),
     closingDate: ctx.kind === "bid" ? closingDate(ctx) : null,
     clientProductIds: [...productIds],
@@ -162,6 +188,7 @@ async function upsertLead(db: Queryable, candidate: Candidate, result: LeadScore
     result.isSample,
     runId,
     ctx.tender?.ref ?? null,
+    result.buyerType,
   ];
   let leadId: string;
   let outcome: "created" | "updated";
@@ -170,7 +197,7 @@ async function upsertLead(db: Queryable, candidate: Candidate, result: LeadScore
       `update leads set client_product_ids = $2::text[], signal_ids = $3::uuid[], score = $4, score_breakdown = $5::jsonb,
               gate_results = $6::jsonb, confidence = $7, confidence_band = $8, class = $9, reasons = $10::jsonb,
               closing_date = $11, scoring_version = $12, is_sample = $13, run_id = coalesce($14, run_id),
-              tender_ref = coalesce($15, tender_ref), updated_at = now()
+              tender_ref = coalesce($15, tender_ref), buyer_type = $16, updated_at = now()
         where id = $1`,
       [existing.id, ...common],
     );
@@ -180,8 +207,8 @@ async function upsertLead(db: Queryable, candidate: Candidate, result: LeadScore
     const { rows } = await db.query<{ id: string }>(
       `insert into leads (kind, buyer_company_id, project_id, package_id, client_product_ids, signal_ids, score, score_breakdown,
                           gate_results, confidence, confidence_band, class, reasons, closing_date, scoring_version, is_sample,
-                          run_id, tender_ref)
-       values ($1, $2, $3, $4, $5::text[], $6::uuid[], $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18)
+                          run_id, tender_ref, buyer_type)
+       values ($1, $2, $3, $4, $5::text[], $6::uuid[], $7, $8::jsonb, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18, $19)
        returning id`,
       [candidate.kind, candidate.buyerId, candidate.projectId, candidate.packageId, ...common],
     );

@@ -7,8 +7,10 @@ import { getClientProfile, getProductById } from "@/mvp/config/profile";
 import { bidChecklist, contactCountry, outreachRules } from "@/mvp/compliance";
 import { failStaleRuns } from "@/mvp/pipeline/active-runs";
 import { getCompanyInsights } from "@/mvp/scoring/graph";
+import { sentenceAround } from "@/mvp/pipeline/text";
 import type {
   ActivityRow,
+  CompanyContactView,
   AddedWindow,
   FacetOption,
   LeadFacets,
@@ -75,7 +77,7 @@ const LEAD_LIST_FROM = `
   left join packages pk on pk.id = l.package_id`;
 
 /** Filter dimensions that have options with counts (facets) in the Leads filter bar. */
-export type LeadDimension = "class" | "discipline" | "market" | "kind" | "stage" | "status" | "confidence" | "product" | "source";
+export type LeadDimension = "class" | "discipline" | "market" | "kind" | "stage" | "status" | "confidence" | "product" | "source" | "buyerType";
 
 const ADDED_INTERVAL: Record<AddedWindow, string> = { "24h": "24 hours", "7d": "7 days", "30d": "30 days" };
 
@@ -129,6 +131,8 @@ export function dimensionExpr(dim: Exclude<LeadDimension, "product">, sql: SqlPa
       return "l.confidence_band";
     case "source":
       return "(case when l.is_sample then 'sample' else 'live' end)";
+    case "buyerType":
+      return "l.buyer_type";
   }
 }
 
@@ -157,6 +161,7 @@ export function buildLeadWhere(filter: LeadFilter, sql: SqlParams, omit: LeadDim
   if (filter.confidence && !skip.has("confidence")) clauses.push(`l.confidence_band = ${sql.add(filter.confidence)}`);
   if (filter.productId && !skip.has("product")) clauses.push(`${sql.add(filter.productId)}::text = any(l.client_product_ids)`);
   if (filter.source && !skip.has("source")) clauses.push(`l.is_sample = ${sql.add(filter.source === "sample")}`);
+  if (filter.buyerType && !skip.has("buyerType")) clauses.push(`l.buyer_type = ${sql.add(filter.buyerType)}`);
   if (filter.runId && isUuid(filter.runId)) clauses.push(`l.run_id = ${sql.add(filter.runId)}::uuid`);
   if (filter.added && ADDED_INTERVAL[filter.added]) {
     clauses.push(`l.created_at >= now() - ${sql.add(ADDED_INTERVAL[filter.added])}::interval`);
@@ -270,6 +275,7 @@ function toListItem(row: LeadListSqlRow): LeadListItem {
     createdAt: row.created_at,
     stage: row.project_stage ?? null,
     nextAction: row.next_action ?? null,
+    buyerType: row.buyer_type ?? null,
   };
 }
 
@@ -291,7 +297,7 @@ export async function listLeads(filter: LeadFilter = {}): Promise<LeadListResult
   return { items: items.rows.map(toListItem), counts: countMap, total };
 }
 
-const FACET_DIMENSIONS = ["discipline", "market", "kind", "stage", "status", "confidence", "product", "source"] as const;
+const FACET_DIMENSIONS = ["discipline", "market", "kind", "stage", "status", "confidence", "product", "source", "buyerType"] as const;
 
 /** Options with counts for every filter of the Leads filter bar, computed from the leads in the database. */
 export async function leadFacets(filter: LeadFilter = {}): Promise<LeadFacets> {
@@ -542,8 +548,10 @@ export async function getLeadDetail(id: string): Promise<LeadDetail | null> {
         )
       ).rows
     : [];
+  await attachSentences(db, evidenceRows);
 
   const partyViews: PartyView[] = parties.rows.map((party) => ({ ...party, company: company(party.company_id) }));
+  const companyContacts = companyContactViews(buyer, lead.buyer_type ?? null, project?.owner_company_id ?? null, partyViews, company);
 
   return {
     lead,
@@ -574,7 +582,105 @@ export async function getLeadDetail(id: string): Promise<LeadDetail | null> {
     activities: activities.rows,
     drafts: drafts.rows,
     scoreHistory: scoreHistory.rows,
+    companies: companyContacts,
   };
+}
+
+const PARTY_ROLE_WORDS: Record<string, string> = {
+  owner: "Owner",
+  main_epc: "EPC contractor",
+  consortium_member: "EPC contractor",
+  subcontractor: "Subcontractor",
+  supplier: "Supplier",
+  pmc: "Project manager (PMC)",
+  consultant: "Consultant",
+  logistics: "Logistics",
+};
+const BUYER_TYPE_WORDS: Record<string, string> = { epc_contractor: "EPC contractor", subcontractor: "Subcontractor", supplier: "Supplier", owner: "Owner" };
+
+/**
+ * Web searches that help find a company's procurement contacts. They open in the user's browser;
+ * nothing is fetched or scraped by the app (no LinkedIn or search-engine scraping). Exported for tests.
+ */
+export function contactSearches(name: string, website: string | null): { label: string; url: string }[] {
+  const google = (q: string) => `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  const host = website?.replace(/^https?:\/\//i, "").replace(/\/.*$/, "") ?? null;
+  return [
+    { label: "Procurement manager", url: google(`"${name}" procurement manager`) },
+    { label: "Purchasing contact", url: google(`"${name}" purchasing OR procurement contact email`) },
+    { label: "LinkedIn people", url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${name} procurement`)}` },
+    { label: "Contact page", url: google(host ? `site:${host} contact` : `"${name}" contact us`) },
+  ];
+}
+
+/** The lead's companies (buyer first, then owner and every party) with roles, website, searches and outreach rule. */
+function companyContactViews(
+  buyer: CompanyRow | undefined,
+  buyerType: string | null,
+  ownerId: string | null,
+  parties: PartyView[],
+  company: (id: string | null | undefined) => CompanyRow | null,
+): CompanyContactView[] {
+  const roles = new Map<string, Set<string>>();
+  const order: string[] = [];
+  const add = (id: string | null | undefined, role: string) => {
+    if (!id) return;
+    if (!roles.has(id)) {
+      roles.set(id, new Set());
+      order.push(id);
+    }
+    roles.get(id)!.add(role);
+  };
+  if (buyer) add(buyer.id, buyerType ? `Buyer · ${BUYER_TYPE_WORDS[buyerType] ?? buyerType}` : "Buyer");
+  add(ownerId, "Owner");
+  for (const party of parties) add(party.company_id, PARTY_ROLE_WORDS[party.role] ?? party.role);
+  return order
+    .map((id) => (id === buyer?.id ? buyer : company(id)))
+    .filter((row): row is CompanyRow => Boolean(row))
+    .slice(0, 8)
+    .map((row) => {
+      const website = row.domain ? (/^https?:\/\//i.test(row.domain) ? row.domain : `https://${row.domain}`) : null;
+      return {
+        companyId: row.id,
+        name: row.canonical_name,
+        country: row.country,
+        roles: [...(roles.get(row.id) ?? [])],
+        website,
+        searches: contactSearches(row.canonical_name, website),
+        rule: outreachRules(row.country ?? ""),
+      };
+    });
+}
+
+/**
+ * Give every evidence row the full sentence of its document that contains the quote (the proof panel
+ * shows the sentence and highlights the quote; a 1–2 word quote alone proves nothing).
+ */
+async function attachSentences(db: Queryable, rows: EvidenceView[]): Promise<void> {
+  const documentIds = uniqUuids(rows.map((row) => row.document_id));
+  if (!documentIds.length) return;
+  const { rows: docs } = await db.query<{ id: string; text: string | null }>(
+    "select id, text from source_documents where id = any($1::uuid[])",
+    [documentIds],
+  );
+  const texts = new Map(docs.map((doc) => [doc.id, doc.text ?? ""]));
+  for (const row of rows) {
+    const text = row.document_id ? texts.get(row.document_id) : undefined;
+    row.sentence = text ? evidenceSentence(text, row.quote, row.char_start, row.char_end) : null;
+  }
+}
+
+/** The sentence of `text` that contains `quote` (by offsets when they still match, else by search). Exported for tests. */
+export function evidenceSentence(text: string, quote: string, start: number | null, end: number | null): string | null {
+  let from = start;
+  let to = end;
+  if (from === null || to === null || from < 0 || to > text.length || text.slice(from, to).trim() !== quote.trim()) {
+    const at = text.indexOf(quote.trim());
+    if (at < 0) return null;
+    from = at;
+    to = at + quote.trim().length;
+  }
+  return sentenceAround(text, from, to).sentence;
 }
 
 // ───────────────────────── writes ─────────────────────────

@@ -6,7 +6,7 @@ import { AlertTriangle, ArrowRight, Check, Loader2, X } from "lucide-react";
 import { marketName } from "@/mvp/config/markets";
 import type { LeadDetail, LeadListItem, LeadStatus, RejectReason } from "@/mvp/types";
 import { apiJson } from "../api-client";
-import { ConfidenceChip, SampleBadge } from "../badges";
+import { BuyerTypeBadge, ConfidenceChip, SampleBadge } from "../badges";
 import { EvidenceButton, EvidenceProvider } from "../evidence";
 import { CLASS_LABELS, FAILED_CHECK_TITLES, KIND_LABELS, STAGE_LABELS, disciplineLabel, formatDate, formatMoney } from "../labels";
 import { SkeletonBlock } from "../skeleton";
@@ -94,6 +94,7 @@ export function LeadDrawer({
               </h2>
               <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                 <ConfidenceChip band={lead.confidenceBand} />
+                <BuyerTypeBadge type={lead.buyerType} />
                 <span className="chip">{CLASS_LABELS[lead.class]}</span>
                 <StatusPill status={status} />
                 {lead.isSample ? <SampleBadge /> : null}

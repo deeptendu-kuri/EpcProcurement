@@ -20,7 +20,7 @@ import type {
 } from "@/mvp/types";
 import type { ExtractedDoc, VerifiedFact } from "./extract";
 import { detectMarkets } from "./filter";
-import { isParentMention } from "./rules-extract";
+import { isParentInDoc, isParentMention } from "./rules-extract";
 import {
   companyKeys, companyNameParts, displayCompanyName, knownCompany, normalizeCompanyName, normalizePersonName, normalizeProjectName,
   parseDate, parseMoney, parseNumber, tokenSetRatio,
@@ -160,6 +160,21 @@ export function projectCountry(ex: ExtractedDoc, docMarket: string | null): stri
   return clientCountry ?? docMarket;
 }
 
+/**
+ * The award date of a document: the date stated in the text when it is not after the article's own
+ * publication date (+3 days) nor in the future; else, for an award story, the publication date.
+ * Exported for tests.
+ */
+export function awardDateFor(textDate: string | null, publishedAt: string | null, isAwardStory: boolean, now: Date = new Date()): string | null {
+  const published = publishedAt?.slice(0, 10) ?? null;
+  const today = now.toISOString().slice(0, 10);
+  if (textDate) {
+    const tooLate = published ? Date.parse(textDate) - Date.parse(published) > 3 * 86_400_000 : false;
+    if (!tooLate && textDate <= today) return textDate;
+  }
+  return isAwardStory && published && published <= today ? published : null;
+}
+
 // ───────────────────────── resolver ─────────────────────────
 
 class Resolver {
@@ -294,7 +309,33 @@ class Resolver {
     return id;
   }
 
-  async project(ex: ExtractedDoc, ownerId: string | null): Promise<string | null> {
+  /**
+   * True when an existing project is a different contract than the incoming order: award dates more
+   * than 30 days apart, or values in the same currency more than 10% apart (13 §11). Only checked for
+   * orders (supply orders and awards whose project name was derived), where one buyer places many.
+   */
+  private async differentOrder(projectId: string, awardDate: string | null, money: ReturnType<typeof parseMoney>): Promise<boolean> {
+    const { rows } = await this.db.query<{ award: string | null; estimated_value: number | null; currency: string | null }>(
+      `select (select min(event_date)::text from project_stage_events where project_id = p.id and stage = 'awarded') as award,
+              p.estimated_value, p.currency
+         from projects p where p.id = $1`,
+      [projectId],
+    );
+    const row = rows[0];
+    if (!row) return false;
+    if (awardDate && row.award) {
+      const days = Math.abs(Date.parse(awardDate) - Date.parse(row.award)) / 86_400_000;
+      if (days > 30) return true;
+    }
+    if (money && row.estimated_value && row.currency && row.currency.toUpperCase() === money.currency.toUpperCase()) {
+      const a = Number(row.estimated_value);
+      const b = money.amount;
+      if (Math.abs(a - b) / Math.max(a, b) > 0.1) return true;
+    }
+    return false;
+  }
+
+  async project(ex: ExtractedDoc, ownerId: string | null, awardDate: string | null = null, isOrder = false): Promise<string | null> {
     const nameFact = ex.project.name;
     if (!nameFact) return null;
     const name = nameFact.value.replace(/\s+/g, " ").trim();
@@ -312,15 +353,21 @@ class Resolver {
       "select id, normalized_name, owner_company_id from projects where country is not distinct from $1",
       [country],
     );
-    let id: string | null = candidates.rows.find((row) => row.normalized_name === normalized)?.id ?? null;
-    if (!id) {
-      let best: { id: string; score: number } | null = null;
-      for (const row of candidates.rows) {
-        if (ownerId && row.owner_company_id && row.owner_company_id !== ownerId) continue;
-        const score = tokenSetRatio(row.normalized_name, normalized);
-        if (score >= 90 && (!best || score > best.score)) best = { id: row.id, score };
-      }
-      id = best?.id ?? null;
+    // Exact name first, then fuzzy matches by score; an order never merges into a different order.
+    const ranked: string[] = candidates.rows.filter((row) => row.normalized_name === normalized).map((row) => row.id);
+    const fuzzy: { id: string; score: number }[] = [];
+    for (const row of candidates.rows) {
+      if (row.normalized_name === normalized) continue;
+      if (ownerId && row.owner_company_id && row.owner_company_id !== ownerId) continue;
+      const score = tokenSetRatio(row.normalized_name, normalized);
+      if (score >= 90) fuzzy.push({ id: row.id, score });
+    }
+    ranked.push(...fuzzy.sort((a, b) => b.score - a.score).map((f) => f.id));
+    let id: string | null = null;
+    for (const candidate of ranked) {
+      if (isOrder && (await this.differentOrder(candidate, awardDate, money))) continue;
+      id = candidate;
+      break;
     }
 
     const specsPatch: Record<string, unknown> = {};
@@ -365,7 +412,9 @@ class Resolver {
       const eventDate =
         stage === "completed"
           ? (ex.project.stageFact.quote.match(/\b(?:completed|commissioned)\s+in\s+(\d{4})/i)?.[1] ?? null)?.concat("-12-31") ?? null
-          : (parseDate(ex.project.awardDate?.value) ?? this.doc.publishedAt?.slice(0, 10) ?? null);
+          : stage === "awarded" && awardDate
+            ? awardDate
+            : (parseDate(ex.project.awardDate?.value) ?? this.doc.publishedAt?.slice(0, 10) ?? null);
       const evidenceId = await this.evidence(ex.project.stageFact);
       const existing = await this.db.query<{ id: string }>("select id from project_stage_events where project_id = $1 and stage = $2 limit 1", [id, stage]);
       let eventId = existing.rows[0]?.id;
@@ -459,13 +508,17 @@ export async function resolveDocument(db: Queryable, doc: DocContext, ex: Extrac
     return entry;
   };
 
-  // Project + stage event
-  const projectId = await r.project(ex, owner?.id ?? null);
+  // Award date: from the text, else the article's own publication date (the award is news that day).
+  // A text date after the publication date (a delivery deadline read as the award) or in the future is
+  // not an award date.
   const stage = ex.project.stage;
-  // No award date in the text: an award article is dated by its publication (the award is news that day).
   const reportsAward = stage === "awarded" || ex.companies.some((c) => AWARDEE.includes(c.role as PartyRole) && c.roleFact && /award|won|wins|win|secur|bag|order|contract|signed/i.test(c.roleFact.quote));
-  const awardDate = parseDate(ex.project.awardDate?.value) ?? (reportsAward && stage !== "completed" ? (doc.publishedAt?.slice(0, 10) ?? null) : null);
+  const awardDate = awardDateFor(parseDate(ex.project.awardDate?.value), doc.publishedAt, reportsAward && stage !== "completed");
   const money = parseMoney(ex.project.value?.value);
+  const isOrder = ex.project.name?.extractedBy === "rule:derived" || ex.companies.some((c) => c.role === "supplier" && c.roleFact);
+
+  // Project + stage event
+  const projectId = await r.project(ex, owner?.id ?? null, awardDate, isOrder);
   if (projectId && owner) await r.link("project", projectId, "owner_company_id", owner.roleFact ?? owner.fact);
 
   // Packages
@@ -641,7 +694,7 @@ export async function resolveDocument(db: Queryable, doc: DocContext, ex: Extrac
   for (const supplier of suppliers) {
     // Not the supplier's own parent ("Welspun Corp's US unit wins …").
     const quote = supplier.roleFact?.quote ?? "";
-    const buyer = buyerCandidates.find((c) => c.id !== supplier.id && !isParentMention(quote, c.fact.value));
+    const buyer = buyerCandidates.find((c) => c.id !== supplier.id && !isParentMention(quote, c.fact.value) && !isParentInDoc(doc.text, c.fact.value));
     if (buyer) await relationship(buyer, supplier, "supplied_by", firstDiscipline(["piping", "pipeline", "static_equipment"]));
   }
 

@@ -5,7 +5,7 @@ import { ArrowDownWideNarrow, Search, SlidersHorizontal, X } from "lucide-react"
 import { FilterDrawer } from "@/components/filter-drawer";
 import { marketName } from "@/mvp/config/markets";
 import { LEAD_STATUSES, type FacetOption, type LeadClass, type LeadFacets } from "@/mvp/types";
-import { BAND_LABELS, CLASS_LABELS, KIND_LABELS, STAGE_LABELS, STATUS_LABELS, disciplineLabel } from "../labels";
+import { BAND_LABELS, BUYER_TYPE_LABELS, CLASS_LABELS, KIND_LABELS, STAGE_LABELS, STATUS_LABELS, disciplineLabel } from "../labels";
 import { TABS, activeFilters, type FilterKey, type LeadsTab, type LeadsUrlState } from "./url-state";
 
 export const TAB_LABELS: Record<LeadsTab, string> = { ...CLASS_LABELS, all: "All" };
@@ -87,6 +87,8 @@ export function chipLabel(key: FilterKey, state: LeadsUrlState, productName: (id
       return productName(state.product);
     case "source":
       return state.source === "sample" ? "Sample data" : "Live sources";
+    case "buyer":
+      return state.buyer ? `Buyer: ${BUYER_TYPE_LABELS[state.buyer]}` : "";
     case "run":
       return "One search";
   }
@@ -104,6 +106,7 @@ const RESET: Record<FilterKey, Change> = {
   minScore: { minScore: null },
   product: { product: "" },
   source: { source: "" },
+  buyer: { buyer: "" },
   run: { run: "" },
 };
 
@@ -195,6 +198,14 @@ export function FilterBar({
   const primarySelects = (p: string) => (
     <>
       <FilterSelect id={`${p}-category`} label="Category" value={state.category} allLabel="All" options={facetOptions(facets.discipline, disciplineLabel, state.category)} onChange={(category) => onChange({ category })} />
+      <FilterSelect
+        id={`${p}-buyer`}
+        label="Buyer type"
+        value={state.buyer}
+        allLabel="All"
+        options={facetOptions(facets.buyerType ?? [], (value) => BUYER_TYPE_LABELS[value as keyof typeof BUYER_TYPE_LABELS] ?? value, state.buyer)}
+        onChange={(buyer) => onChange({ buyer: buyer as LeadsUrlState["buyer"] })}
+      />
       <FilterSelect id={`${p}-market`} label="Market" value={state.market} allLabel="All" options={facetOptions(facets.market, marketName, state.market)} onChange={(market) => onChange({ market })} />
       <FilterSelect
         id={`${p}-kind`}

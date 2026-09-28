@@ -100,12 +100,31 @@ export async function buildCandidates(
     return options.insightsCache.get(companyId)!;
   };
 
+  const supplierRoles = new Map<string, boolean>();
+  const supplierOn = async (companyId: string, projectId: string | null): Promise<boolean> => {
+    if (!projectId) return false;
+    const key = `${companyId}|${projectId}`;
+    if (!supplierRoles.has(key)) {
+      const { rows } = await db.query<{ role: string }>("select role from project_parties where project_id = $1 and company_id = $2", [projectId, companyId]);
+      const roles = rows.map((r) => r.role);
+      supplierRoles.set(key, roles.includes("supplier") && !roles.some((r) => r === "main_epc" || r === "consortium_member" || r === "subcontractor"));
+    }
+    return supplierRoles.get(key)!;
+  };
+
   for (const s of signals) {
     if (!s.company_id) continue;
     if (BID_SIGNALS.includes(s.type) && kinds.has("bid")) {
       out.push({ kind: "bid", buyerId: s.company_id, projectId: s.project_id, packageId: s.package_id, signalIds: [s.id] });
     }
     if (!SUPPLY_SIGNALS.includes(s.type) || !kinds.has("supply_subcontract")) continue;
+
+    // A supplier that won an order (13 §11): one lead on the order itself — the client sells it inputs
+    // and services; the order's packages belong to its buyer, and it has no subcontracting history.
+    if (s.type === "contract_awarded" && (await supplierOn(s.company_id, s.project_id))) {
+      out.push({ kind: "supply_subcontract", buyerId: s.company_id, projectId: s.project_id, packageId: null, signalIds: [s.id] });
+      continue;
+    }
 
     if (s.package_id || !s.project_id) {
       out.push({ kind: "supply_subcontract", buyerId: s.company_id, projectId: s.project_id, packageId: s.package_id, signalIds: [s.id] });

@@ -121,3 +121,14 @@ Columns = lead statuses: New · Accepted · Contacted · RFQ · Quoted · Won ·
 2. Builder implements U1–U8 (no commits).
 3. Independent verifier runs §9 and reviews; the builder fixes; repeat until §9 passes.
 4. Single commit; screenshots to the client-facing owner for review.
+
+## 11. Buyer types, supplier leads and contacts (after the first client review)
+
+- **Buyer type** on every lead: *EPC contractor*, *Subcontractor*, *Supplier* or *Owner*. It shows as a badge on cards, table rows, the preview drawer and the lead header. It's also a **Buyer type** filter with counts, and a CSV column. Rules are in 07 §1.
+- **Supplier leads.** The client can sell to suppliers that won orders, so they are leads too, with a first reason saying what they won, from whom and when.
+- **Owner orders without an EPC** are *Watching* leads with the task "Identify the EPC contractor".
+- **Proof panel.** The ⓘ panel shows the full sentence from the source with the quoted words highlighted.
+- **People and contacts.**
+  - People named in the sources, with their title, company and buying role.
+  - Below them, a **Find contacts** card per company on the lead (buyer, owner, EPC, subcontractors, suppliers), showing its roles, website if known, and the email rule for its country. Each card has four web searches that open in a new tab: procurement manager, purchasing contact, LinkedIn people, contact page. The app never scrapes LinkedIn or search engines, and every contact must be verified before use.
+- **Clean names and places.** Orders without a project name in the text are named "<Buyer> <product> order (<Mon YYYY>)", and a location never repeats the country.

@@ -87,6 +87,18 @@ export function signalsFromFacts(snap: FactsSnapshot, now: Date): SignalDraft[] 
         summary: `${party.company_name} awarded ${party.role === "main_epc" ? "EPC contract" : "contract (consortium)"} for ${project} (${formatDay(party.award_date)})`,
         evidenceIds: ids,
       });
+    } else if (party.role === "supplier" && party.award_date) {
+      // A supplier that won an order is a buyer too (13 §11): it buys inputs and services to deliver it.
+      out.push({
+        type: "contract_awarded",
+        signalDate: party.award_date,
+        companyId: party.company_id,
+        projectId: party.project_id,
+        packageId: null,
+        tenderRef: null,
+        summary: `${party.company_name} won a supply order: ${project} (${formatDay(party.award_date)})`,
+        evidenceIds: ids,
+      });
     } else if (party.role === "subcontractor") {
       const date = party.award_date ?? earliest(items) ?? today;
       out.push({

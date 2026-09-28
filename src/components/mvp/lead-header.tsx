@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft, Mail } from "lucide-react";
 import type { LeadRow } from "@/mvp/types";
-import { ConfidenceChip, SampleBadge, ScoreBadge } from "./badges";
+import { BuyerTypeBadge, ConfidenceChip, SampleBadge, ScoreBadge } from "./badges";
 import { CLASS_LABELS, KIND_LABELS } from "./labels";
 import { LeadSectionNav } from "./lead-section-nav";
 
@@ -36,6 +36,7 @@ export function LeadHeader({ lead, buyerName, projectName, productLabel, onDraft
               {KIND_LABELS[lead.kind]}
               {productLabel ? ` · ${productLabel}` : ""}
             </span>
+            <BuyerTypeBadge type={lead.buyer_type} />
             <span className="chip">{CLASS_LABELS[lead.class]}</span>
             {lead.is_sample ? <SampleBadge /> : null}
           </p>

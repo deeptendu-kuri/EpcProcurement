@@ -102,6 +102,16 @@ export async function loadContext(
   const stageEvents = project
     ? await many<ProjectStageEventRow>(db, "select * from project_stage_events where project_id = $1 order by event_date nulls last", [project.id])
     : [];
+  // A supplier's client on this order (13 §11): the company that bought from it on the project.
+  const orderClient =
+    project && parties.some((p) => p.company_id === buyer.id && p.role === "supplier")
+      ? await one<CompanyRow>(
+          db,
+          `select c.* from relationships r join companies c on c.id = r.from_company_id
+            where r.type = 'supplied_by' and r.to_company_id = $1 and r.project_id = $2 limit 1`,
+          [buyer.id, project.id],
+        )
+      : null;
 
   const triggerSignals = candidate.signalIds.length
     ? await many<SignalRow>(db, "select * from signals where id = any($1::uuid[])", [candidate.signalIds])
@@ -197,6 +207,7 @@ export async function loadContext(
     buyer,
     project,
     projectOwner,
+    orderClient,
     leadPackage,
     packages,
     requirements,

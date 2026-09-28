@@ -37,6 +37,8 @@ export interface ScoringContext {
   buyer: CompanyRow;
   project: ProjectRow | null;
   projectOwner: CompanyRow | null;
+  /** For a supplier buyer: the company that placed its order (supplied_by edge on the project), else null. */
+  orderClient?: CompanyRow | null;
   /** The lead's package, when the candidate has one. */
   leadPackage: PackageRow | null;
   /** Packages in scope: the lead's package, or every package of the project when it has none. */

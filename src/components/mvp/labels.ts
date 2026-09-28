@@ -4,6 +4,7 @@
  */
 import type {
   ActivityType,
+  BuyerType,
   BuyingRole,
   CheckStatus,
   ConfidenceBand,
@@ -30,6 +31,20 @@ export const KIND_LABELS: Record<LeadKind, string> = { bid: "Bid", supply_subcon
 export const KIND_SHORT: Record<LeadKind, string> = { bid: "Bid", supply_subcontract: "Supply" };
 
 export const BAND_LABELS: Record<ConfidenceBand, string> = { high: "High", medium: "Medium", low: "Low" };
+
+/** Who the lead is about (13 §11). */
+export const BUYER_TYPE_LABELS: Record<BuyerType, string> = {
+  epc_contractor: "EPC contractor",
+  subcontractor: "Subcontractor",
+  supplier: "Supplier",
+  owner: "Owner",
+};
+export const BUYER_TYPE_HINTS: Record<BuyerType, string> = {
+  epc_contractor: "Won the main contract: buys materials and subcontracts packages",
+  subcontractor: "Won a subcontract: buys materials for its package",
+  supplier: "Won a supply order: buys inputs and services to deliver it",
+  owner: "Owns the project or runs the tender",
+};
 
 export const STATUS_LABELS: Record<LeadStatus, string> = {
   new: "New",

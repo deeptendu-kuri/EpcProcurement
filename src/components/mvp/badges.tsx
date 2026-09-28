@@ -1,6 +1,6 @@
 import { FlaskConical } from "lucide-react";
-import type { ConfidenceBand } from "@/mvp/types";
-import { BAND_LABELS } from "./labels";
+import type { BuyerType, ConfidenceBand } from "@/mvp/types";
+import { BAND_LABELS, BUYER_TYPE_HINTS, BUYER_TYPE_LABELS } from "./labels";
 
 const BAND_STYLES: Record<ConfidenceBand, string> = {
   high: "border-[#abefc6] bg-[#ecfdf3] text-[#067647]",
@@ -58,6 +58,26 @@ export function NewBadge() {
     <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2 py-px text-xs font-bold text-[var(--accent-2)]">
       <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[#2563eb]" />
       NEW
+    </span>
+  );
+}
+
+const BUYER_TYPE_STYLES: Record<BuyerType, string> = {
+  epc_contractor: "border-[#c7d7fe] bg-[#eef4ff] text-[#3538cd]",
+  subcontractor: "border-[#b9e6fe] bg-[#f0f9ff] text-[#026aa2]",
+  supplier: "border-[#fcceee] bg-[#fdf2fa] text-[#c11574]",
+  owner: "border-[#d0d5dd] bg-[#f9fafb] text-[#344054]",
+};
+
+/** EPC contractor / Subcontractor / Supplier / Owner (13 §11). Nothing for leads scored before it existed. */
+export function BuyerTypeBadge({ type }: { type: BuyerType | null | undefined }) {
+  if (!type) return null;
+  return (
+    <span
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-px text-xs font-semibold ${BUYER_TYPE_STYLES[type]}`}
+      title={BUYER_TYPE_HINTS[type]}
+    >
+      {BUYER_TYPE_LABELS[type]}
     </span>
   );
 }

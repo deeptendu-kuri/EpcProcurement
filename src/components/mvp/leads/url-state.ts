@@ -4,10 +4,12 @@
  * Only non-default values are written, in a fixed order, so shared links stay short and stable.
  */
 import {
+  BUYER_TYPES,
   DISCIPLINES,
   LEAD_STATUSES,
   PROJECT_STAGES,
   type AddedWindow,
+  type BuyerType,
   type ConfidenceBand,
   type LeadClass,
   type LeadFilter,
@@ -34,6 +36,8 @@ export interface LeadsUrlState {
   minScore: number | null;
   product: string;
   source: LeadSource | "";
+  /** EPC contractor, subcontractor, supplier or owner. */
+  buyer: BuyerType | "";
   sort: LeadSort;
   page: number;
   size: PageSize;
@@ -60,6 +64,7 @@ export const DEFAULT_STATE: LeadsUrlState = {
   minScore: null,
   product: "",
   source: "",
+  buyer: "",
   sort: "latest",
   page: 1,
   size: DEFAULT_PAGE_SIZE,
@@ -80,6 +85,7 @@ const PARAM: Record<keyof LeadsUrlState, string> = {
   minScore: "min",
   product: "product",
   source: "source",
+  buyer: "buyer",
   sort: "sort",
   size: "size",
   page: "page",
@@ -124,6 +130,7 @@ export function parseLeadsState(source: ParamSource): LeadsUrlState {
     minScore: Number.isFinite(min) && min > 0 ? Math.min(min, 100) : null,
     product: get("product").slice(0, 100),
     source: oneOf(get("source"), ["live", "sample"] as const, ""),
+    buyer: oneOf(get("buyer"), BUYER_TYPES, ""),
     sort: (oneOf(get("sort"), SORTS, DEFAULT_STATE.sort) || DEFAULT_STATE.sort) as LeadSort,
     page: Number.isFinite(page) && page > 1 ? Math.min(page, 10_000) : 1,
     size: (PAGE_SIZES as readonly number[]).includes(size) ? (size as PageSize) : DEFAULT_PAGE_SIZE,
@@ -145,7 +152,7 @@ export function serializeLeadsState(state: Partial<LeadsUrlState>): URLSearchPar
 
 /** Keys that are filters (a change returns to page 1; they show as chips). */
 export const FILTER_KEYS = [
-  "q", "category", "market", "kind", "stage", "status", "added", "confidence", "minScore", "product", "source", "run",
+  "q", "category", "market", "kind", "stage", "status", "added", "confidence", "minScore", "product", "source", "buyer", "run",
 ] as const satisfies readonly (keyof LeadsUrlState)[];
 export type FilterKey = (typeof FILTER_KEYS)[number];
 
@@ -185,6 +192,7 @@ export function toLeadFilter(state: LeadsUrlState): LeadFilter {
     minScore: state.minScore ?? undefined,
     productId: state.product || undefined,
     source: state.source || undefined,
+    buyerType: state.buyer || undefined,
     runId: state.run || undefined,
     sort: state.sort,
     limit: state.size,

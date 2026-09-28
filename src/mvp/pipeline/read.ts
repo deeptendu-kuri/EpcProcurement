@@ -313,16 +313,53 @@ export async function robotsAllowed(url: string): Promise<boolean> {
 
 // ───────────────────────── main text ─────────────────────────
 
-/** Main text of an HTML page (Readability, then plain body text as fallback). */
-export async function htmlToText(html: string, url: string): Promise<{ title: string | null; text: string }> {
+/** ISO timestamp from a date string, or null when it doesn't parse (or is in the future). */
+function isoOrNull(value: string | null | undefined, now = Date.now()): string | null {
+  if (!value) return null;
+  const time = Date.parse(value.trim());
+  if (!Number.isFinite(time) || time > now + 36 * 3_600_000 || time < Date.UTC(1995, 0, 1)) return null;
+  return new Date(time).toISOString();
+}
+
+/**
+ * The article's own publication date from its HTML: meta article:published_time / og / Dublin Core /
+ * itemprop, JSON-LD datePublished, or the first <time datetime>. Feed dates (Bing, RSS) are only the
+ * date a feed saw the page, so this date wins over them (13 §11). Exported for tests.
+ */
+export function pagePublishedAt(doc: Document): string | null {
+  const metaNames = [
+    'meta[property="article:published_time"]',
+    'meta[name="article:published_time"]',
+    'meta[property="og:published_time"]',
+    'meta[name="publish-date"]',
+    'meta[name="pubdate"]',
+    'meta[name="date"]',
+    'meta[name="DC.date.issued"]',
+    'meta[itemprop="datePublished"]',
+  ];
+  for (const selector of metaNames) {
+    const found = isoOrNull(doc.querySelector(selector)?.getAttribute("content"));
+    if (found) return found;
+  }
+  for (const script of doc.querySelectorAll('script[type="application/ld+json"]')) {
+    const match = script.textContent?.match(/"datePublished"\s*:\s*"([^"]+)"/);
+    const found = isoOrNull(match?.[1]);
+    if (found) return found;
+  }
+  return isoOrNull(doc.querySelector("time[datetime]")?.getAttribute("datetime"));
+}
+
+/** Main text of an HTML page (Readability, then plain body text as fallback) and its publication date. */
+export async function htmlToText(html: string, url: string): Promise<{ title: string | null; text: string; publishedAt: string | null }> {
   const [{ JSDOM }, { Readability }] = await Promise.all([import("jsdom"), import("@mozilla/readability")]);
   const dom = new JSDOM(html, { url });
   try {
     const doc = dom.window.document;
     const pageTitle = doc.title || null;
+    const publishedAt = pagePublishedAt(doc);
     const article = new Readability(doc.cloneNode(true) as Document).parse();
     const text = article?.textContent?.trim() ? article.textContent : (doc.body?.textContent ?? "");
-    return { title: article?.title || pageTitle, text: cleanText(text) };
+    return { title: article?.title || pageTitle, text: cleanText(text), publishedAt };
   } finally {
     dom.window.close();
   }
@@ -345,7 +382,7 @@ export function stripHtml(html: string): string {
 }
 
 export type FetchOutcome =
-  | { ok: true; title: string | null; text: string }
+  | { ok: true; title: string | null; text: string; /** The page's own publication date, when it states one. */ publishedAt?: string | null }
   | { ok: false; reason: "robots" | "pdf" | "http" | "timeout" | "empty" | "error"; detail?: string };
 
 /** Thrown by fetchPageText's redirect hook when robots.txt disallows a redirect target. */
@@ -380,9 +417,9 @@ export async function fetchPageText(url: string): Promise<FetchOutcome> {
     const type = res.contentType;
     if (/pdf/i.test(type)) return { ok: false, reason: "pdf", detail: "PDFs are skipped in the slice" };
     if (type && !/html|xml|text/i.test(type)) return { ok: false, reason: "error", detail: `unsupported content-type ${type}` };
-    const { title, text } = await htmlToText(res.text.slice(0, 2_000_000), res.url || url);
+    const { title, text, publishedAt } = await htmlToText(res.text.slice(0, 2_000_000), res.url || url);
     if (text.length < 200) return { ok: false, reason: "empty", detail: "too little text" };
-    return { ok: true, title, text: text.slice(0, MAX_TEXT_CHARS) };
+    return { ok: true, title, text: text.slice(0, MAX_TEXT_CHARS), publishedAt };
   } catch (error) {
     if (error instanceof RobotsDisallowedError) return { ok: false, reason: "robots", detail: error.message };
     if (error instanceof BlockedUrlError) return { ok: false, reason: "error", detail: error.message };

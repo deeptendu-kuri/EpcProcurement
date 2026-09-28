@@ -69,6 +69,33 @@ export function EvidenceButton({ ids, label = "Show source" }: { ids: (string | 
   );
 }
 
+/** Split a sentence around the quote (first case-insensitive match). Exported for tests. */
+export function splitAroundQuote(sentence: string, quote: string): [string, string, string] | null {
+  const at = sentence.toLowerCase().indexOf(quote.trim().toLowerCase());
+  if (at < 0) return null;
+  const end = at + quote.trim().length;
+  return [sentence.slice(0, at), sentence.slice(at, end), sentence.slice(end)];
+}
+
+/** The full sentence from the source with the quoted part highlighted (the quote alone when no sentence is stored). */
+function QuoteInSentence({ quote, sentence }: { quote: string; sentence?: string | null }) {
+  const parts = sentence && sentence.trim().length > quote.trim().length ? splitAroundQuote(sentence, quote) : null;
+  const mark = (text: string) => <mark className="rounded bg-[#fef0c7] px-0.5 text-[#101828]">{text}</mark>;
+  return (
+    <blockquote className="text-sm leading-6 text-[#101828]">
+      “{parts ? (
+        <>
+          <span className="text-[#475467]">{parts[0]}</span>
+          {mark(parts[1])}
+          <span className="text-[#475467]">{parts[2]}</span>
+        </>
+      ) : (
+        mark(quote)
+      )}”
+    </blockquote>
+  );
+}
+
 /** Side panel with the highlighted quote, source name, tier, date, verified flag and link (09 §4.3). */
 export function EvidencePanel({ items, title, onClose }: { items: EvidenceView[]; title?: string; onClose: () => void }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -101,9 +128,7 @@ export function EvidencePanel({ items, title, onClose }: { items: EvidenceView[]
         <ul className="flex flex-col gap-4 p-4">
           {items.map((item) => (
             <li key={item.id} className="rounded-lg border border-[#e1e6ef] p-3">
-              <blockquote className="text-sm leading-6 text-[#101828]">
-                “<mark className="rounded bg-[#fef0c7] px-0.5 text-[#101828]">{item.quote}</mark>”
-              </blockquote>
+              <QuoteInSentence quote={item.quote} sentence={item.sentence} />
               <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
                 <dt className="font-semibold text-[#667085]">Source</dt>
                 <dd className="text-[#344054]">{item.sourceName ?? item.publisher_key}{item.documentTitle ? ` · ${item.documentTitle}` : ""}</dd>

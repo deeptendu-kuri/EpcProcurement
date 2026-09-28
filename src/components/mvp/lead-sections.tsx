@@ -5,6 +5,7 @@ import { marketName } from "@/mvp/config/markets";
 import type {
   CheckStatus,
   ChecklistItem,
+  CompanyContactView,
   CompanyInsights,
   FactEntityType,
   FactEvidenceRow,
@@ -42,6 +43,19 @@ export function factIds(facts: FactEvidenceRow[], type: FactEntityType, id: stri
   return facts
     .filter((fact) => fact.entity_type === type && fact.entity_id === id && (!fields || fact.field === "*" || fields.includes(fact.field)))
     .map((fact) => fact.evidence_id);
+}
+
+/** "Jubail, Eastern Province, Saudi Arabia" without repeats ("Saudi Arabia, Saudi Arabia"). Exported for tests. */
+export function locationLabel(...parts: (string | null | undefined)[]): string {
+  const out: string[] = [];
+  for (const part of parts) {
+    const value = part?.trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (out.some((existing) => existing.toLowerCase() === key || existing.toLowerCase().includes(key) || key.includes(existing.toLowerCase()))) continue;
+    out.push(value);
+  }
+  return out.join(", ");
 }
 
 // ───────────────────────── rejected banner ─────────────────────────
@@ -127,7 +141,7 @@ export function ProjectSection({ detail }: { detail: LeadDetail }) {
       </Section>
     );
   }
-  const location = [project.site, project.region, project.country ? marketName(project.country) : null].filter(Boolean).join(", ");
+  const location = locationLabel(project.site, project.region, project.country ? marketName(project.country) : null);
   const value = formatMoney(project.estimated_value, project.currency);
   const valueUsd = project.value_usd && project.currency?.toUpperCase() !== "USD" ? formatMoney(project.value_usd, "USD") : "";
 
@@ -378,8 +392,10 @@ function PersonLine({ person, outreach, facts }: { person: PersonView; outreach?
 
 export function PeopleSection({ detail }: { detail: LeadDetail }) {
   const outreach = new Map(detail.compliance.outreach.map((item) => [item.personId, item]));
+  const companies = detail.companies ?? [];
   return (
-    <Section id="people" title="People" aside={detail.people.length ? `${detail.people.length} found` : undefined}>
+    <Section id="people" title="People and contacts" aside={detail.people.length ? `${detail.people.length} named in sources` : undefined}>
+      <h3 className="text-xs font-bold uppercase tracking-wide text-[#667085]">Named in the sources</h3>
       {detail.people.length ? (
         <ul className="divide-y divide-[#f2f4f7]">
           {detail.people.map((person) => (
@@ -387,9 +403,52 @@ export function PeopleSection({ detail }: { detail: LeadDetail }) {
           ))}
         </ul>
       ) : (
-        <NotFound text="No contacts found yet." />
+        <p className="py-2"><NotFound text="No people named in the sources yet." /></p>
       )}
+      {companies.length ? (
+        <div className="mt-4">
+          <h3 className="text-xs font-bold uppercase tracking-wide text-[#667085]">Find contacts</h3>
+          <p className="mt-0.5 text-xs text-[#667085]">Links open a web search in a new tab — verify every contact before use.</p>
+          <ul className="mt-2 grid gap-2 md:grid-cols-2">
+            {companies.map((company) => (
+              <CompanyContactCard key={company.companyId} company={company} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </Section>
+  );
+}
+
+/** One company on the lead: its roles, website, contact searches and the email rule for its country. */
+function CompanyContactCard({ company }: { company: CompanyContactView }) {
+  const emailRule = company.rule.companyEmail ?? company.rule.email;
+  const blocked = emailRule === "consent_needed" || emailRule === "blocked";
+  return (
+    <li className="rounded-lg border border-[#e4e7ec] p-3">
+      <p className="font-semibold text-[#101828]">{company.name}</p>
+      <p className="mt-0.5 flex flex-wrap gap-1">
+        {company.roles.map((role) => (
+          <span key={role} className="rounded bg-[#f2f4f7] px-1.5 py-0.5 text-xs font-semibold text-[#344054]">{role}</span>
+        ))}
+        {company.country ? <span className="rounded px-1.5 py-0.5 text-xs text-[#667085]">{marketName(company.country)}</span> : null}
+      </p>
+      <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+        {company.website ? (
+          <a href={company.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[#1d4ed8] hover:underline">
+            Website <ExternalLink size={11} aria-hidden />
+          </a>
+        ) : null}
+        {company.searches.map((search) => (
+          <a key={search.label} href={search.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold text-[#1d4ed8] hover:underline">
+            {search.label} <ExternalLink size={11} aria-hidden />
+          </a>
+        ))}
+      </p>
+      <p className={`mt-2 text-xs ${blocked ? "text-[#b54708]" : "text-[#667085]"}`} title={company.rule.steps.join(" ")}>
+        Company email: {PERMISSION_LABELS[emailRule]}{company.rule.steps[0] ? ` — ${company.rule.steps[0]}` : ""}
+      </p>
+    </li>
   );
 }
 

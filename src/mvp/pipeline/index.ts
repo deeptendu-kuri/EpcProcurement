@@ -235,11 +235,14 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     const stored = await mapLimit(raws, READ_CONCURRENCY, async (raw) => {
       let text = raw.text;
       let title = raw.title;
+      // The article's own date wins over the feed's (a feed may re-surface an old story).
+      let publishedAt = raw.publishedAt;
       if (!text) {
         const fetched = await fetchPageText(raw.url);
         if (fetched.ok) {
           text = fetched.text;
           title = title ?? fetched.title;
+          publishedAt = fetched.publishedAt ?? publishedAt;
         } else if (raw.fallbackText) {
           text = raw.fallbackText;
         } else {
@@ -248,11 +251,11 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
         }
       }
       try {
-        const doc = await storeDocument(db, runId, { ...raw, title, text, publisherKey: raw.publisherKey ?? publisherKeyFor(raw.url) });
+        const doc = await storeDocument(db, runId, { ...raw, title, text, publishedAt, publisherKey: raw.publisherKey ?? publisherKeyFor(raw.url) });
         progress.counters.itemsRead++;
         if (doc.state === "known") known++;
         if (progress.counters.itemsRead % 5 === 0) await progress.emit("read", `Read ${progress.counters.itemsRead} items`);
-        return { stored: doc, raw: { ...raw, title, text } };
+        return { stored: doc, raw: { ...raw, title, text, publishedAt } };
       } catch (error) {
         unreadable++;
         console.error("[pipeline] store failed", raw.url, error);
@@ -313,7 +316,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     for (const item of relevant) {
       try {
         const extracted = await extractDocument(
-          { text: item.stored.text, url: item.raw.url, structured: item.raw.structured },
+          { text: item.stored.text, url: item.raw.url, structured: item.raw.structured, publishedAt: item.raw.publishedAt },
           { db, runId, onNote: (message) => progress.emit("info", message), rulesOnly: offline },
         );
         progress.counters.factsKept += extracted.stats.kept;

@@ -285,14 +285,14 @@ export function displayCompanyName(name: string): string {
 }
 
 /** Well-known companies written several ways in the press; each group counts as one company. */
-const KNOWN_ALIAS_GROUPS: { key: string; country: string | null; names: string[] }[] = [
-  { key: "aramco", country: "SA", names: ["saudi aramco", "aramco", "saudi arabian oil", "saudi arabian oil company"] },
-  { key: "adnoc", country: "AE", names: ["adnoc", "abu dhabi national oil", "abu dhabi national oil company"] },
-  { key: "petronas", country: "MY", names: ["petronas", "petroliam nasional", "petroliam nasional berhad"] },
-  { key: "qatarenergy", country: null, names: ["qatarenergy", "qatar energy", "qatar petroleum"] },
-  { key: "ongc", country: "IN", names: ["ongc", "oil and natural gas corporation", "oil and natural gas"] },
-  { key: "iocl", country: "IN", names: ["iocl", "indian oil", "indian oil corporation"] },
-  { key: "equinor", country: "NO", names: ["equinor", "statoil"] },
+const KNOWN_ALIAS_GROUPS: { key: string; short: string; country: string | null; names: string[] }[] = [
+  { key: "aramco", short: "Aramco", country: "SA", names: ["saudi aramco", "aramco", "saudi arabian oil", "saudi arabian oil company"] },
+  { key: "adnoc", short: "ADNOC", country: "AE", names: ["adnoc", "abu dhabi national oil", "abu dhabi national oil company"] },
+  { key: "petronas", short: "PETRONAS", country: "MY", names: ["petronas", "petroliam nasional", "petroliam nasional berhad"] },
+  { key: "qatarenergy", short: "QatarEnergy", country: null, names: ["qatarenergy", "qatar energy", "qatar petroleum"] },
+  { key: "ongc", short: "ONGC", country: "IN", names: ["ongc", "oil and natural gas corporation", "oil and natural gas"] },
+  { key: "iocl", short: "IndianOil", country: "IN", names: ["iocl", "indian oil", "indian oil corporation"] },
+  { key: "equinor", short: "Equinor", country: "NO", names: ["equinor", "statoil"] },
 ];
 const KNOWN_BY_NAME = new Map(KNOWN_ALIAS_GROUPS.flatMap((g) => g.names.map((n) => [normalizeCompanyName(n), g] as const)));
 
@@ -320,4 +320,105 @@ export function companyKeys(name: string): { keys: string[]; hasAlias: boolean }
   const known = knownCompany(name);
   if (known) keys.add(`known:${known.key}`);
   return { keys: [...keys], hasAlias: aliases.length > 0 || known !== null };
+}
+
+/**
+ * Short name for labels ("Saudi Arabian Oil Co. (Saudi Aramco)" → "Aramco", "East Pipes Integrated
+ * Company for Industry (EPIC)" → "EPIC"): a well-known group's short name, else a short alias, else the
+ * main name without a trailing legal suffix.
+ */
+export function shortCompanyName(name: string): string {
+  const { main, aliases } = companyNameParts(name);
+  for (const part of [main, ...aliases]) {
+    const group = KNOWN_BY_NAME.get(normalizeCompanyName(part));
+    if (group) return group.short;
+  }
+  const alias = aliases.find((a) => a.length <= 16);
+  if (alias) return alias;
+  return main.replace(/,?\s+(?:Co\.?|Company|Ltd\.?|Limited|LLC|Inc\.?|Corp\.?|Corporation|PJSC|Pvt\.? Ltd\.?|Bhd\.?|ASA|Sdn\.? Bhd\.?)$/i, "").trim() || main;
+}
+
+/** "Sep 2026" for an ISO date (or null). */
+export function monthYear(iso: string | null | undefined): string | null {
+  const m = iso?.match(/^(\d{4})-(\d{2})/);
+  if (!m) return null;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const month = months[Number(m[2]) - 1];
+  return month ? `${month} ${m[1]}` : null;
+}
+
+/** Words that end with a dot but do not end a sentence ("Co.", "Ltd.", "Rs."). */
+const NON_TERMINAL = new Set([
+  "co", "ltd", "inc", "corp", "rs", "no", "mr", "mrs", "ms", "dr", "st", "jr", "sr", "vs", "approx", "dept", "govt", "pvt", "bhd", "plc",
+  "sdn", "u.s", "u.k", "e.g", "i.e", "etc", "mn", "bn", "cr", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+]);
+
+function isSentenceEnd(text: string, dotIndex: number): boolean {
+  const ch = text[dotIndex];
+  if (ch === "!" || ch === "?") return true;
+  if (ch !== ".") return false;
+  const next = text[dotIndex + 1];
+  if (next !== undefined && !/\s/.test(next)) return false; // "5.5", "a.m."
+  const word = text.slice(Math.max(0, dotIndex - 8), dotIndex).match(/([\p{L}.]+)$/u)?.[1]?.toLowerCase().replace(/^\./, "");
+  if (word && NON_TERMINAL.has(word)) return false;
+  if (word && word.length === 1) return false; // initials ("A. Khan")
+  return true;
+}
+
+/**
+ * The full sentence of `text` around [start, end) (a verified quote), trimmed; at most `max` chars
+ * (longer sentences are cut at word boundaries around the quote). Never shorter than the quote.
+ */
+export function sentenceAround(text: string, start: number, end: number, max = 420): { sentence: string; start: number; end: number } {
+  let from = start;
+  while (from > 0) {
+    const ch = text[from - 1];
+    if (ch === "\n") break;
+    if (from >= 2 && /\s/.test(ch) && isSentenceEnd(text, from - 2)) break;
+    from--;
+  }
+  let to = end;
+  while (to < text.length) {
+    const ch = text[to];
+    if (ch === "\n") break;
+    if (isSentenceEnd(text, to)) {
+      to++;
+      break;
+    }
+    to++;
+  }
+  // Skip leading spaces, closing quotes of the previous sentence.
+  while (from < start && /[\s"'”’)]/.test(text[from])) from++;
+  while (to > end && /\s/.test(text[to - 1])) to--;
+  if (to - from > max) {
+    const room = Math.max(0, max - (end - start));
+    let a = Math.max(from, start - Math.floor(room / 2));
+    let b = Math.min(to, end + Math.ceil(room / 2));
+    if (a > from) a = Math.min(start, text.indexOf(" ", a) + 1 || a);
+    if (b < to) b = Math.max(end, text.lastIndexOf(" ", b) > end ? text.lastIndexOf(" ", b) : b);
+    from = a;
+    to = b;
+  }
+  return { sentence: text.slice(from, to).trim(), start: from, end: to };
+}
+
+/** Word count of a quote. */
+export function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** True when `sentence` names the company (its main name, an alias or its first distinctive words). */
+export function mentionsCompany(sentence: string, name: string): boolean {
+  const hay = normaliseForMatch(sentence);
+  const { main, aliases } = companyNameParts(name);
+  const parts = [main, ...aliases].map((p) => normaliseForMatch(p)).filter((p) => p.length >= 2);
+  if (parts.some((p) => hay.includes(p))) return true;
+  const firstWords = normaliseForMatch(main).split(" ").filter((w) => w.length >= 3 && !SUFFIX_SET.has(w)).slice(0, 2).join(" ");
+  if (firstWords.length >= 4 && hay.includes(firstWords)) return true;
+  const known = knownCompany(name);
+  if (known) {
+    const group = KNOWN_ALIAS_GROUPS.find((g) => g.key === known.key);
+    if (group?.names.some((n) => hay.includes(n))) return true;
+  }
+  return false;
 }

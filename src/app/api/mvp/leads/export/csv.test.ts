@@ -21,7 +21,7 @@ describe("leads CSV", () => {
     const csv = leadsToCsv([lead], { l1: ["https://a.example/1", "https://b.example/2"] });
     const [header, row] = csv.replace(/^﻿/, "").trim().split("\r\n");
     expect(header.split(",")).toContain("Evidence URLs");
-    expect(row).toContain("Genuine,80,High,Bid,Valves,Example Water Authority,Oman,Line 3,Oman");
+    expect(row).toContain("Genuine,80,High,Bid,Valves,Example Water Authority,,Oman,Line 3,Oman");
     expect(row).toContain("Tender open | Closes 18 Oct");
     expect(row).toContain("https://a.example/1 https://b.example/2");
   });

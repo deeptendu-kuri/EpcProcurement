@@ -131,7 +131,24 @@ export function isParentMention(sentence: string, parent: string): boolean {
   const UNIT = String.raw`(?:unit|units|arm|associate|associate company|subsidiary|subsidiaries|affiliate|group company|JV|joint venture)`;
   const after = new RegExp(String.raw`${name}(?:['’]s)?(?:\s+[\p{L}\p{N}-]+){0,3}?\s+${UNIT}\b`, "iu");
   const before = new RegExp(String.raw`\b${UNIT}\s+(?:company\s+)?of\s+(?:the\s+)?${name}`, "iu");
-  return after.test(sentence) || before.test(sentence);
+  // "Welspun Corp says EPIC bags …": a listed parent reporting another company's win (not "X says it …").
+  const reporter = new RegExp(String.raw`^\W*${name}\s+(?:[Ss]ays|[Ss]aid|[Ii]nforms|[Aa]nnounces|[Aa]nnounced)\s+(?!It\b|Its\b|The [Cc]ompany\b|That [Ii]t\b)[\p{Lu}"“]`, "u");
+  return after.test(sentence) || before.test(sentence) || reporter.test(sentence);
+}
+
+/**
+ * True when the article presents `parent` as the parent of the awardee anywhere near its start: a parent
+ * sentence (isParentMention), or a stock story ("Shares of Welspun Corp rose … after its associate EPIC
+ * bagged …"), where the company whose shares moved is the parent of "its associate/unit".
+ */
+export function isParentInDoc(text: string, parent: string): boolean {
+  const head = text.slice(0, 1500);
+  if (splitSentences(head).some((s) => isParentMention(s, parent))) return true;
+  const name = escapeRe(parent.trim());
+  if (!name) return false;
+  const hasUnit = /\b(?:its|their)\s+(?:[\p{L}-]+\s+){0,2}(?:associate|subsidiary|unit|arm|affiliate)\b/iu.test(head);
+  const stock = new RegExp(String.raw`(?:shares?\s+of|stock\s+of)\s+${name}|${name}(?:['’]s)?\s+(?:shares|stock)\b`, "iu");
+  return hasUnit && stock.test(head);
 }
 
 // ───────────────────────── P1 ─────────────────────────

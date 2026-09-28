@@ -395,6 +395,10 @@ export interface ScoreBreakdown {
   unknown: string[];
 }
 
+/** Who the lead is about (13 §11): an EPC contractor, a subcontractor, a supplier that won an order, or a project owner. */
+export const BUYER_TYPES = ["epc_contractor", "subcontractor", "supplier", "owner"] as const;
+export type BuyerType = (typeof BUYER_TYPES)[number];
+
 export interface LeadRow {
   id: string;
   kind: LeadKind;
@@ -421,6 +425,8 @@ export interface LeadRow {
   run_id: string | null;
   created_at: string;
   updated_at: string | null;
+  /** Migration 003; null on leads scored before it. */
+  buyer_type?: BuyerType | null;
 }
 
 export interface LeadScoreHistoryRow {
@@ -617,6 +623,8 @@ export interface LeadFilter {
   source?: LeadSource;
   /** Only these statuses (overrides `status`; used by the pipeline board). */
   statuses?: LeadStatus[];
+  /** EPC contractor, subcontractor, supplier or owner. */
+  buyerType?: BuyerType;
   /** Default "latest". */
   sort?: LeadSort;
 }
@@ -646,6 +654,8 @@ export interface LeadListItem {
   stage?: ProjectStage | null;
   /** The lead's next step (added for the pipeline board). */
   nextAction?: string | null;
+  /** EPC contractor, subcontractor, supplier or owner (null on old leads). */
+  buyerType?: BuyerType | null;
 }
 
 export interface LeadListResult {
@@ -665,6 +675,8 @@ export interface EvidenceView extends EvidenceRow {
   documentTitle: string | null;
   publishedAt: string | null;
   isSample: boolean;
+  /** The full sentence of the document that contains the quote (null when the document text is gone). */
+  sentence?: string | null;
 }
 
 export interface PartyView extends ProjectPartyRow {
@@ -679,6 +691,21 @@ export interface PackageView extends PackageRow {
 export interface PersonView extends PersonRow {
   companyName: string | null;
   roles: PersonRoleRow[];
+}
+
+/** A company on the lead (buyer, owner, EPC, subcontractor, supplier) with ways to find its contacts (13 §11). */
+export interface CompanyContactView {
+  companyId: string;
+  name: string;
+  country: string | null;
+  /** Plain roles on this lead: "Buyer", "Owner", "EPC contractor", "Subcontractor", "Supplier". */
+  roles: string[];
+  /** Company website when known (companies.domain). */
+  website: string | null;
+  /** Web searches that open in a new tab (never scraped): label + url. */
+  searches: { label: string; url: string }[];
+  /** Outreach rule for the company's country (email to a company address). */
+  rule: OutreachRule;
 }
 
 export interface LeadDetail {
@@ -710,6 +737,8 @@ export interface LeadDetail {
   activities: ActivityRow[];
   drafts: OutreachDraftRow[];
   scoreHistory: LeadScoreHistoryRow[];
+  /** Companies on the lead with "Find contacts" research links (buyer first). */
+  companies?: CompanyContactView[];
 }
 
 // ═════════════════════════ LLM ═════════════════════════
@@ -738,6 +767,7 @@ export interface LeadFacets {
   confidence: FacetOption[];
   product: FacetOption[];
   source: FacetOption[];
+  buyerType: FacetOption[];
 }
 
 export type RefreshHours = 6 | 12 | 24;

@@ -11,6 +11,15 @@ Owner of: how facts become signals, how signals become leads, the exact gates, c
 
 A **candidate lead** is the combination *(kind, buyer company, project, package)*, plus the client products that match that package's requirements.
 
+**Buyer type** (13 §11). Every lead is labelled with who the buyer is: `epc_contractor`, `subcontractor`, `supplier` or `owner`. The label never changes the gates or the score.
+
+- **Suppliers are buyers too.** A manufacturer or distributor that wins a supply order ("EPIC bags a SAR 771M Aramco steel-pipe order") needs inputs and services to deliver it. It gets a supply lead on the order itself (no package; the order's packages belong to its buyer). The first reason reads "Won a SAR 771M Aramco steel pipe order (Sep 2026) — suppliers buy inputs and services now". The owner → supplier edge stays in the buyer history (`supplied_by`).
+- **Supply orders vs EPC awards.** The award sentence decides the type. A pipe, tube, valve or steel maker in a story whose headline is a supply order is a supplier, even if its own sentence only says "entered into a contract".
+- **Owner ordered materials, EPC unknown.** When the owner placed the order and no EPC contractor is known on the project, the owner's supply lead is capped at **Watching**. Its first reason and research task is "Identify the EPC contractor".
+- **Orders stay separate.** Two orders of the same buyer are two projects when their award dates are more than 30 days apart or their values differ by more than 10%. An order with no project name in the text is named "<Buyer> <product> order (<Mon YYYY>)".
+- **Proof is a sentence.** A relation fact (role, stage, value, date) is proven by the full sentence that contains it. A 1–4 word quote is widened to its sentence, and a role whose sentence does not name the company is dropped.
+- **Dates.** The award date is the date stated in the text, when it is not after the article's own publication date. Otherwise it is the article's own publication date (from the page, not the feed). "Procurement window open" is only claimed for an award under 18 months old.
+
 ## 2. Signals
 
 **Signal types** (enum in 04): capex_plan, project_announced, feed_awarded, permit_approved, prequalification_opened, tender_released, tender_closing_soon, bid_results_published, contract_awarded, subcontract_awarded, supply_order_announced, vendor_registration_opened, approved_vendor_listed, hiring_project_roles, import_shipment, engagement.
