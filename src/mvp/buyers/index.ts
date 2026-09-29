@@ -3,31 +3,46 @@
  * Server-only (reads the database). Types live in ./types (safe to import from client components).
  */
 import { getDb } from "@/mvp/db";
-import { allBuyerRecords, clearBuyerCache, CONFIRM_PREFIX, isUuid, loadBuyerRecords } from "./load";
+import { clearBuyerCache, CONFIRM_PREFIX, isUuid, loadBuyerRecords } from "./load";
+import { allSearchRecords, getBuyerPage } from "./chain-db";
 import { getLeadList } from "./lists";
 import { searchContactRecords, searchRecords } from "./search";
-import type { BuyerRow, BuyerSearch, BuyerSearchResult, BuyerView, ContactSearchResult, LeadList } from "./types";
+import { isDerivedLeadId, type BuyerRow, type BuyerSearch, type BuyerSearchResult, type BuyerView, type ContactSearchResult, type LeadList } from "./types";
 
 export * from "./types";
 export { addToLeadList, createLeadList, deleteLeadList, getLeadList, listLeadLists, removeFromLeadList, renameLeadList } from "./lists";
 export { buyerSearchSchema, parseBuyerSearch, searchFromUrl } from "./schema";
+export {
+  addContact,
+  allSearchRecords,
+  ChainError,
+  confirmPerson,
+  deleteManualContact,
+  deriveBuyer,
+  getChainContacts,
+  getSupplyChain,
+  removeNodeCompany,
+  setNodeCompany,
+} from "./chain-db";
 
-/** The buyer view of one lead (14 §9), or null when the lead doesn't exist. */
+/**
+ * The buyer view of one lead (14 §9, 15 §A–B): with all deals of the company and the supply-chain
+ * summary. Accepts `derived:<key>` ids of derived buyers too. Null when not found.
+ */
 export async function getBuyerView(leadId: string): Promise<BuyerView | null> {
-  if (!isUuid(leadId)) return null;
-  const [record] = await loadBuyerRecords({ leadIds: [leadId] });
-  return record?.view ?? null;
+  if (!isUuid(leadId) && !isDerivedLeadId(leadId)) return null;
+  return getBuyerPage(leadId);
 }
 
 /** SuperSearch buyers: `{ rows, total, facets, contactsFound, contactsTotal, page, pageSize }`. */
 export async function searchBuyers(search: BuyerSearch = {}): Promise<BuyerSearchResult> {
-  const records = await allBuyerRecords();
+  const records = await allSearchRecords();
   return searchRecords(records, search, new Date());
 }
 
 /** SuperSearch contacts: one row per buying-team slot (a named person or an empty slot with Find links). */
 export async function searchContacts(search: BuyerSearch = {}): Promise<ContactSearchResult> {
-  const records = await allBuyerRecords();
+  const records = await allSearchRecords();
   return searchContactRecords(records, search, new Date());
 }
 

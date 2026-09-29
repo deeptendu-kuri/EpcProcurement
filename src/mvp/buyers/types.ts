@@ -30,13 +30,40 @@ export interface BuyerView {
   reach: { country: string | null; email: 'allowed' | 'opt_out_only' | 'consent_needed' | 'blocked'; summary: string };
   proof: ProofItem[];
   status: string; isSample: boolean; updatedAt: string;
+  // ---- doc 15 (buyer-first page + supply chain) ----
+  /** Plain-words sub-role, e.g. "Pipeline builder", "Pipe maker", "Stockist". Never "EPC"/"owner". */
+  whatTheyDo: string;
+  /** Supply-chain tier of this buyer relative to how it was found (1 = won the work). */
+  tier: ChainTier;
+  /** For derived / tier 2-3 buyers: the tier-1 deal that surfaced them. */
+  foundVia: { leadId: string; name: string } | null;
+  /** All deals of this company (same company after name merging), strongest first. */
+  deals: BuyerDeal[];
+  chainSummary: { tier2: number; tier3: number; peopleTotal: number; peopleFound: number };
 }
 export interface BuyerRow { /* list row: subset of BuyerView */
   leadId: string; name: string; subRoleLabel: string | null; role: BuyerRole; roleLabel: string;
   buyingReason: string; sellSummary: string; competitorNote: string | null;
   country: string | null; fitScore: number; howSure: 'high' | 'medium' | 'low'; stage: BuyerStage;
   found: number; total: number; isSample: boolean; triggerDate: string | null;
+  // ---- doc 15 ----
+  whatTheyDo: string;
+  tier: ChainTier;
+  foundVia: { leadId: string; name: string } | null;
+  /** Number of deals for this company (row shows the strongest; "+N more deals" = dealsCount - 1). */
+  dealsCount: number;
+  /** Derived rows (tier 2/3 companies with no stored lead): stable key used by POST /api/mvp/buyers/derive. */
+  derivedKey: string | null;
+  /**
+   * Stored lead id, or null for derived rows. `leadId` above stays a string for existing UI code:
+   * for derived rows it is `derived:<derivedKey>` (use isDerivedLeadId / POST /api/mvp/buyers/derive).
+   */
+  storedLeadId: string | null;
+  /** How we know the chain link (derived / tier 2-3 rows); null for tier 1. */
+  link: ChainLinkStatus | null;
 }
+export const DERIVED_PREFIX = 'derived:';
+export function isDerivedLeadId(id: string): boolean { return id.startsWith(DERIVED_PREFIX); }
 export type BuyerSignal = 'order_won' | 'contract_won' | 'tender_open' | 'expansion';
 export interface BuyerSearch {
   location?: { any?: string[]; not?: string[]; basis?: 'hq' | 'site' };
@@ -49,7 +76,72 @@ export interface BuyerSearch {
   reach?: ('allowed' | 'opt_out_only' | 'consent_needed')[];
   stage?: BuyerStage[]; minFit?: number; howSure?: ('high' | 'medium' | 'low')[];
   q?: string; sort?: 'latest' | 'fit' | 'window'; page?: number; pageSize?: number;
+  /** doc 15 D: supply-chain tier filter. Absent = all tiers. */
+  tiers?: ChainTier[];
+  /** doc 15 D: "How we know" filter (tier 1 rows count as confirmed). */
+  linkStatus?: Exclude<ChainLinkStatus, 'not_identified'>[];
 }
+
+// ---- doc 15: supply-chain explorer ----
+
+export type ChainTier = 1 | 2 | 3;
+export type ChainLinkStatus = 'confirmed' | 'likely' | 'possible' | 'not_identified';
+export type ChainLinkSource = 'source' | 'history' | 'directory' | 'user';
+export interface ChainCandidate { companyId: string; name: string; country: string | null; why: string }
+export interface ChainNode {
+  /** Stable id within the tree, e.g. "t1", "t2:pipe_maker", "t3:pipe_maker:steel_mill". */
+  nodeId: string;
+  tier: ChainTier;
+  parentNodeId: string | null;
+  companyId: string | null;
+  /** Stored lead for this company, if any (tier 1 always has one). */
+  leadId: string | null;
+  /** Key for derived buyers (company identified, no lead). Null when not identified or a lead exists. */
+  derivedKey: string | null;
+  /** Company name when identified, else the supplier type label (e.g. "Valve maker"). */
+  name: string;
+  /** Plain words: "Pipe maker", "Stockist" … */
+  whatTheyDo: string;
+  /** What this node supplies to its parent, e.g. "line pipe". Empty for tier 1. */
+  supplies: string;
+  link: ChainLinkStatus;
+  linkWhy: string;
+  linkSource: ChainLinkSource | null;
+  evidenceIds: string[];
+  /** Items from the client's catalogue this node would buy (competitor items excluded). */
+  wouldBuy: SellItem[];
+  /** Catalogue item names this node competes on. */
+  competitorFor: string[];
+  found: number;
+  total: number;
+  candidates: ChainCandidate[];
+  /** True when the node has supplier types below it that are not included yet (tier 2 → tier 3). */
+  expandable: boolean;
+}
+export interface SupplyChain {
+  rootLeadId: string;
+  rootCompanyId: string;
+  nodes: ChainNode[];
+  peopleTotal: number;
+  peopleFound: number;
+}
+export interface ChainContactRow {
+  tier: ChainTier;
+  nodeId: string;
+  companyId: string | null;
+  companyName: string;
+  companyIdentified: boolean;
+  slotId: string;
+  role: SlotRole;
+  title: string;
+  why: string;
+  person: { id: string; name: string; title: string; email: string | null; phone: string | null; linkedinUrl: string | null; evidenceIds: string[] } | null;
+  status: 'not_found' | 'likely' | 'confirmed' | 'company_first';
+  findLinks: { label: string; url: string }[];
+}
+export interface BuyerDeal { leadId: string; title: string; date: string | null; valueUsd: number | null; sourceCount: number }
+export interface AddContactInput { companyId: string; slotId: string; name: string; title: string; email?: string; phone?: string; linkedinUrl?: string; notes?: string }
+
 
 // ---- Server function results (doc 14 §9 "Server functions") ----
 
@@ -63,6 +155,10 @@ export interface BuyerFacets {
   howSure: FacetCount[];
   reach: FacetCount[];
   industries: FacetCount[];
+  /** doc 15 D: supply-chain tier (1 won the work · 2 · 3). */
+  tiers?: FacetCount[];
+  /** doc 15 D: how we know (tier 1 counts as confirmed). */
+  linkStatus?: FacetCount[];
 }
 export interface BuyerSearchResult {
   rows: BuyerRow[];
@@ -86,6 +182,10 @@ export interface ContactRow {
   person: ContactSlot['person'];
   status: ContactSlot['status'];
   findLinks: ContactSlot['findLinks'];
+  /** doc 15: supply-chain tier of the company (1 = won the work). */
+  tier?: ChainTier;
+  /** doc 15: set for derived companies (no stored lead yet); `leadId` is then `derived:<key>`. */
+  derivedKey?: string | null;
 }
 export interface ContactSearchResult { rows: ContactRow[]; total: number; found: number; page: number; pageSize: number }
 
@@ -93,12 +193,13 @@ export interface LeadList { id: string; name: string; createdAt: string; updated
 export interface LeadListItem { listId: string; leadId: string; addedAt: string }
 
 export const BUYER_ROLE_LABELS: Record<BuyerRole, string> = {
-  owner: 'Project owner',
-  epc_contractor: 'EPC contractor',
-  subcontractor: 'Subcontractor',
-  manufacturer: 'Manufacturer',
+  // Plain words (docs/mvp/15 §A): never "EPC", "owner" or "main contractor".
+  owner: 'Client / tendering body',
+  epc_contractor: 'Builder',
+  subcontractor: 'Specialist contractor',
+  manufacturer: 'Maker',
   fabricator: 'Fabricator',
-  distributor: 'Distributor',
+  distributor: 'Stockist',
 };
 
 export const BUYER_STAGE_LABELS: Record<BuyerStage, string> = {

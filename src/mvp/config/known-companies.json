@@ -14,6 +14,7 @@
     { "names": ["Electrosteel Castings"], "role": "manufacturer", "subRole": "pipe_mill", "makes": ["di-pipe"], "parentGroup": null, "listed": "NSE", "country": "IN" },
     { "names": ["AVK", "AVK Holding"], "role": "manufacturer", "subRole": "valve_maker", "makes": ["butterfly-valves", "gate-globe-check"], "parentGroup": null, "listed": null, "country": null },
     { "names": ["Petrolvalves"], "role": "manufacturer", "subRole": "valve_maker", "makes": ["ball-valves", "gate-globe-check"], "parentGroup": null, "listed": null, "country": null },
-    { "names": ["Desco Infratech"], "role": "epc_contractor", "subRole": "pipeline", "makes": [], "parentGroup": null, "listed": null, "country": "IN" }
+    { "names": ["Desco Infratech"], "role": "epc_contractor", "subRole": "pipeline", "makes": [], "parentGroup": null, "listed": null, "country": "IN" },
+    { "names": ["Brødrene Dahl", "Brodrene Dahl", "Brødrene Dahl AS", "Brødrene Dahl A/S"], "role": "distributor", "subRole": null, "makes": [], "parentGroup": "Saint-Gobain", "listed": null, "country": "NO" }
   ]
 }

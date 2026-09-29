@@ -9,6 +9,7 @@ import {
   Gauge,
   Home,
   MapPin,
+  Network,
   PackageSearch,
   PanelLeftClose,
   Scale,
@@ -16,15 +17,19 @@ import {
   Shapes,
   Upload,
   UsersRound,
+  Waypoints,
   Zap,
 } from "lucide-react";
-import type { BuyerFacets, BuyerRole, BuyerSignal, BuyerStage, SlotRole } from "@/mvp/buyers/types";
+import type { BuyerFacets, BuyerRole, BuyerSignal, BuyerStage, ChainTier, SlotRole } from "@/mvp/buyers/types";
+
+const TIER_OPTION_LABELS: Record<ChainTier, string> = { 1: "Tier 1 · won the work", 2: "Tier 2 · supplies them", 3: "Tier 3 · supplies tier 2" };
 import {
   BUYER_ROLE_LABELS,
   BUYER_STAGE_LABELS,
   DEPARTMENTS,
   HOW_SURE_LABELS,
   INDUSTRIES,
+  LINK_LEGEND,
   REACH_LABELS,
   SIGNAL_LABELS,
   SLOT_ROLE_LABELS,
@@ -33,15 +38,18 @@ import { AnyNotChips, Chip, SubLabel, Switch, type ChipOption } from "./filter-c
 import {
   CATEGORY_PREFIX,
   HOW_SURE,
+  LINKS,
   REACH,
   ROLES,
   SIGNALS,
   SLOT_ROLES,
   STAGES,
+  TIERS,
   WITHIN_DAYS,
   activeFilterCount,
   type CatalogueOption,
   type HowSure,
+  type KnownLink,
   type Reach,
   type SearchUrlState,
 } from "./search-state";
@@ -274,6 +282,27 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
             not={state.roleNot}
             placeholder="Exclude a role…"
             onChange={({ any, not }) => onChange({ roleAny: any as BuyerRole[], roleNot: not as BuyerRole[] })}
+          />
+        </Group>
+
+        <Group icon={<Network size={15} />} title="Supply chain tier" defaultOpen active={state.tiers.length}>
+          <AnyNotChips
+            options={TIERS.map((tier) => ({ value: String(tier), label: TIER_OPTION_LABELS[tier] }))}
+            any={state.tiers.map(String)}
+            anyLabel={null}
+            showNot={false}
+            onChange={({ any }) => onChange({ tiers: any.map(Number).filter((tier): tier is ChainTier => tier === 1 || tier === 2 || tier === 3) })}
+          />
+        </Group>
+
+        <Group icon={<Waypoints size={15} />} title="How we know" active={state.links.length}>
+          <SubLabel>For tier 2 and 3 companies</SubLabel>
+          <AnyNotChips
+            options={LINKS.map((link) => ({ value: link, label: LINK_LEGEND[link] }))}
+            any={state.links}
+            anyLabel={null}
+            showNot={false}
+            onChange={({ any }) => onChange({ links: any as KnownLink[] })}
           />
         </Group>
 

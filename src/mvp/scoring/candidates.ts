@@ -17,6 +17,7 @@ import { BID_SIGNALS, SUPPLY_SIGNALS } from "./config";
 import type { Candidate } from "./context";
 import type { InsightsCache } from "./loader";
 import { getCompanyInsights } from "./graph";
+import { isConsultant } from "@/mvp/buyers/what-they-do";
 import { unique } from "./util";
 
 export function candidateKey(c: Pick<Candidate, "kind" | "buyerId" | "projectId" | "packageId">): string {
@@ -112,10 +113,28 @@ export async function buildCandidates(
     return supplierRoles.get(key)!;
   };
 
+  const clientCache = new Map<string, string | null>();
+  const tenderClientFor = async (companyId: string, projectId: string | null): Promise<string | null> => {
+    const key = `${companyId}|${projectId ?? ""}`;
+    if (!clientCache.has(key)) {
+      let client: string | null = null;
+      const { rows } = await db.query<{ canonical_name: string; types: string[] }>("select canonical_name, types from companies where id = $1", [companyId]);
+      if (rows[0] && isConsultant(rows[0].canonical_name, rows[0].types ?? []) && projectId) {
+        const owner = await db.query<{ owner_company_id: string | null }>("select owner_company_id from projects where id = $1", [projectId]);
+        const ownerId = owner.rows[0]?.owner_company_id ?? null;
+        if (ownerId && ownerId !== companyId) client = ownerId;
+      }
+      clientCache.set(key, client);
+    }
+    return clientCache.get(key) ?? null;
+  };
+
   for (const s of signals) {
     if (!s.company_id) continue;
     if (BID_SIGNALS.includes(s.type) && kinds.has("bid")) {
-      out.push({ kind: "bid", buyerId: s.company_id, projectId: s.project_id, packageId: s.package_id, signalIds: [s.id] });
+      // A tender issued by a consultant for a named client: the client is the buyer (15 §A4).
+      const buyerId = (await tenderClientFor(s.company_id, s.project_id)) ?? s.company_id;
+      out.push({ kind: "bid", buyerId, projectId: s.project_id, packageId: s.package_id, signalIds: [s.id] });
     }
     if (!SUPPLY_SIGNALS.includes(s.type) || !kinds.has("supply_subcontract")) continue;
 

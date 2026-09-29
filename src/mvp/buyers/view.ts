@@ -40,8 +40,13 @@ import {
   type Situation,
 } from "./roles";
 import { buildTeam, slotDefs, teamCounts, type TeamPerson } from "./team";
-import type { BuyerRole, BuyerRow, BuyerSignal, BuyerStage, BuyerView, ProofItem, SlotRole } from "./types";
+import type { BuyerDeal, BuyerRole, BuyerRow, BuyerSignal, BuyerStage, BuyerView, ChainTier, ProofItem, SlotRole } from "./types";
 import { whyYouFor, type WhyYouFacts } from "./why-you";
+import { CONSULTANT_REASON, isConsultant, plainWords, supplierTypeKeyFor, whatTheyDoLabel } from "./what-they-do";
+import { companyGroupKey } from "./group";
+import { isPlaceName } from "@/mvp/pipeline/merge";
+
+export const PLACE_NAME_REASON = "Place name, not a company";
 import { currentStep, windowSteps } from "./window";
 
 /** Evidence as the buyer view needs it: the quote, its full sentence and its source. */
@@ -62,7 +67,7 @@ export interface PartyWithName extends Pick<ProjectPartyRow, "id" | "company_id"
 export type LeadForView = Pick<
   LeadRow,
   "id" | "kind" | "buyer_company_id" | "class" | "status" | "score" | "confidence_band" | "reasons" | "closing_date" | "is_sample" | "created_at" | "updated_at" | "client_product_ids" | "tender_ref" | "project_id" | "package_id"
-> & { buyer_type?: string | null; signal_ids?: string[] };
+> & { buyer_type?: string | null; signal_ids?: string[]; chain_tier?: number | null; found_via_lead_id?: string | null };
 
 export interface BuyerInput {
   now: Date;
@@ -89,6 +94,8 @@ export interface BuyerInput {
   confirmedPersonIds: ReadonlySet<string>;
   /** Project stage event dates (awarded …) for the trigger date fallback. */
   awardedDate?: string | null;
+  /** Name of the tier-1 buyer a materialised derived lead was found via (15 §D). */
+  foundViaName?: string | null;
 }
 
 /** A built view plus the attributes search filters on. */
@@ -107,6 +114,19 @@ export interface BuyerRecord {
   leadStatus: string;
   /** True when the buyer competes on every item it would buy. */
   competitorForAll: boolean;
+  // ---- doc 15 ----
+  /** Supply-map type key of the buyer ("pipeline_builder", "pipe_maker" …). */
+  typeKey: string;
+  /** One row per company: records with the same key are grouped (15 §A3). */
+  groupKey: string;
+  projectId: string | null;
+  projectType: string | null;
+  /** True for a consultant (not a buyer, 15 §A4). */
+  consultant: boolean;
+  /** Evidence sources behind this deal. */
+  sourceCount: number;
+  /** For derived records (tier 2/3 companies without a lead). */
+  derived?: { key: string; rootLeadId: string; link: "confirmed" | "likely" | "possible" };
 }
 
 const STAGE_FROM_CLASS: Record<string, BuyerStage> = { genuine: "ready", research: "check", watch: "early", rejected: "not_buyer" };
@@ -324,7 +344,7 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
   } else if (signal === "tender_open") {
     const what = projectName ?? "a new tender";
     shortReason = `Tender open: ${what}${lead.closing_date ? ` · closes ${monthYearOf(lead.closing_date)}` : ""}`;
-    longReason = `${shortName} has an open tender for ${what}${lead.closing_date ? `, closing ${dayOnly(lead.closing_date)}` : ""}. The winning bidder, or the owner itself, buys the materials.`;
+    longReason = `${shortName} has an open tender for ${what}${lead.closing_date ? `, closing ${dayOnly(lead.closing_date)}` : ""}. The winning bidder, or ${shortName} itself, buys the materials.`;
     triggerPhrase = `the ${what} tender`;
   } else {
     const first = reasons.find((r) => !/^Needs research|^Rejected/i.test(r.text))?.text ?? leadSignals[0]?.summary ?? projectName ?? "a new project";
@@ -332,15 +352,26 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
     longReason = shortReason.endsWith(".") ? shortReason : `${shortReason}.`;
     triggerPhrase = projectName ? `the ${projectName}` : "this project";
   }
+  shortReason = plainWords(shortReason);
+  longReason = plainWords(longReason);
+  triggerPhrase = plainWords(triggerPhrase);
   const buyingReasonEvidenceIds = [...new Set([...leadSignals.flatMap((s) => s.evidence_ids ?? []), ...(reasons[0]?.evidenceIds ?? [])])].filter((id) => input.evidence[id]);
+
+  // ── what they do (15 §A) ──
+  const typeKey = supplierTypeKeyFor(role, situation, { ...situationFacts, name, types: buyer.types ?? [], sector: project?.sector ?? null });
+  const whatTheyDo = whatTheyDoLabel(typeKey, role === "owner" && openTender);
+  const consultant = isConsultant(name, buyer.types ?? []);
+  const placeName = isPlaceName(name);
 
   // ── headline (14 §1) ──
   const country = countryName(hq ?? siteCountry);
   const top = sellable.slice(0, 3).map((i) => shortItemName(i.itemId));
   const step = currentStep(window);
   const windowWords = (step?.from ? monthRange(step.from, step.to) : null) ?? "the coming months";
-  const who = `${shortName} (${roleLabel(role)}${country ? `, ${country}` : ""})`;
-  const headline = competitorForAll
+  const who = `${shortName} (${whatTheyDo}${country ? `, ${country}` : ""})`;
+  const headline = consultant
+    ? `${who} is not a buyer: ${CONSULTANT_REASON.toLowerCase()}.`
+    : competitorForAll
     ? `${who} is not a buyer: competitor for all your products.`
     : top.length
       ? `${who} will likely buy ${joinAnd(top)} in ${windowWords} for ${triggerPhrase}.${whyYou.length ? ` Why you: ${whyYou.slice(0, 2).map((w) => w.reason).join("; ")}.` : ""}`
@@ -359,16 +390,24 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
   }
   proof.sort((a, b) => Number(b.verified) - Number(a.verified) || (b.date ?? "").localeCompare(a.date ?? ""));
 
-  const stage: BuyerStage = competitorForAll ? "not_buyer" : stageFromClass(lead.class);
+  const stage: BuyerStage = competitorForAll || consultant || placeName ? "not_buyer" : stageFromClass(lead.class);
+  const tier = (lead.chain_tier === 2 || lead.chain_tier === 3 ? lead.chain_tier : 1) as ChainTier;
+  const foundVia = lead.found_via_lead_id ? { leadId: lead.found_via_lead_id, name: input.foundViaName ?? "another buyer" } : null;
+  const valueUsd = buyerParty?.value_usd ?? project?.value_usd ?? null;
+  const sourceCount = new Set(proof.map((p) => p.url ?? p.source)).size;
+  const deal: BuyerDeal = { leadId: lead.id, title: shortReason, date: triggerDate, valueUsd, sourceCount };
+  const reasonText = placeName ? `${PLACE_NAME_REASON}.` : consultant ? `${CONSULTANT_REASON}.` : competitorForAll ? `${longReason} Competitor for all your products.` : longReason;
   // The role label already says "· open tender" for an owner's open tender; the sub-role stays short.
-  const subRoleLabel = subRoleLabelFor(role, situation, name, project?.sector ?? null);
+  void subRoleLabelFor;
+  void roleLabel;
+  const subRoleLabel = whatTheyDo;
   const view: BuyerView = {
     leadId: lead.id,
     companyId: buyer.id,
     name,
     shortName,
     role,
-    roleLabel: role === "owner" && openTender ? "Project owner · open tender" : roleLabel(role),
+    roleLabel: whatTheyDo,
     subRoleLabel,
     country: hq,
     city: project?.site ?? null,
@@ -376,7 +415,7 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
     fitScore: Math.max(0, Math.min(100, Math.round(lead.score ?? 0))),
     howSure: lead.confidence_band ?? "low",
     headline,
-    buyingReason: competitorForAll ? `${longReason} Competitor for all your products.` : longReason,
+    buyingReason: reasonText,
     buyingReasonEvidenceIds,
     triggerDate,
     sellItems,
@@ -392,6 +431,11 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
     status: lead.status,
     isSample: lead.is_sample,
     updatedAt: lead.updated_at ?? lead.created_at,
+    whatTheyDo,
+    tier,
+    foundVia,
+    deals: [deal],
+    chainSummary: { tier2: 0, tier3: 0, peopleTotal: total, peopleFound: found },
   };
   const row: BuyerRow = {
     leadId: lead.id,
@@ -399,7 +443,7 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
     subRoleLabel: view.subRoleLabel,
     role,
     roleLabel: view.roleLabel,
-    buyingReason: competitorForAll ? "Competitor for all your products" : shortReason,
+    buyingReason: placeName ? PLACE_NAME_REASON : consultant ? CONSULTANT_REASON : competitorForAll ? "Competitor for all your products" : shortReason,
     sellSummary: role === "owner" && !openTender && !sellable.some((i) => i.fit === "good") ? "Get on their approved vendor list" : sellSummary(sellItems),
     competitorNote: competitorNote(sellItems, role),
     country: view.country,
@@ -410,6 +454,13 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
     total,
     isSample: lead.is_sample,
     triggerDate,
+    whatTheyDo,
+    tier,
+    foundVia,
+    dealsCount: 1,
+    derivedKey: null,
+    storedLeadId: lead.id,
+    link: tier === 1 ? null : "confirmed",
   };
   const slotDepartments = Object.fromEntries(slotDefs(role).map((d) => [d.slotId, d.department]));
   return {
@@ -419,12 +470,18 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
     siteCountry,
     site: project?.site ?? null,
     sector: project?.sector ?? null,
-    valueUsd: buyerParty?.value_usd ?? project?.value_usd ?? null,
+    valueUsd,
     signals: signalKinds,
     createdAt: lead.created_at,
     slotDepartments,
     leadStatus: lead.status,
     competitorForAll,
+    typeKey,
+    groupKey: companyGroupKey(buyer.id, name),
+    projectId: project?.id ?? null,
+    projectType,
+    consultant,
+    sourceCount,
   };
 }
 

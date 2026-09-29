@@ -102,6 +102,8 @@ export function resolveBuyerRole(stored: string | null | undefined, name: string
   const supplySide = (r: unknown) => r === "supplier" || r === "manufacturer" || r === "fabricator" || r === "distributor";
   const knownRole = findKnownCompany(name)?.role;
   if (knownRole && supplySide(stored) && supplySide(knownRole)) return knownRole;
+  // Wholesalers are stockists, never builders (15 §A5).
+  if (isWholesaler(name, text)) return "distributor";
   if (isBuyerRole(stored)) return stored;
   if (stored === "supplier") return supplierRoleFor(name, types, text);
   const known = findKnownCompany(name);
@@ -111,6 +113,21 @@ export function resolveBuyerRole(stored: string | null | undefined, name: string
   if (types.includes("owner") || types.includes("government_buyer") || kind === "bid") return "owner";
   if (types.includes("manufacturer") || types.includes("fabricator") || types.includes("stockist_trader")) return supplierRoleFor(name, types, text);
   return "epc_contractor";
+}
+
+/** Wholesalers → Stockist (15 §A5). Name words, or strong wholesaler words in the text about them. */
+const WHOLESALER_NAME_RE = /(?:wholesal\w*|grossist\w*|\bdistributors?\b|\btrading\b|\bstockists?\b|rørhandel|rorhandel|vvs-grossist)/i;
+const WHOLESALER_TEXT_RE = /(?:wholesaler|grossist\w*|rørhandel|vvs-grossist|pipe stockist|stockist of)/i;
+
+export function isWholesaler(name: string, text = ""): boolean {
+  if (findKnownCompany(name)?.role === "distributor") return true;
+  if (WHOLESALER_NAME_RE.test(name)) return true;
+  if (!text) return false;
+  // Only when the wholesaler word sits next to the company's name ("VVS-grossisten Brødrene Dahl").
+  const first = name.split(/\s+/)[0]?.replace(/[^\p{L}\p{N}]/gu, "");
+  if (!first || first.length < 3) return false;
+  const re = new RegExp(`(?:${WHOLESALER_TEXT_RE.source})[^.]{0,40}${first}|${first}[^.]{0,60}(?:${WHOLESALER_TEXT_RE.source})`, "iu");
+  return re.test(text);
 }
 
 // ───────────────────────── situations ─────────────────────────

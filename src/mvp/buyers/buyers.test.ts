@@ -83,7 +83,7 @@ describe("EPIC — a pipe mill that won a pipe order (14 §5, §6)", () => {
 
   it("is a manufacturer / pipe mill that buys coating materials, welding consumables and plates", () => {
     expect(view.role).toBe("manufacturer");
-    expect(view.subRoleLabel).toBe("Pipe mill");
+    expect(view.subRoleLabel).toBe("Pipe maker");
     expect(fit("coating-materials")).toBe("good");
     expect(fit("welding-consumables")).toBe("good");
     expect(fit("plates")).toBe("good");
@@ -117,7 +117,7 @@ describe("EPIC — a pipe mill that won a pipe order (14 §5, §6)", () => {
     expect(view.reach.country).toBe("SA");
     expect(view.proof[0].sentence).toMatch(/^The Welspun Aramco order is a steel-pipe/);
     expect(view.proof[0].highlight).toBe("signed by East Pipes Integrated Company for Industry");
-    expect(view.headline).toMatch(/^EPIC \(Manufacturer, Saudi Arabia\) will likely buy steel plates, welding consumables and coating materials in .+ for its SAR 771M pipe order from Aramco\. Why you: Stock in Dammam/);
+    expect(view.headline).toMatch(/^EPIC \(Pipe maker, Saudi Arabia\) will likely buy steel plates, welding consumables and coating materials in .+ for its SAR 771M pipe order from Aramco\. Why you: Stock in Dammam/);
   });
 });
 
@@ -138,7 +138,7 @@ describe("EPC pipeline contractor (Desco-like)", () => {
     const view = record.view;
     expect(view.role).toBe("epc_contractor");
     expect(view.stage).toBe("ready");
-    expect(view.subRoleLabel).toBe("Pipeline contractor");
+    expect(view.subRoleLabel).toBe("Pipeline builder");
     const ids = view.sellItems.map((i) => i.itemId);
     for (const id of ["line-pipe", "ball-valves", "gate-globe-check", "induction-bends", "bw-fittings", "flanges", "welding-consumables"]) expect(ids).toContain(id);
     expect(view.competitorFor).toEqual([]);
@@ -150,7 +150,7 @@ describe("EPC pipeline contractor (Desco-like)", () => {
       "https://www.linkedin.com/search/results/people/?keywords=Desco%20Infratech%20head%20of%20procurement",
       "https://www.google.com/search?q=Desco%20Infratech%20contact",
     ]);
-    expect(view.headline).toMatch(/^Desco Infratech \(EPC contractor, India\) will likely buy line pipe, ball valves and induction bends/);
+    expect(view.headline).toMatch(/^Desco Infratech \(Pipeline builder, India\) will likely buy line pipe, ball valves and induction bends/);
   });
 });
 

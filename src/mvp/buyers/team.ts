@@ -94,6 +94,8 @@ export interface TeamPerson {
   /** Buying roles from person_roles (fallback when the title is missing). */
   buyingRoles?: string[];
   evidenceIds: string[];
+  /** Slot a user added this person for (manual contacts, 15 §E). */
+  slotId?: string | null;
 }
 
 const BUYING_ROLE_SLOT: Record<string, SlotRole[]> = {
@@ -145,8 +147,17 @@ export function buildTeam(
   const defs = slotDefs(role, opts.who ?? company);
   const taken = new Set<string>();
   const filled = new Map<string, TeamPerson>();
+  // Pass 0: people a user added for a given slot (newest wins is not needed: first one kept).
+  for (const def of defs) {
+    const person = people.find((p) => !taken.has(p.id) && p.slotId === def.slotId);
+    if (person) {
+      filled.set(def.slotId, person);
+      taken.add(person.id);
+    }
+  }
   // Pass 1: title matches, in slot order (the definitions list specific slots first).
   for (const def of defs) {
+    if (filled.has(def.slotId)) continue;
     const person = people.find((p) => !taken.has(p.id) && p.title && personFits(def, p));
     if (person) {
       filled.set(def.slotId, person);

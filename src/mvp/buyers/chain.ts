@@ -38,10 +38,10 @@ const PARTY_BUYER_ROLE: Record<string, BuyerRole | "pmc" | undefined> = {
 };
 
 function contractorWord(projectType: string | null | undefined): string {
-  if (projectType === "pipeline") return "Pipeline contractor";
-  if (projectType === "water") return "Water network contractor";
-  if (projectType === "plant") return "Plant EPC contractor";
-  return "EPC contractor";
+  if (projectType === "pipeline") return "Pipeline builder";
+  if (projectType === "water") return "Water/sewer contractor";
+  if (projectType === "plant") return "Plant builder";
+  return "Builder";
 }
 
 /** The chain around the buyer (the buyer itself is left out). */
@@ -65,20 +65,20 @@ export function buildChain(input: ChainInput): ChainCompany[] {
 
   // Owner
   if (input.owner && input.owner.companyId !== input.buyerId) {
-    push(identified(input.owner.companyId, input.owner.name, "owner", "approved vendor list, project team"));
+    push(identified(input.owner.companyId, input.owner.name, "owner", "the client: approved vendor list, project team"));
   } else if (!input.owner && input.buyerRole !== "owner") {
-    push(missing("Project owner", "owner"));
+    push(missing("Client", "owner"));
   }
 
   // EPC contractors
   const epcs = input.parties.filter((p) => PARTY_BUYER_ROLE[p.partyRole] === "epc_contractor" && p.companyId !== input.buyerId);
-  for (const p of epcs) push(identified(p.companyId, p.name, "epc_contractor", p.scope ? `EPC contractor — ${p.scope}` : "main contractor, buys materials and subcontracts packages"));
+  for (const p of epcs) push(identified(p.companyId, p.name, "epc_contractor", p.scope ? `builder — ${p.scope}` : "builds the project, buys materials and subcontracts work"));
   if (!epcs.length && input.buyerRole !== "epc_contractor" && !input.parties.some((p) => p.companyId === input.buyerId && PARTY_BUYER_ROLE[p.partyRole] === "epc_contractor")) {
     push(missing(contractorWord(input.projectType ?? (input.situation === "pipe_mill" ? "pipeline" : null)), "epc_contractor"));
   }
 
   // PMC / consultants
-  for (const p of input.parties.filter((x) => PARTY_BUYER_ROLE[x.partyRole] === "pmc")) push(identified(p.companyId, p.name, "pmc", "project management consultant, influences vendor choice"));
+  for (const p of input.parties.filter((x) => PARTY_BUYER_ROLE[x.partyRole] === "pmc")) push(identified(p.companyId, p.name, "pmc", "consultant: specifies, influences vendor choice"));
 
   // Subcontractors
   const subs = input.parties.filter((p) => p.partyRole === "subcontractor" && p.companyId !== input.buyerId);

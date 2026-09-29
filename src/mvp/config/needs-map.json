@@ -10,7 +10,7 @@
   },
   "rules": [
     {
-      "id": "epc-pipeline", "role": "epc_contractor", "situation": "pipeline", "label": "EPC contractor — pipeline", "trigger": "Contract won",
+      "id": "epc-pipeline", "role": "epc_contractor", "situation": "pipeline", "label": "Pipeline builder", "trigger": "Contract won",
       "groups": [
         { "label": "Long-lead items", "from": 0, "to": 3, "items": [
           { "id": "line-pipe", "fit": "good", "why": "Line pipe is the first long-lead order on a pipeline" },
@@ -34,7 +34,7 @@
       ]
     },
     {
-      "id": "epc-plant", "role": "epc_contractor", "situation": "plant", "label": "EPC contractor — plant or facility", "trigger": "Contract won",
+      "id": "epc-plant", "role": "epc_contractor", "situation": "plant", "label": "Plant builder", "trigger": "Contract won",
       "groups": [
         { "label": "Piping & valves", "from": 1, "to": 6, "items": [
           { "id": "cs-process-pipe", "fit": "good", "why": "Process piping is the bulk of plant piping" },
@@ -66,7 +66,7 @@
       ]
     },
     {
-      "id": "epc-water", "role": "epc_contractor", "situation": "water", "label": "EPC / contractor — water and sewage", "trigger": "Contract won",
+      "id": "epc-water", "role": "epc_contractor", "situation": "water", "label": "Water/sewer contractor", "trigger": "Contract won",
       "groups": [
         { "label": "Pipes, valves & pumps", "from": 0, "to": 6, "items": [
           { "id": "di-pipe", "fit": "good", "why": "Water mains use ductile iron pipe" },
@@ -207,7 +207,7 @@
       "continuous": true
     },
     {
-      "id": "owner-drilling", "role": "owner", "situation": "drilling", "label": "Owner — upstream drilling", "trigger": "Drilling programme",
+      "id": "owner-drilling", "role": "owner", "situation": "drilling", "label": "Oil & gas company — upstream drilling", "trigger": "Drilling programme",
       "groups": [
         { "label": "Casing & tubing", "from": 0, "to": 6, "items": [
           { "id": "octg", "fit": "good", "why": "Drilling programmes buy casing and tubing" }
@@ -215,13 +215,13 @@
       ]
     },
     {
-      "id": "owner", "role": "owner", "situation": null, "label": "Project owner", "trigger": "Project announced",
+      "id": "owner", "role": "owner", "situation": null, "label": "Client (runs the project)", "trigger": "Project announced",
       "groups": [
         { "label": "Vendor registration", "from": 0, "to": 3, "items": [] },
-        { "label": "Owner-supplied long-lead items", "from": 0, "to": 9, "items": [
-          { "id": "line-pipe", "fit": "possible", "why": "Owners often buy line pipe themselves" },
-          { "id": "ball-valves", "fit": "possible", "why": "Owners often buy mainline valves themselves" },
-          { "id": "gate-globe-check", "fit": "possible", "why": "Owner-supplied valves" }
+        { "label": "Client-supplied long-lead items", "from": 0, "to": 9, "items": [
+          { "id": "line-pipe", "fit": "possible", "why": "Clients often buy line pipe themselves" },
+          { "id": "ball-valves", "fit": "possible", "why": "Clients often buy mainline valves themselves" },
+          { "id": "gate-globe-check", "fit": "possible", "why": "Client-supplied valves" }
         ] },
         { "label": "Maintenance spares", "from": 6, "to": 24, "items": [
           { "id": "gaskets", "fit": "possible", "why": "Maintenance spares" },

@@ -55,7 +55,7 @@ describe("buyers from the database", () => {
     expect(epic).toBeDefined();
     const view = epic!.view;
     expect(view.role).toBe("manufacturer");
-    expect(view.subRoleLabel).toBe("Pipe mill");
+    expect(view.subRoleLabel).toBe("Pipe maker");
     const good = view.sellItems.filter((i) => i.fit === "good").map((i) => i.itemId);
     expect(good).toEqual(expect.arrayContaining(["coating-materials", "welding-consumables", "plates"]));
     expect(view.competitorFor.some((id) => ["line-pipe", "di-pipe"].includes(id))).toBe(true);

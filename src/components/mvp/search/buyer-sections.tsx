@@ -5,7 +5,6 @@ import { ArrowRight, Check, ExternalLink, Home, Info, X } from "lucide-react";
 import type { BuyerView, ContactSlot, ProofItem } from "@/mvp/buyers/types";
 import { formatDate } from "../labels";
 import {
-  CHAIN_ROLE_TAGS,
   FIT_LABELS,
   FIT_STYLES,
   REACH_LABELS,
@@ -236,36 +235,6 @@ export function TeamCard({ buyer }: { buyer: BuyerView }) {
       ) : (
         <p className="text-sm text-[#9ca3af]">No buying team slots for this role yet.</p>
       )}
-    </BuyerCard>
-  );
-}
-
-export function ChainCard({ buyer, onOpenCompany }: { buyer: BuyerView; onOpenCompany?: (name: string) => void }) {
-  if (!buyer.chain.length) return null;
-  return (
-    <BuyerCard title="Other buyers on this project" aside="more people to approach">
-      <ul>
-        {buyer.chain.map((company, index) => {
-          const tag = CHAIN_ROLE_TAGS[company.role];
-          return (
-            <li key={`${company.name}-${index}`} className="flex items-center gap-2 border-b border-[#f1f5f9] py-2 text-[13px] last:border-0">
-              <span className={`inline-block whitespace-nowrap rounded-full px-[9px] py-0.5 text-xs font-semibold ${tag.style}`}>{tag.label}</span>
-              <span className="min-w-0 flex-1">
-                {company.identified && onOpenCompany ? (
-                  <button type="button" onClick={() => onOpenCompany(company.name)} className="font-bold text-[#111827] hover:underline">{company.name}</button>
-                ) : (
-                  <b className="text-[#111827]">{company.name}</b>
-                )}
-                {company.note ? <span className="text-[#374151]"> — {company.note}</span> : null}
-                {!company.identified ? <span className="text-[#374151]"> — not identified yet</span> : null}
-              </span>
-              <span className="whitespace-nowrap text-xs text-[#6b7280]">
-                {company.identified ? `${company.found} of ${company.total} · Find` : "Research"}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
     </BuyerCard>
   );
 }

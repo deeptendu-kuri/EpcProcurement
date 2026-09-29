@@ -35,19 +35,19 @@ export const BAND_LABELS: Record<ConfidenceBand, string> = { high: "High", mediu
 
 /** Who the lead is about (13 §11). */
 export const BUYER_TYPE_LABELS: Record<BuyerType, string> = {
-  epc_contractor: "EPC contractor",
+  epc_contractor: "Builder", // never "EPC" (15 §A.1)
   subcontractor: "Subcontractor",
   supplier: "Manufacturer", // never "supplier" (14 §1)
-  owner: "Project owner",
+  owner: "Utility / operator", // never "owner" (15 §A.1)
   manufacturer: "Manufacturer",
   fabricator: "Fabricator",
   distributor: "Distributor",
 };
 export const BUYER_TYPE_HINTS: Record<BuyerType, string> = {
-  epc_contractor: "Won the main contract: buys materials and subcontracts packages",
+  epc_contractor: "Won the work: buys materials and hires specialist crews",
   subcontractor: "Won a subcontract: buys materials for its package",
   supplier: "Won an order: buys materials and services to make and deliver it",
-  owner: "Owns the project or runs the tender",
+  owner: "Runs the project or the tender",
   manufacturer: "Makes products (e.g. pipe mill, valve maker): buys raw materials and consumables",
   fabricator: "Fabricator / spool shop: buys pipe, fittings, flanges and consumables",
   distributor: "Distributor / stockist: buys stock for resale",
@@ -118,10 +118,10 @@ export function disciplineLabel(value: string | null | undefined): string {
 }
 
 export const PARTY_ROLE_LABELS: Record<PartyRole, string> = {
-  owner: "Owner",
+  owner: "Runs the project",
   pmc: "Project management consultant",
   consultant: "Consultant",
-  main_epc: "Main EPC contractor",
+  main_epc: "Won the work",
   consortium_member: "Consortium partner",
   subcontractor: "Subcontractor",
   supplier: "Manufacturer / distributor",

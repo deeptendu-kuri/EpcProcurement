@@ -113,7 +113,7 @@ export function supplierReason(ctx: ScoringContext): Reason | null {
 }
 
 /** Research task (and first reason) of an owner that ordered materials while its EPC contractor is not known yet. */
-export const IDENTIFY_EPC_TASK = "Identify the EPC contractor";
+export const IDENTIFY_EPC_TASK = "Identify the contractor who will build it";
 
 /** True when an owner placed a supply order but no EPC contractor is known on the project. */
 export function ownerOrderWithoutEpc(ctx: ScoringContext, buyerType: BuyerType): boolean {
@@ -131,7 +131,7 @@ export function ownerOrderReason(ctx: ScoringContext): Reason {
     ...(supplier ? (ctx.factEvidence[`project_party:${supplier.id}`] ?? []) : []),
   ]).filter((id) => ctx.evidence[id]);
   return {
-    text: `Watching: ${ctx.buyer.canonical_name.replace(/\s*\(.*\)$/, "")} ordered materials for this work — identify the EPC contractor who will build it`,
+    text: `Watching: ${ctx.buyer.canonical_name.replace(/\s*\(.*\)$/, "")} ordered materials for this work — identify the contractor who will build it`,
     evidenceIds,
   };
 }

@@ -1,9 +1,28 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
-import type { BuyerRow } from "@/mvp/buyers/types";
+import { AlertTriangle, Loader2, Save } from "lucide-react";
+import { isDerivedLeadId, type BuyerRow, type ChainTier } from "@/mvp/buyers/types";
 import { SampleBadge } from "../badges";
-import { HOW_SURE_LABELS, HOW_SURE_STYLES, ROLE_STYLES, TENDER_STYLE, avatarColour, countryName, initials, isTenderLabel, roleText } from "./buyer-labels";
+import { HOW_SURE_LABELS, HOW_SURE_STYLES, LINK_LABELS, LINK_STYLES, ROLE_STYLES, TENDER_STYLE, TIER_STYLES, avatarColour, countryName, initials, isTenderLabel, roleText, whatTheyDoText } from "./buyer-labels";
+
+/** A derived row: a tier 2/3 company with no stored lead yet (docs/mvp/15 §D). */
+export function isDerivedRow(row: { derivedKey?: string | null; leadId: string; storedLeadId?: string | null }): boolean {
+  return Boolean(row.derivedKey) && (row.storedLeadId === null || isDerivedLeadId(row.leadId));
+}
+
+/** "Pipeline builder" (+ " · open tender"), never "EPC" / "owner". */
+export function rowRoleText(row: Pick<BuyerRow, "whatTheyDo" | "subRoleLabel" | "role" | "roleLabel">): string {
+  const plain = whatTheyDoText(row);
+  return roleText(row.role, plain, isTenderLabel(row.roleLabel ?? ""));
+}
+
+export function TierBadge({ tier }: { tier: ChainTier }) {
+  return (
+    <span className={`inline-block whitespace-nowrap rounded-md px-1.5 py-px text-[11px] font-semibold ${TIER_STYLES[tier]}`} title={tier === 1 ? "Tier 1 · won the work" : `Tier ${tier} · in the supply chain of a deal`}>
+      Tier {tier}
+    </span>
+  );
+}
 
 export function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "lg" }) {
   const box = size === "lg" ? "h-11 w-11 rounded-[10px] text-sm" : "h-7 w-7 rounded-[7px] text-[11px]";
@@ -32,13 +51,17 @@ export interface ResultsTableProps {
   onOpen: (leadId: string) => void;
   /** Show the select checkboxes (default on). */
   selectable?: boolean;
+  /** "Save as buyer" on a derived row (creates a lead). */
+  onSaveDerived?: (row: BuyerRow) => void;
+  /** Derived keys being saved. */
+  saving?: ReadonlySet<string>;
 }
 
 /**
  * Buyers table (docs/mvp/14 §10): Buyer · Buyer role · Why they buy now · What we can sell them
  * (+ competitor note) · Location · Buyer fit + how sure · Contacts. A click opens the sidebar.
  */
-export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true }: ResultsTableProps) {
+export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true, onSaveDerived, saving }: ResultsTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[960px] border-collapse text-[13.5px]" aria-label="Buyers">
@@ -46,7 +69,8 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
           <tr className="bg-[#fcfcfd] text-left text-xs uppercase tracking-[.03em] text-[#6b7280]">
             {selectable ? <th scope="col" className="w-[34px] border border-[var(--line)] px-2.5 py-2.5 font-medium"><span className="sr-only">Select</span></th> : null}
             <th scope="col" className="w-[18%] border border-[var(--line)] px-2.5 py-2.5 font-medium">Buyer</th>
-            <th scope="col" className="w-[15%] border border-[var(--line)] px-2.5 py-2.5 font-medium">Buyer role</th>
+            <th scope="col" className="w-[14%] border border-[var(--line)] px-2.5 py-2.5 font-medium">What they do</th>
+            <th scope="col" className="w-[9%] border border-[var(--line)] px-2.5 py-2.5 font-medium" title="Supply-chain tier: 1 won the work, 2 supplies them, 3 supplies tier 2">Tier</th>
             <th scope="col" className="w-[22%] border border-[var(--line)] px-2.5 py-2.5 font-medium">Why they buy now</th>
             <th scope="col" className="w-[21%] border border-[var(--line)] px-2.5 py-2.5 font-medium">What we can sell them</th>
             <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">Location</th>
@@ -58,7 +82,10 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
           {rows.map((row, index) => {
             const isSelected = selected.has(row.leadId);
             const isOpen = openId === row.leadId;
-            const label = roleText(row.role, row.roleLabel);
+            const label = rowRoleText(row);
+            const derived = isDerivedRow(row);
+            const tier: ChainTier = row.tier ?? 1;
+            const moreDeals = Math.max(0, (row.dealsCount ?? 1) - 1);
             return (
               <tr
                 key={row.leadId}
@@ -72,6 +99,8 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                   <input
                     type="checkbox"
                     checked={isSelected}
+                    disabled={derived}
+                    title={derived ? "Save as buyer first" : undefined}
                     onChange={() => onToggle(row.leadId)}
                     aria-label={`Select ${row.name}`}
                     className="mt-0.5 h-3.5 w-3.5 accent-[#111827]"
@@ -91,15 +120,44 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                       >
                         {row.name}
                       </button>
-                      {row.subRoleLabel ? <div className="text-xs text-[var(--muted)]">{row.subRoleLabel}</div> : null}
                       {row.isSample ? <div className="mt-1"><SampleBadge /></div> : null}
+                      {derived && onSaveDerived && row.derivedKey ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSaveDerived(row);
+                          }}
+                          disabled={saving?.has(row.derivedKey)}
+                          className="mt-1 inline-flex items-center gap-1 rounded-md border border-[var(--line)] bg-white px-1.5 py-0.5 text-[11.5px] font-semibold text-[#111827] hover:bg-[var(--subtle)] disabled:opacity-60"
+                        >
+                          {saving?.has(row.derivedKey) ? <Loader2 size={11} className="animate-spin" aria-hidden /> : <Save size={11} aria-hidden />} Save as buyer
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px]">
                   <RolePill role={row.role} label={label} />
                 </td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px] text-[#1f2937]">{row.buyingReason || <span className="text-[#9ca3af]">Not known yet</span>}</td>
+                <td className="border border-[var(--line)] px-2.5 py-[11px]" data-testid="tier-cell">
+                  <TierBadge tier={tier} />
+                  {tier > 1 && row.link ? (
+                    <span className={`ml-1 inline-block whitespace-nowrap rounded-full px-1.5 py-px text-[10.5px] font-semibold ${LINK_STYLES[row.link]}`}>{LINK_LABELS[row.link]}</span>
+                  ) : null}
+                  {tier > 1 && row.foundVia ? (
+                    <div className="mt-1 text-[11.5px] text-[var(--muted)]">
+                      Found via{" "}
+                      <a href={`/buyers/${encodeURIComponent(row.foundVia.leadId)}`} onClick={(event) => event.stopPropagation()} className="text-[var(--accent)] hover:underline">
+                        {row.foundVia.name}
+                      </a>
+                    </div>
+                  ) : null}
+                </td>
+                <td className="border border-[var(--line)] px-2.5 py-[11px] text-[#1f2937]">
+                  {row.buyingReason || <span className="text-[#9ca3af]">{tier > 1 ? "In the supply chain of this deal" : "Not known yet"}</span>}
+                  {moreDeals ? <div className="mt-0.5 text-[11.5px] font-semibold text-[#475569]">+{moreDeals} more {moreDeals === 1 ? "deal" : "deals"}</div> : null}
+                </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px] text-[#1f2937]">
                   {row.sellSummary || <span className="text-[#9ca3af]">Nothing matched yet</span>}
                   {row.competitorNote ? (

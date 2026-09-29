@@ -32,6 +32,8 @@ export const buyerSearchSchema = z
     sort: z.enum(["latest", "fit", "window"]).optional(),
     page: z.number().int().min(1).max(10_000).optional(),
     pageSize: z.number().int().min(1).max(200).optional(),
+    tiers: z.array(z.union([z.literal(1), z.literal(2), z.literal(3)])).max(3).optional(),
+    linkStatus: list(z.enum(["confirmed", "likely", "possible"])).optional(),
   })
   .strict();
 

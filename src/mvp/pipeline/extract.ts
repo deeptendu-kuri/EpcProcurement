@@ -291,7 +291,7 @@ async function runModels(text: string, url: string, db: Queryable | undefined, r
   if (aResult.status === "rejected") {
     // Quota exhausted or provider down: fall back to the rules extractor rather than stall the run.
     const error = aResult.reason;
-    await onNote?.(`Model A unavailable (${error instanceof Error ? error.message : String(error)}); using rules extractor`);
+    await onNote?.(`Model A unavailable (${error instanceof Error ? error.message : String(error)}); using rules extractor for this document only`);
     const p1 = rulesP1(text);
     return { a: { p1, p2: rulesP2(text, p1), p3: rulesP3(text) }, b: null, mode: "rule", extractedBy: "rule:regex" };
   }

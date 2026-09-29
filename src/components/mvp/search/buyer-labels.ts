@@ -1,11 +1,70 @@
 /**
- * Words and colours for buyers (docs/mvp/14 §1). Never show "supplier", "bid" or "supply/subcontract":
- * a company that won a supply order is a Manufacturer, Distributor or Fabricator.
+ * Words and colours for buyers (docs/mvp/14 §1, 15 §A). Never show "supplier", "bid" or "supply/subcontract",
+ * and never "EPC", "owner" or "main contractor": a buyer is "Buyer · {what they do}" in plain words.
  */
-import { BUYER_ROLE_LABELS, BUYER_STAGE_LABELS, type BuyerRole, type BuyerSignal, type BuyerStage, type ChainCompany, type FitLevel, type SlotRole } from "@/mvp/buyers/types";
+import { BUYER_STAGE_LABELS, type BuyerRole, type BuyerSignal, type BuyerStage, type ChainCompany, type ChainLinkStatus, type ChainTier, type FitLevel, type SlotRole } from "@/mvp/buyers/types";
 import { marketName } from "@/mvp/config/markets";
 
-export { BUYER_ROLE_LABELS, BUYER_STAGE_LABELS };
+export { BUYER_STAGE_LABELS };
+
+/** Plain words per stored role, used only when the plain sub-role ("what they do") is missing (15 §A.1). */
+export const BUYER_ROLE_LABELS: Record<BuyerRole, string> = {
+  owner: "Oil & gas company / utility",
+  epc_contractor: "Builder",
+  subcontractor: "Subcontractor",
+  manufacturer: "Maker",
+  fabricator: "Fabricator",
+  distributor: "Stockist",
+};
+
+const BANNED_ROLE_WORDS = /\b(epc|owner|project owner|main contractor)\b/i;
+
+/** "Pipeline builder" — the plain "what they do", falling back to the role in plain words. */
+export function whatTheyDoText(row: { whatTheyDo?: string | null; subRoleLabel?: string | null; role: BuyerRole }): string {
+  const plain = row.whatTheyDo?.trim();
+  if (plain && !BANNED_ROLE_WORDS.test(plain)) return plain;
+  const sub = row.subRoleLabel?.trim();
+  if (sub && !BANNED_ROLE_WORDS.test(sub)) return sub;
+  return BUYER_ROLE_LABELS[row.role];
+}
+
+/** Supply-chain link status (15 §B): words, chip and legend colours. */
+export const LINK_LABELS: Record<ChainLinkStatus, string> = {
+  confirmed: "Confirmed",
+  likely: "Likely",
+  possible: "Possible",
+  not_identified: "Not identified",
+};
+export const LINK_LEGEND: Record<ChainLinkStatus, string> = {
+  confirmed: "Confirmed (source)",
+  likely: "Likely (history / trade data)",
+  possible: "Possible (makes this, same region)",
+  not_identified: "Not identified yet",
+};
+export const LINK_STYLES: Record<ChainLinkStatus, string> = {
+  confirmed: "bg-[#dcfce7] text-[#166534]",
+  likely: "bg-[#dbeafe] text-[#1e40af]",
+  possible: "bg-[#fef3c7] text-[#92400e]",
+  not_identified: "bg-[#f1f5f9] text-[#64748b]",
+};
+export const LINK_SWATCH: Record<ChainLinkStatus, string> = {
+  confirmed: "#22c55e",
+  likely: "#3b82f6",
+  possible: "#f59e0b",
+  not_identified: "#cbd5e1",
+};
+export const LINK_ORDER: ChainLinkStatus[] = ["confirmed", "likely", "possible", "not_identified"];
+
+export const TIER_LABELS: Record<ChainTier, string> = {
+  1: "Tier 1 · won the work",
+  2: "Tier 2",
+  3: "Tier 3",
+};
+export const TIER_STYLES: Record<ChainTier, string> = {
+  1: "bg-[#eef2ff] text-[#3730a3]",
+  2: "bg-[#ecfeff] text-[#0e7490]",
+  3: "bg-[#f5f3ff] text-[#6d28d9]",
+};
 
 /** Pill colours per role, as in the mockup. */
 export const ROLE_STYLES: Record<BuyerRole, string> = {
@@ -18,10 +77,10 @@ export const ROLE_STYLES: Record<BuyerRole, string> = {
 };
 export const TENDER_STYLE = "bg-[#eef2ff] text-[#4338ca]";
 
-/** Short tags for "Other buyers on this project". */
+/** Short tags for companies around a buyer (plain words only). */
 export const CHAIN_ROLE_TAGS: Record<ChainCompany["role"], { label: string; style: string }> = {
-  owner: { label: "Owner", style: ROLE_STYLES.owner },
-  epc_contractor: { label: "EPC", style: ROLE_STYLES.epc_contractor },
+  owner: { label: "Utility", style: ROLE_STYLES.owner },
+  epc_contractor: { label: "Builder", style: ROLE_STYLES.epc_contractor },
   subcontractor: { label: "Sub", style: ROLE_STYLES.subcontractor },
   manufacturer: { label: "Maker", style: ROLE_STYLES.manufacturer },
   fabricator: { label: "Fabricator", style: ROLE_STYLES.fabricator },
@@ -83,11 +142,18 @@ export const REACH_LABELS: Record<"allowed" | "opt_out_only" | "consent_needed" 
 export const FIT_LABELS: Record<FitLevel, string> = { good: "Good fit", possible: "Possible", competitor: "Competitor — they make it" };
 export const FIT_STYLES: Record<FitLevel, string> = { good: "text-[#047857]", possible: "text-[#b45309]", competitor: "text-[#b91c1c]" };
 
-export const SLOT_STATUS_LABELS = { not_found: "Not found", likely: "Likely", confirmed: "Confirmed" } as const;
+export const SLOT_STATUS_LABELS = { not_found: "Not found", likely: "Likely", confirmed: "Confirmed", company_first: "Company first" } as const;
+export const SLOT_STATUS_STYLES: Record<keyof typeof SLOT_STATUS_LABELS, string> = {
+  not_found: "bg-[#f1f5f9] text-[#475569]",
+  likely: "bg-[#fef3c7] text-[#92400e]",
+  confirmed: "bg-[#dcfce7] text-[#166534]",
+  company_first: "bg-[#f1f5f9] text-[#64748b]",
+};
 
-/** "Project owner · open tender" for an open tender run by the owner (doc 14 §1). */
+/** "Utility · open tender" for an open tender (doc 15 §A.1). Banned words fall back to plain ones. */
 export function roleText(role: BuyerRole, roleLabel: string | null | undefined, tenderOpen = false): string {
-  const base = roleLabel?.trim() || BUYER_ROLE_LABELS[role];
+  const given = roleLabel?.trim();
+  const base = given && !BANNED_ROLE_WORDS.test(given.replace(/open tender/i, "")) ? given : BUYER_ROLE_LABELS[role];
   if (tenderOpen && role === "owner" && !/tender/i.test(base)) return `${base} · open tender`;
   return base;
 }

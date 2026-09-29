@@ -1,0 +1,116 @@
+{
+  "_note": "Example supply map (docs/mvp/15 section B): for each kind of company ('what they do'), the supplier types it buys from and what each supplies. Each type maps to a buyer role + situation so its 'would buy from you' comes from the needs map (docs/mvp/14 section 5); 'buys' overrides that list, 'makes' feeds the competitor check. 'directoryItems' are catalogue items that identify a company of this type in the directory.",
+  "isExample": true,
+  "types": {
+    "pipeline_builder":          { "label": "Pipeline builder",            "role": "epc_contractor", "situation": "pipeline",   "does": "builds pipelines" },
+    "plant_builder":             { "label": "Plant builder",               "role": "epc_contractor", "situation": "plant",      "does": "builds plants" },
+    "water_contractor":          { "label": "Water/sewer contractor",      "role": "epc_contractor", "situation": "water",      "does": "builds water and sewer networks" },
+    "pipe_maker":                { "label": "Pipe maker",                  "role": "manufacturer",   "situation": "pipe_mill",  "does": "makes pipe", "directoryItems": ["line-pipe", "cs-process-pipe", "ss-duplex-pipe", "alloy-pipe", "octg", "di-pipe", "hdpe-pipe", "grp-pipe", "pvc-pipe"] },
+    "valve_maker":               { "label": "Valve maker",                 "role": "manufacturer",   "situation": "valve_maker", "does": "makes valves", "directoryItems": ["gate-globe-check", "ball-valves", "butterfly-valves", "control-relief-valves"] },
+    "fittings_maker":            { "label": "Bends/fittings maker",        "role": "manufacturer",   "situation": "equipment_maker", "does": "makes bends and fittings", "makes": ["bw-fittings", "forged-fittings", "flanges", "induction-bends"], "buys": ["line-pipe", "plates", "welding-consumables", "abrasives"], "directoryItems": ["bw-fittings", "forged-fittings", "flanges", "induction-bends"] },
+    "fabricator":                { "label": "Fabricator",                  "role": "fabricator",     "situation": null,         "does": "fabricates spools and structures", "directoryItems": ["spools"] },
+    "stockist":                  { "label": "Stockist",                    "role": "distributor",    "situation": null,         "does": "stocks pipe, fittings and flanges" },
+    "coating_company":           { "label": "Coating company",             "role": "subcontractor",  "situation": "coating",    "does": "coats pipe and field joints" },
+    "crossing_contractor":       { "label": "Drilling/crossing contractor", "role": "subcontractor", "situation": "piping",     "does": "drills road and river crossings (HDD)", "buys": ["line-pipe", "hdpe-pipe", "welding-consumables", "abrasives"] },
+    "civil_contractor":          { "label": "Civil contractor",            "role": "subcontractor",  "situation": "civil",      "does": "does civil works" },
+    "electrical_contractor":     { "label": "Electrical contractor",       "role": "subcontractor",  "situation": "electrical", "does": "does electrical and instrument works" },
+    "insulation_company":        { "label": "Insulation/painting company", "role": "subcontractor",  "situation": "insulation", "does": "insulates and paints" },
+    "pump_supplier":             { "label": "Pump supplier",               "role": "manufacturer",   "situation": "equipment_maker", "does": "supplies pumps", "makes": ["pumps"], "buys": ["stud-bolts", "gaskets", "forged-fittings", "instruments"], "directoryItems": ["pumps"] },
+    "steel_mill":                { "label": "Steel plate/coil mill",       "role": "manufacturer",   "situation": "equipment_maker", "does": "makes steel plate and coil", "makes": ["plates", "structural-steel", "rebar"], "buys": [], "directoryItems": ["plates"] },
+    "coating_powder_supplier":   { "label": "Coating materials supplier",  "role": "manufacturer",   "situation": "equipment_maker", "does": "makes coating materials", "makes": ["coating-materials", "field-joint-coating"], "buys": [], "directoryItems": ["coating-materials", "field-joint-coating"] },
+    "welding_consumables_maker": { "label": "Welding consumables maker",   "role": "manufacturer",   "situation": "equipment_maker", "does": "makes welding consumables", "makes": ["welding-consumables"], "buys": [], "directoryItems": ["welding-consumables"] },
+    "testing_lab":               { "label": "Testing lab",                 "role": "subcontractor",  "situation": "coating",    "does": "tests welds and pipe", "buys": ["abrasives", "instruments"] },
+    "forging_shop":              { "label": "Forging/casting shop",        "role": "manufacturer",   "situation": "equipment_maker", "does": "makes forgings and castings", "makes": ["forged-fittings"], "buys": ["plates", "abrasives"] },
+    "bolting_maker":             { "label": "Bolting maker",               "role": "manufacturer",   "situation": "equipment_maker", "does": "makes stud bolts and nuts", "makes": ["stud-bolts"], "buys": [], "directoryItems": ["stud-bolts"] },
+    "gasket_maker":              { "label": "Gasket maker",                "role": "manufacturer",   "situation": "equipment_maker", "does": "makes gaskets", "makes": ["gaskets"], "buys": [], "directoryItems": ["gaskets"] },
+    "oil_gas_company":           { "label": "Oil & gas company",           "role": "owner",          "situation": null,         "does": "runs oil and gas projects" },
+    "utility":                   { "label": "Utility",                     "role": "owner",          "situation": null,         "does": "runs a utility network" },
+    "municipality":              { "label": "Municipality",                "role": "owner",          "situation": null,         "does": "runs public works" }
+  },
+  "contractorByProjectType": { "pipeline": "pipeline_builder", "plant": "plant_builder", "water": "water_contractor", "drilling": "pipeline_builder", "default": "pipeline_builder" },
+  "buysFrom": {
+    "pipeline_builder": [
+      { "type": "pipe_maker", "supplies": "line pipe" },
+      { "type": "valve_maker", "supplies": "pipeline ball valves" },
+      { "type": "fittings_maker", "supplies": "induction bends, fittings" },
+      { "type": "coating_company", "supplies": "field-joint coating" },
+      { "type": "crossing_contractor", "supplies": "road and river crossings (HDD)" },
+      { "type": "stockist", "supplies": "fittings, flanges, bolting" },
+      { "type": "civil_contractor", "supplies": "civil works" }
+    ],
+    "plant_builder": [
+      { "type": "pipe_maker", "supplies": "process pipe" },
+      { "type": "valve_maker", "supplies": "process valves" },
+      { "type": "fabricator", "supplies": "spools, structures" },
+      { "type": "stockist", "supplies": "fittings, flanges, bolting" },
+      { "type": "electrical_contractor", "supplies": "electrical and instrument works" },
+      { "type": "insulation_company", "supplies": "insulation and painting" }
+    ],
+    "water_contractor": [
+      { "type": "pipe_maker", "supplies": "DI, HDPE, GRP pipe" },
+      { "type": "valve_maker", "supplies": "butterfly and gate valves" },
+      { "type": "pump_supplier", "supplies": "pumps" },
+      { "type": "stockist", "supplies": "fittings, flanges, couplings" },
+      { "type": "civil_contractor", "supplies": "trenching and civil works" }
+    ],
+    "pipe_maker": [
+      { "type": "steel_mill", "supplies": "raw material for the pipe" },
+      { "type": "coating_powder_supplier", "supplies": "3LPE / FBE materials" },
+      { "type": "welding_consumables_maker", "supplies": "welding wire and flux" },
+      { "type": "testing_lab", "supplies": "weld and pipe testing" }
+    ],
+    "valve_maker": [
+      { "type": "forging_shop", "supplies": "valve bodies, forgings" },
+      { "type": "bolting_maker", "supplies": "stud bolts" },
+      { "type": "gasket_maker", "supplies": "gaskets and seals" },
+      { "type": "testing_lab", "supplies": "pressure testing" }
+    ],
+    "fittings_maker": [
+      { "type": "pipe_maker", "supplies": "mother pipe for bending" },
+      { "type": "steel_mill", "supplies": "plate" },
+      { "type": "testing_lab", "supplies": "testing" }
+    ],
+    "fabricator": [
+      { "type": "pipe_maker", "supplies": "pipe" },
+      { "type": "stockist", "supplies": "fittings and flanges" },
+      { "type": "welding_consumables_maker", "supplies": "welding consumables" },
+      { "type": "steel_mill", "supplies": "plate and sections" }
+    ],
+    "stockist": [
+      { "type": "pipe_maker", "supplies": "pipe" },
+      { "type": "fittings_maker", "supplies": "fittings" },
+      { "type": "valve_maker", "supplies": "valves" }
+    ],
+    "coating_company": [
+      { "type": "coating_powder_supplier", "supplies": "coating materials" },
+      { "type": "stockist", "supplies": "consumables" }
+    ],
+    "crossing_contractor": [
+      { "type": "pipe_maker", "supplies": "casing pipe" },
+      { "type": "stockist", "supplies": "consumables" }
+    ],
+    "civil_contractor": [
+      { "type": "steel_mill", "supplies": "rebar and sections" },
+      { "type": "stockist", "supplies": "materials" }
+    ],
+    "electrical_contractor": [
+      { "type": "stockist", "supplies": "cables and trays" }
+    ],
+    "insulation_company": [
+      { "type": "stockist", "supplies": "insulation and paints" }
+    ],
+    "pump_supplier": [
+      { "type": "forging_shop", "supplies": "castings" },
+      { "type": "gasket_maker", "supplies": "seals" }
+    ],
+    "forging_shop": [
+      { "type": "steel_mill", "supplies": "billets and plate" }
+    ],
+    "testing_lab": [],
+    "steel_mill": [],
+    "coating_powder_supplier": [],
+    "welding_consumables_maker": [],
+    "bolting_maker": [],
+    "gasket_maker": []
+  }
+}

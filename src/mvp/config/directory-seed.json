@@ -1,0 +1,13 @@
+{
+  "_note": "Seed list for the company directory (docs/mvp/15 section C). Only well-known manufacturers whose own website states what they make; each entry cites that URL (checked 2026-09-28). Stored with source 'seed'. Replace or extend via API import later.",
+  "checkedAt": "2026-09-28",
+  "companies": [
+    { "name": "Welspun Corp", "country": "IN", "domain": "welspuncorp.com", "url": "https://www.welspuncorp.com", "types": ["pipe_maker"], "items": ["line-pipe", "di-pipe", "ss-duplex-pipe", "rebar"], "says": "large diameter line pipes (LSAW, HSAW, HFW), ductile iron pipes, TMT rebars, stainless pipes" },
+    { "name": "Jindal SAW", "country": "IN", "domain": "jindalsaw.com", "url": "https://www.jindalsaw.com", "types": ["pipe_maker"], "items": ["line-pipe", "di-pipe"], "says": "iron and steel pipes" },
+    { "name": "Ratnamani Metals & Tubes", "country": "IN", "domain": "ratnamani.com", "url": "https://www.ratnamani.com", "types": ["pipe_maker"], "items": ["ss-duplex-pipe", "cs-process-pipe", "line-pipe"], "says": "stainless, carbon steel and nickel alloy pipes and tubes; coating and bending" },
+    { "name": "Tenaris", "country": null, "domain": "tenaris.com", "url": "https://www.tenaris.com", "types": ["pipe_maker"], "items": ["octg", "line-pipe"], "says": "OCTG and line pipe for onshore and offshore" },
+    { "name": "AVK", "country": "DK", "domain": "avkvalves.com", "url": "https://www.avkvalves.com", "types": ["valve_maker"], "items": ["gate-globe-check", "butterfly-valves"], "says": "valves and hydrants for water and gas distribution and wastewater" },
+    { "name": "Lamons", "country": "US", "domain": "lamons.com", "url": "https://www.lamons.com", "types": ["gasket_maker", "bolting_maker"], "items": ["gaskets", "stud-bolts"], "says": "custom gaskets and fasteners" },
+    { "name": "Canusa-CPS", "country": "CA", "domain": "canusacps.com", "url": "https://www.canusacps.com", "types": ["coating_powder_supplier"], "items": ["field-joint-coating"], "says": "field joint coatings and heat-shrinkable sleeves" }
+  ]
+}

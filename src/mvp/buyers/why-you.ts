@@ -89,11 +89,11 @@ export function strengthReason(strength: Strength, facts: WhyYouFacts, config: P
     case "specs_or_major": {
       if (facts.standards.length) return `The sources name ${facts.standards.slice(0, 2).join(", ")} — you supply certified material`;
       const major = ownerMatches(facts.ownerName, c.majors);
-      return major ? `The owner is ${facts.ownerName?.replace(/\s*\(.*\)$/, "")} — an oil & gas major that asks for full certification` : null;
+      return major ? `The client is ${facts.ownerName?.replace(/\s*\(.*\)$/, "")} — an oil & gas major that asks for full certification` : null;
     }
     case "owner_in": {
       const owner = ownerMatches(facts.ownerName, c.owners);
-      return owner ? `The owner (${OWNER_LABEL[owner] ?? owner}) buys from its approved vendor list` : null;
+      return owner ? `The client (${OWNER_LABEL[owner] ?? owner}) buys from its approved vendor list` : null;
     }
     case "local_content": {
       const owner = ownerMatches(facts.ownerName, c.owners);

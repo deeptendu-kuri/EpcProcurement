@@ -72,7 +72,7 @@ const BUYER_TYPE_STYLES: Record<BuyerType, string> = {
   distributor: "border-[#abefc6] bg-[#ecfdf3] text-[#067647]",
 };
 
-/** EPC contractor / Subcontractor / Manufacturer / Project owner (14 §1). Nothing for leads scored before it existed. */
+/** Builder / Subcontractor / Manufacturer / Utility in plain words (14 §1, 15 §A). Nothing for leads scored before it existed. */
 export function BuyerTypeBadge({ type }: { type: BuyerType | null | undefined }) {
   if (!type) return null;
   return (

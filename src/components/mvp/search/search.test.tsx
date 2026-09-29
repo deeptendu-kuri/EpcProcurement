@@ -158,6 +158,11 @@ const buyer: BuyerView = {
   status: "new",
   isSample: false,
   updatedAt: "2026-09-27T10:00:00.000Z",
+  whatTheyDo: "Pipe maker",
+  tier: 1,
+  foundVia: null,
+  deals: [],
+  chainSummary: { tier2: 4, tier3: 3, peopleTotal: 31, peopleFound: 1 },
 };
 
 describe("BuyerSidebarView (docs/mvp/14 §10)", () => {
@@ -167,7 +172,7 @@ describe("BuyerSidebarView (docs/mvp/14 §10)", () => {
       <BuyerSidebarView buyer={buyer} status="new" onClose={() => undefined} onGood={onGood} onNotRelevant={() => undefined} onAddToList={() => undefined} />,
     );
     expect(screen.getByRole("heading", { name: buyer.name })).toBeTruthy();
-    expect(screen.getByText("Buyer · Manufacturer (pipe mill)")).toBeTruthy();
+    expect(screen.getByText("Buyer · Pipe maker")).toBeTruthy();
     expect(screen.getByText(buyer.buyingReason)).toBeTruthy();
 
     const sell = screen.getByRole("region", { name: "What we can sell them" });
@@ -192,7 +197,11 @@ describe("BuyerSidebarView (docs/mvp/14 §10)", () => {
     expect(within(slots[1]).getByText("Approver · likely")).toBeTruthy();
     expect(screen.getByText(/1 of 6 found/)).toBeTruthy();
 
-    expect(screen.getByText("Saudi Aramco")).toBeTruthy();
+    const chain = screen.getByRole("region", { name: "Supply chain" });
+    expect(within(chain).getByText("4 companies")).toBeTruthy();
+    expect(within(chain).getByText("3 companies")).toBeTruthy();
+    expect(within(chain).getByText("1 of 31 found")).toBeTruthy();
+    expect(within(chain).getByRole("link", { name: /Open full chain/ }).getAttribute("href")).toBe(`/buyers/${buyer.leadId}#supply-chain`);
     expect(screen.getByText(/Cold email needs consent/)).toBeTruthy();
     expect(screen.getByText("signed by East Pipes Integrated Company for Industry").tagName).toBe("B");
 
@@ -206,6 +215,6 @@ describe("BuyerSidebarView (docs/mvp/14 §10)", () => {
     const { container } = render(
       <BuyerSidebarView buyer={buyer} status="new" onClose={() => undefined} onGood={() => undefined} onNotRelevant={() => undefined} onAddToList={() => undefined} />,
     );
-    expect(container.textContent).not.toMatch(/\bsupplier\b|\bbid\b|subcontract\b|genuine|confidence score/i);
+    expect(container.textContent).not.toMatch(/\bsupplier\b|\bbid\b|subcontract\b|genuine|confidence score|\bEPC\b|\bowner\b|main contractor/i);
   });
 });

@@ -164,6 +164,13 @@ function viewToRow(view: BuyerView): BuyerRow {
     total: view.total,
     isSample: view.isSample,
     triggerDate: view.triggerDate,
+    whatTheyDo: view.whatTheyDo,
+    tier: view.tier ?? 1,
+    foundVia: view.foundVia ?? null,
+    dealsCount: view.deals?.length || 1,
+    derivedKey: null,
+    storedLeadId: view.leadId,
+    link: null,
   };
 }
 

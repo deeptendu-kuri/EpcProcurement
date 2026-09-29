@@ -121,7 +121,7 @@ export async function loadBuyerRecords(opts: { leadIds?: string[]; db?: Queryabl
         order by signal_date desc limit 5000`,
       [signalIds, buyerIds, projectIds],
     ),
-    rows<PersonRow>(db, "select * from people where current_company_id = any($1::uuid[]) order by full_name", [companyIds]),
+    rows<PersonRow & { slot_id?: string | null; confirmed_at?: string | null }>(db, "select * from people where current_company_id = any($1::uuid[]) order by full_name", [companyIds]),
     rows<{ lead_id: string; body: string | null }>(
       db,
       "select lead_id, body from activities where lead_id = any($1::uuid[]) and type = 'note' and body like $2",
@@ -193,9 +193,19 @@ export async function loadBuyerRecords(opts: { leadIds?: string[]; db?: Queryabl
       department: p.department,
       buyingRoles: rolesByPerson.get(p.id) ?? [],
       evidenceIds: (factsBy.get(`person:${p.id}`) ?? []).filter((id) => evidence[id]),
+      slotId: p.slot_id ?? null,
     });
     peopleByCompany.set(p.current_company_id, list);
   }
+  // People a user confirmed as decision maker (15 §E) count as confirmed on every lead of their company.
+  const confirmedPeople = new Set(people.filter((p) => p.confirmed_at).map((p) => p.id.toLowerCase()));
+  const viaIds = uuids(leads.map((l) => (l as LeadRow & { found_via_lead_id?: string | null }).found_via_lead_id));
+  const viaNames = new Map(
+    (viaIds.length
+      ? await rows<{ id: string; name: string }>(db, "select l.id, c.canonical_name as name from leads l join companies c on c.id = l.buyer_company_id where l.id = any($1::uuid[])", [viaIds])
+      : []
+    ).map((r) => [r.id, r.name]),
+  );
   const confirmedByLead = new Map<string, Set<string>>();
   for (const c of confirms) {
     const personId = (c.body ?? "").slice(CONFIRM_PREFIX.length).split(/[\s:]/)[0];
@@ -239,7 +249,8 @@ export async function loadBuyerRecords(opts: { leadIds?: string[]; db?: Queryabl
           peopleByCompany,
           evidence,
           buyerEvidenceIds,
-          confirmedPersonIds: confirmedByLead.get(lead.id) ?? new Set(),
+          confirmedPersonIds: new Set([...(confirmedByLead.get(lead.id) ?? []), ...confirmedPeople]),
+          foundViaName: viaNames.get((lead as LeadRow & { found_via_lead_id?: string | null }).found_via_lead_id ?? "") ?? null,
           awardedDate: project ? (awardedByProject.get(project.id) ?? null) : null,
         }),
       );

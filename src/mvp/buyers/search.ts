@@ -25,7 +25,15 @@ import type { BuyerRecord } from "./view";
 export const DEFAULT_PAGE_SIZE = 25;
 export const MAX_PAGE_SIZE = 200;
 
-type Dimension = "location" | "roles" | "sell" | "signals" | "contacts" | "industry" | "value" | "lookalike" | "companyList" | "reach" | "stage" | "minFit" | "howSure" | "q";
+type Dimension = "location" | "roles" | "sell" | "signals" | "contacts" | "industry" | "value" | "lookalike" | "companyList" | "reach" | "stage" | "minFit" | "howSure" | "q" | "tiers" | "linkStatus";
+
+const TIER_LABELS: Record<string, string> = { "1": "Tier 1 · won the work", "2": "Tier 2", "3": "Tier 3" };
+const LINK_LABELS: Record<string, string> = { confirmed: "Confirmed", likely: "Likely", possible: "Possible" };
+
+/** How we know a record's link: tier 1 (won the work) counts as confirmed. */
+export function linkOf(record: BuyerRecord): "confirmed" | "likely" | "possible" {
+  return record.derived?.link ?? (record.row.link && record.row.link !== "not_identified" ? record.row.link : "confirmed");
+}
 
 const SIGNAL_LABELS: Record<BuyerSignal, string> = { order_won: "Won an order", contract_won: "Won a contract", tender_open: "Open tender", expansion: "Expansion" };
 const REACH_LABELS: Record<string, string> = { allowed: "Allowed", opt_out_only: "With opt-out", consent_needed: "Consent needed", blocked: "Blocked" };
@@ -125,9 +133,11 @@ export function matches(record: BuyerRecord, search: BuyerSearch, now: Date, all
   if (on("reach") && search.reach?.length && !(search.reach as string[]).includes(view.reach.email)) return false;
   if (on("minFit") && typeof search.minFit === "number" && search.minFit > 0 && view.fitScore < search.minFit) return false;
   if (on("howSure") && search.howSure?.length && !search.howSure.includes(view.howSure)) return false;
+  if (on("tiers") && search.tiers?.length && !search.tiers.includes(view.tier)) return false;
+  if (on("linkStatus") && search.linkStatus?.length && !search.linkStatus.includes(linkOf(record))) return false;
   if (on("q") && search.q?.trim()) {
     const q = search.q.trim().toLowerCase();
-    const hay = [view.name, view.shortName, view.subRoleLabel ?? "", view.roleLabel, view.buyingReason, record.row.buyingReason, countryName(view.country) ?? "", ...view.sellItems.map((i) => `${i.name} ${i.category}`), ...view.team.map((s) => s.person?.name ?? "")]
+    const hay = [view.name, view.shortName, view.whatTheyDo, view.subRoleLabel ?? "", view.roleLabel, view.buyingReason, record.row.buyingReason, countryName(view.country) ?? "", ...view.sellItems.map((i) => `${i.name} ${i.category}`), ...view.team.map((s) => s.person?.name ?? "")]
       .join(" \n ")
       .toLowerCase();
     if (!q.split(/\s+/).every((word) => hay.includes(word))) return false;
@@ -143,7 +153,8 @@ function count<T extends string>(values: Iterable<T>, labels: (v: T) => string):
 
 /** Facets: each dimension counted over the records that pass every other filter. */
 export function buildFacets(records: readonly BuyerRecord[], search: BuyerSearch, now: Date): BuyerFacets {
-  const pass = (dim: Dimension) => records.filter((r) => matches(r, search, now, records, new Set([dim])));
+  // One count per company (15 §A3): the strongest passing record of each group.
+  const pass = (dim: Dimension) => representatives(records.filter((r) => matches(r, search, now, records, new Set([dim])))).map((g) => g.rep);
   const catalogue = getCatalogue().items;
   const itemName = (id: string) => catalogue.find((i) => i.id === id)?.shortName ?? id;
   const hide = hideCompetitors(search);
@@ -159,6 +170,8 @@ export function buildFacets(records: readonly BuyerRecord[], search: BuyerSearch
     howSure: count(pass("howSure").map((r) => r.view.howSure), (v) => v.charAt(0).toUpperCase() + v.slice(1)),
     reach: count(pass("reach").map((r) => r.view.reach.email), (v) => REACH_LABELS[v] ?? v),
     industries: count(pass("industry").map((r) => r.sector).filter((s): s is string => Boolean(s)), (v) => INDUSTRY_LABELS[v] ?? v),
+    tiers: count(pass("tiers").map((r) => String(r.view.tier)), (v) => TIER_LABELS[v] ?? `Tier ${v}`),
+    linkStatus: count(pass("linkStatus").map((r) => linkOf(r)), (v) => LINK_LABELS[v] ?? v),
   };
 }
 
@@ -211,9 +224,30 @@ function rowFor(record: BuyerRecord, search: BuyerSearch): BuyerRow {
   return { ...record.row, found: slots.filter((s) => s.person).length, total: slots.length };
 }
 
-/** SuperSearch buyers: one page of rows, total, facets and contact counts across all results. */
+/**
+ * One entry per company (15 §A3): records sharing a group key collapse to the strongest (fit, then
+ * latest); `count` = how many of its deals passed the filters.
+ */
+export function representatives(records: readonly BuyerRecord[]): { rep: BuyerRecord; count: number }[] {
+  const groups = new Map<string, { rep: BuyerRecord; count: number }>();
+  for (const r of records) {
+    const g = groups.get(r.groupKey);
+    if (!g) groups.set(r.groupKey, { rep: r, count: r.derived ? 0 : 1 });
+    else {
+      if (!r.derived) g.count++;
+      const a = g.rep;
+      const stronger = (a.derived && !r.derived) || (Boolean(a.derived) === Boolean(r.derived) && (r.view.fitScore > a.view.fitScore || (r.view.fitScore === a.view.fitScore && (r.view.triggerDate ?? "") > (a.view.triggerDate ?? ""))));
+      if (stronger) g.rep = r;
+    }
+  }
+  return [...groups.values()];
+}
+
+/** SuperSearch buyers: one page of rows (one per company), total, facets and contact counts. */
 export function searchRecords(records: readonly BuyerRecord[], search: BuyerSearch, now: Date): BuyerSearchResult {
-  const filtered = records.filter((r) => matches(r, search, now, records));
+  const groups = representatives(records.filter((r) => matches(r, search, now, records)));
+  const countOf = new Map(groups.map((g) => [g.rep, g.count]));
+  const filtered = groups.map((g) => g.rep);
   const lookalike = search.lookalikeOf ? findLookalikeRef(records, search.lookalikeOf) : null;
   const sorted = sortRecords(filtered, search.sort, lookalike);
   const { page, pageSize } = pageOf(search);
@@ -225,7 +259,7 @@ export function searchRecords(records: readonly BuyerRecord[], search: BuyerSear
     contactsFound += slots.filter((s) => s.person).length;
   }
   return {
-    rows: sorted.slice((page - 1) * pageSize, page * pageSize).map((r) => rowFor(r, search)),
+    rows: sorted.slice((page - 1) * pageSize, page * pageSize).map((r) => ({ ...rowFor(r, search), dealsCount: countOf.get(r) ?? r.row.dealsCount })),
     total: filtered.length,
     facets: buildFacets(records, search, now),
     contactsFound,
@@ -237,7 +271,7 @@ export function searchRecords(records: readonly BuyerRecord[], search: BuyerSear
 
 /** SuperSearch contacts: one row per buying-team slot (person or empty slot) of the matching buyers. */
 export function searchContactRecords(records: readonly BuyerRecord[], search: BuyerSearch, now: Date): ContactSearchResult {
-  const filtered = sortRecords(records.filter((r) => matches(r, search, now, records)), search.sort, null);
+  const filtered = sortRecords(representatives(records.filter((r) => matches(r, search, now, records))).map((g) => g.rep), search.sort, null);
   const rows: ContactRow[] = [];
   for (const record of filtered) {
     for (const slot of slotsMatching(record, search.contacts)) {
@@ -255,6 +289,8 @@ export function searchContactRecords(records: readonly BuyerRecord[], search: Bu
         person: slot.person,
         status: slot.status,
         findLinks: slot.findLinks,
+        tier: record.view.tier,
+        derivedKey: record.derived?.key ?? null,
       });
     }
   }

@@ -1,17 +1,19 @@
 import { notFound } from "next/navigation";
+import { getBuyerView } from "@/mvp/buyers";
 import { companyOutreachRules } from "@/mvp/compliance";
-import { getProductById } from "@/mvp/config/profile";
 import { getLeadDetail } from "@/mvp/repo";
-import { LeadView } from "@/components/mvp/lead-view";
-import { FiveQuestions } from "@/components/mvp/search/five-questions";
+import { BuyerPageView } from "@/components/mvp/buyers/buyer-page";
 
-/** Full buyer page (docs/mvp/14 §10): the five questions on top, then the detail with proof (09 §4.3). */
+/**
+ * Buyer-first page (docs/mvp/15 §A, mockup buyer-chain): who they are and the deal in one line, what
+ * they'll buy, when and why you, the supply chain from the deal with every contact across it, then
+ * the compact sections (Can you sell to them?, How to reach them, Proof, Activity).
+ */
 export default async function BuyerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const detail = await getLeadDetail(id);
-  if (!detail) notFound();
+  const [detail, buyer] = await Promise.all([getLeadDetail(id), getBuyerView(id)]);
+  if (!detail || !buyer) notFound();
 
-  const productNames = (detail.lead.client_product_ids ?? []).map((productId) => getProductById(productId)?.name ?? productId);
   let companyOutreach = null;
   try {
     companyOutreach = companyOutreachRules(detail.buyer.country ?? "");
@@ -19,5 +21,5 @@ export default async function BuyerPage({ params }: { params: Promise<{ id: stri
     console.error("[buyer page] outreach rules failed:", error);
   }
 
-  return <LeadView detail={detail} productNames={productNames} companyOutreach={companyOutreach} top={<FiveQuestions leadId={detail.lead.id} />} />;
+  return <BuyerPageView buyer={buyer} detail={detail} companyOutreach={companyOutreach} />;
 }

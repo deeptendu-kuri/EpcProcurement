@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Bookmark, ChevronDown, Download, Info, Loader2, PanelLeftOpen, Plus, Search, SearchX, SlidersHorizontal, Sparkles, Square, SquareCheck, Users, X } from "lucide-react";
-import type { BuyerRow, BuyerSearchResult, ContactSearchResult } from "@/mvp/buyers/types";
+import type { BuyerRow, BuyerSearchResult, ContactRow, ContactSearchResult } from "@/mvp/buyers/types";
 import { ApiError } from "../api-client";
 import { EmptyState } from "../empty-state";
 import { Pagination } from "../leads/pagination";
@@ -12,13 +12,15 @@ import { useAppStatus } from "../shell/app-shell";
 import { safeStorage } from "../shell/events";
 import { statusLabel } from "../shell/time-ago";
 import { useToast } from "../shell/toast";
-import { BUYER_ROLE_LABELS, BUYER_STAGE_LABELS, HOW_SURE_LABELS, countryName } from "./buyer-labels";
+import { AddContactModal, type AddContactValues } from "../buyers/add-contact-modal";
+import { addContact, confirmContact, isDerivedId, saveDerivedBuyer } from "../buyers/chain-api";
+import { BUYER_STAGE_LABELS, HOW_SURE_LABELS, LINK_LABELS, countryName } from "./buyer-labels";
 import { searchBuyers, searchContacts } from "./buyer-api";
-import { BuyerSidebar } from "./buyer-sidebar";
-import { ContactsTable } from "./contacts-table";
+import { BuyerSidebar, DerivedBuyerSidebar } from "./buyer-sidebar";
+import { ContactsTable, contactKey } from "./contacts-table";
 import { FilterPanel, type MarketOption } from "./filter-panel";
 import { AddToListDialog, LeadListsView } from "./lead-lists";
-import { ResultsTable } from "./results-table";
+import { ResultsTable, isDerivedRow, rowRoleText } from "./results-table";
 import {
   PAGE_SIZE,
   activeFilterCount,
@@ -29,6 +31,7 @@ import {
   serializeSearchState,
   toBuyerSearch,
   type CatalogueOption,
+  type ResultView,
   type SearchUrlState,
 } from "./search-state";
 
@@ -58,14 +61,17 @@ function csvCell(value: string | number | null | undefined): string {
 
 /** CSV of buyer rows in the words shown on screen. */
 export function buyersCsv(rows: BuyerRow[]): string {
-  const header = ["Buyer", "Type", "Buyer role", "Why they buy now", "What we can sell them", "Competitor note", "Location", "Buyer fit", "How sure we are", "Stage", "Contacts found", "Contacts to find", "Link"];
+  const header = ["Buyer", "What they do", "Supply chain tier", "Found via", "How we know", "Why they buy now", "More deals", "What we can sell them", "Competitor note", "Location", "Buyer fit", "How sure we are", "Stage", "Contacts found", "Contacts to find", "Link"];
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const lines = rows.map((row) =>
     [
       row.name,
-      row.subRoleLabel,
-      row.roleLabel || BUYER_ROLE_LABELS[row.role],
+      rowRoleText(row),
+      row.tier ?? 1,
+      row.foundVia?.name ?? "",
+      row.link ? LINK_LABELS[row.link] : "",
       row.buyingReason,
+      Math.max(0, (row.dealsCount ?? 1) - 1) || "",
       row.sellSummary,
       row.competitorNote,
       countryName(row.country),
@@ -74,7 +80,7 @@ export function buyersCsv(rows: BuyerRow[]): string {
       BUYER_STAGE_LABELS[row.stage],
       row.found,
       row.total,
-      `${origin}/buyers/${row.leadId}`,
+      isDerivedRow(row) ? "" : `${origin}/buyers/${row.leadId}`,
     ]
       .map(csvCell)
       .join(","),
@@ -236,10 +242,22 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
   const [filtersOpenSmall, setFiltersOpenSmall] = useState(false);
   const [panelKey, setPanelKey] = useState(0);
   const [exporting, setExporting] = useState(false);
+  /** Buyers | Contacts, held here so the switch renders at once; mirrored into the URL. */
+  const [view, setViewState] = useState<ResultView>(state.view);
+  const [seenStateView, setSeenStateView] = useState<ResultView>(state.view);
+  if (seenStateView !== state.view) {
+    setSeenStateView(state.view);
+    setViewState(state.view);
+  }
+  const [contactsPage, setContactsPage] = useState(1);
+  const [savingDerived, setSavingDerived] = useState<Set<string>>(new Set());
+  const [addingContact, setAddingContact] = useState<ContactRow | null>(null);
+  const [confirming, setConfirming] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const goToPage = (page: number) => {
     scrollRef.current?.scrollTo({ top: 0 });
-    navigate({ page });
+    if (view === "contacts") setContactsPage(page);
+    else navigate({ page });
   };
 
   useEffect(() => {
@@ -254,8 +272,12 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
     safeStorage.set(FILTERS_KEY, collapsed ? "1" : "0");
   };
 
-  // The query without the open sidebar: opening a buyer must not re-run the search.
-  const queryKey = useMemo(() => serializeSearchState({ ...state, open: "" }).toString(), [state]);
+  // The query without the open sidebar: opening a buyer must not re-run the search. The view and the
+  // contacts page come from local state, so Buyers | Contacts switches at once.
+  const queryKey = useMemo(
+    () => serializeSearchState({ ...state, open: "", view, page: view === "contacts" ? contactsPage : state.page }).toString(),
+    [state, view, contactsPage],
+  );
 
   useEffect(() => {
     if (tab !== "search") return;
@@ -283,21 +305,85 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
 
   const navigate = useCallback(
     (change: Partial<SearchUrlState>) => {
-      const next = applySearchChange({ ...state, open: openId }, change);
+      const next = applySearchChange({ ...state, open: openId, view }, change);
       startTransition(() => router.replace(searchHref(next), { scroll: false }));
     },
-    [router, state, openId],
+    [router, state, openId, view],
   );
+
+  const switchView = (next: ResultView) => {
+    if (next === view) return;
+    setViewState(next);
+    setContactsPage(1);
+    if (tab !== "search") return;
+    const href = searchHref({ ...state, open: openId, view: next, page: 1 });
+    window.history.replaceState(window.history.state, "", href);
+  };
+
+  const saveDerived = async (row: BuyerRow) => {
+    const key = row.derivedKey;
+    if (!key) return;
+    setSavingDerived((previous) => new Set(previous).add(key));
+    try {
+      const leadId = await saveDerivedBuyer(key);
+      toast.show({ message: `${row.name} saved as a buyer`, tone: "success" });
+      setRetry((value) => value + 1);
+      if (leadId) setOpen(leadId);
+    } catch (err) {
+      toast.show({ message: err instanceof Error ? err.message : "Could not save this buyer.", tone: "error" });
+    } finally {
+      setSavingDerived((previous) => {
+        const next = new Set(previous);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const submitContact = async (row: ContactRow, values: AddContactValues) => {
+    await addContact({
+      leadId: row.leadId,
+      companyId: row.companyId,
+      slotId: row.slotId,
+      name: values.name,
+      title: values.title || row.slotTitle,
+      ...(values.email ? { email: values.email } : {}),
+      ...(values.phone ? { phone: values.phone } : {}),
+      ...(values.linkedinUrl ? { linkedinUrl: values.linkedinUrl } : {}),
+      ...(values.notes ? { notes: values.notes } : {}),
+    });
+    toast.show({ message: `${values.name} added as Likely`, tone: "success" });
+    setRetry((value) => value + 1);
+  };
+
+  const confirmRow = async (row: ContactRow) => {
+    if (!row.person) return;
+    const key = contactKey(row);
+    setConfirming((previous) => new Set(previous).add(key));
+    try {
+      await confirmContact(row.person.id, { leadId: row.leadId, slotId: row.slotId, companyId: row.companyId });
+      toast.show({ message: `${row.person.name} confirmed`, tone: "success" });
+      setRetry((value) => value + 1);
+    } catch (err) {
+      toast.show({ message: err instanceof Error ? err.message : "Could not confirm this contact.", tone: "error" });
+    } finally {
+      setConfirming((previous) => {
+        const next = new Set(previous);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
 
   const setOpen = useCallback(
     (leadId: string) => {
       setOpenId(leadId);
       if (tab !== "search") return;
       // Keep the open buyer in the link without a server round trip.
-      const href = searchHref({ ...state, open: leadId });
+      const href = searchHref({ ...state, open: leadId, view });
       window.history.replaceState(window.history.state, "", href);
     },
-    [state, tab],
+    [state, tab, view],
   );
 
   const clearAll = () => {
@@ -308,7 +394,9 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
   const loading = tab === "search" && doneKey !== `${queryKey}#${retry}`;
   const rows = result?.rows ?? [];
   const total = result?.total ?? 0;
-  const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.leadId));
+  const selectableRows = rows.filter((row) => !isDerivedRow(row));
+  const allSelected = selectableRows.length > 0 && selectableRows.every((row) => selected.has(row.leadId));
+  const openRow = openId && isDerivedId(openId) ? (rows.find((row) => row.leadId === openId) ?? null) : null;
   const notFound = Math.max(0, (result?.contactsTotal ?? 0) - (result?.contactsFound ?? 0));
   const activeFilters = activeFilterCount(state);
 
@@ -343,7 +431,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
   };
 
   const findContacts = () => {
-    if (state.view !== "contacts") navigate({ view: "contacts" });
+    switchView("contacts");
     toast.show({ message: "Showing each buyer’s buying team. Use “Find” on a missing person to search for them." });
   };
 
@@ -407,23 +495,23 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
           )}
         </p>
         <div role="group" aria-label="Show" className="flex overflow-hidden rounded-lg border border-[var(--line)] text-[13px]">
-          {(["buyers", "contacts"] as const).map((view) => (
+          {(["buyers", "contacts"] as const).map((option) => (
             <button
-              key={view}
+              key={option}
               type="button"
-              aria-pressed={state.view === view}
-              onClick={() => navigate({ view })}
-              className={`px-3 py-1.5 ${state.view === view ? "bg-[#111827] text-white" : "bg-white text-[#111827] hover:bg-[var(--subtle)]"}`}
+              aria-pressed={view === option}
+              onClick={() => switchView(option)}
+              className={`px-3 py-1.5 ${view === option ? "bg-[#111827] text-white" : "bg-white text-[#111827] hover:bg-[var(--subtle)]"}`}
             >
-              {view === "buyers" ? "Buyers" : "Contacts"}
+              {option === "buyers" ? "Buyers" : "Contacts"}
             </button>
           ))}
         </div>
-        {state.view === "buyers" ? (
+        {view === "buyers" ? (
           <button
             type="button"
-            onClick={() => setSelected(allSelected ? new Set() : new Set(rows.map((row) => row.leadId)))}
-            disabled={!rows.length}
+            onClick={() => setSelected(allSelected ? new Set() : new Set(selectableRows.map((row) => row.leadId)))}
+            disabled={!selectableRows.length}
             className="btn btn-secondary btn-sm"
           >
             {allSelected ? <SquareCheck size={14} aria-hidden /> : <Square size={14} aria-hidden />}
@@ -460,7 +548,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
         <div className="h-2" />
       )}
 
-      <section aria-label={state.view === "buyers" ? "Buyers" : "Contacts"} aria-busy={loading || isPending} className={`px-4 pb-6 transition-opacity lg:px-6 ${(loading || isPending) && result ? "opacity-60" : ""}`}>
+      <section aria-label={view === "buyers" ? "Buyers" : "Contacts"} aria-busy={loading || isPending} className={`px-4 pb-6 transition-opacity lg:px-6 ${(loading || isPending) && result ? "opacity-60" : ""}`}>
         {error ? (
           <EmptyState
             icon={<SearchX size={20} aria-hidden />}
@@ -482,22 +570,30 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
             text="Run a live search on Find, or load sample buyers to see how SuperSearch works."
             showSample
           />
-        ) : state.view === "contacts" ? (
+        ) : view === "contacts" ? (
           contacts && contacts.rows.length ? (
             <>
-              <ContactsTable rows={contacts.rows} onOpenBuyer={setOpen} />
+              <p className="mb-2 text-[13px] text-[#374151]" data-testid="contacts-count">
+                <b className="tabular-nums text-[#111827]">{contacts.total}</b> people to approach · <b className="tabular-nums text-[#111827]">{contacts.found}</b> found
+              </p>
+              <ContactsTable rows={contacts.rows} onOpenBuyer={setOpen} onAdd={setAddingContact} onConfirm={(row) => void confirmRow(row)} busy={confirming} />
               <div className="mt-3">
-                <Pagination page={state.page} size={PAGE_SIZE} total={contacts.total} onPage={goToPage} />
+                <Pagination page={contactsPage} size={PAGE_SIZE} total={contacts.total} onPage={goToPage} />
               </div>
             </>
+          ) : loading || contacts === null ? (
+            <div className="flex flex-col gap-2" role="status" aria-live="polite">
+              <span className="sr-only">Loading contacts…</span>
+              {Array.from({ length: 6 }, (_, index) => <div key={index} className="skeleton h-12 rounded-md" />)}
+            </div>
           ) : (
             <EmptyState icon={<Users size={20} aria-hidden />} title="No contacts match" text="Clear a contact filter, or switch back to Buyers." showFind={false}>
-              <button type="button" className="btn btn-secondary" onClick={() => navigate({ view: "buyers" })}>Show buyers</button>
+              <button type="button" className="btn btn-secondary" onClick={() => switchView("buyers")}>Show buyers</button>
             </EmptyState>
           )
         ) : rows.length ? (
           <>
-            <ResultsTable rows={rows} selected={selected} openId={openId} onToggle={toggle} onOpen={setOpen} />
+            <ResultsTable rows={rows} selected={selected} openId={openId} onToggle={toggle} onOpen={setOpen} onSaveDerived={(row) => void saveDerived(row)} saving={savingDerived} />
             <div className="mt-3">
               <Pagination page={state.page} size={PAGE_SIZE} total={total} onPage={goToPage} />
             </div>
@@ -533,7 +629,15 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
         </div>
       </div>
 
-      {openId ? (
+      {openRow ? (
+        <DerivedBuyerSidebar
+          key={openRow.leadId}
+          row={openRow}
+          saving={Boolean(openRow.derivedKey && savingDerived.has(openRow.derivedKey))}
+          onClose={() => setOpen("")}
+          onSave={() => void saveDerived(openRow)}
+        />
+      ) : openId && !isDerivedId(openId) ? (
         <BuyerSidebar
           key={openId}
           leadId={openId}
@@ -543,6 +647,14 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
             setOpen("");
             navigate({ q: name });
           }}
+        />
+      ) : null}
+      {addingContact ? (
+        <AddContactModal
+          company={addingContact.company}
+          slotTitle={addingContact.slotTitle}
+          onSubmit={(values) => submitContact(addingContact, values)}
+          onClose={() => setAddingContact(null)}
         />
       ) : null}
       {listIds ? <AddToListDialog leadIds={listIds} onClose={() => setListIds(null)} onDone={() => setSelected(new Set())} /> : null}

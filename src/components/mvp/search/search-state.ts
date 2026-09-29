@@ -4,7 +4,7 @@
  * BuyerSearch body sent to POST /api/mvp/buyers. Only non-default values are written, in a
  * fixed order, so links stay short and stable.
  */
-import type { BuyerRole, BuyerSearch, BuyerSignal, BuyerStage, SlotRole } from "@/mvp/buyers/types";
+import type { BuyerRole, BuyerSearch, BuyerSignal, BuyerStage, ChainLinkStatus, ChainTier, SlotRole } from "@/mvp/buyers/types";
 
 export const PAGE_SIZE = 25;
 
@@ -16,6 +16,11 @@ export const HOW_SURE = ["high", "medium", "low"] as const;
 export const REACH = ["allowed", "opt_out_only", "consent_needed"] as const;
 export const SORTS = ["latest", "fit", "window"] as const;
 export const WITHIN_DAYS = [30, 90, 180, 365] as const;
+/** Supply-chain tier filter (docs/mvp/15 §D). */
+export const TIERS: ChainTier[] = [1, 2, 3];
+/** "How we know" filter for derived buyers (15 §D). */
+export const LINKS = ["confirmed", "likely", "possible"] as const satisfies readonly Exclude<ChainLinkStatus, "not_identified">[];
+export type KnownLink = (typeof LINKS)[number];
 
 export type HowSure = (typeof HOW_SURE)[number];
 export type Reach = (typeof REACH)[number];
@@ -48,6 +53,10 @@ export interface SearchUrlState {
   stage: BuyerStage[];
   minFit: number | null;
   howSure: HowSure[];
+  /** Supply-chain tiers (empty = all). */
+  tiers: ChainTier[];
+  /** How we know a tier 2/3 company is in the chain (empty = any). */
+  links: KnownLink[];
   q: string;
   sort: SearchSort;
   page: number;
@@ -78,6 +87,8 @@ export const DEFAULT_SEARCH: SearchUrlState = {
   stage: [],
   minFit: null,
   howSure: [],
+  tiers: [],
+  links: [],
   q: "",
   sort: "latest",
   page: 1,
@@ -136,6 +147,8 @@ export function parseSearchState(params: Params): SearchUrlState {
     stage: listOf(get("stage"), STAGES),
     minFit: num(get("fit"), 0, 100),
     howSure: listOf(get("sure"), HOW_SURE),
+    tiers: listOf(get("tier"), ["1", "2", "3"] as const).map((value) => Number(value) as ChainTier),
+    links: listOf(get("how"), LINKS),
     q: (get("q") ?? "").trim().slice(0, 200),
     sort: (SORTS as readonly string[]).includes(sort ?? "") ? (sort as SearchSort) : "latest",
     page: num(get("page"), 1, 10_000) ?? 1,
@@ -174,6 +187,8 @@ export function serializeSearchState(state: SearchUrlState): URLSearchParams {
   putList("stage", state.stage);
   put("fit", state.minFit);
   putList("sure", state.howSure);
+  putList("tier", state.tiers.map(String));
+  putList("how", state.links);
   put("sort", state.sort === "latest" ? "" : state.sort);
   put("page", state.page > 1 ? state.page : null);
   put("view", state.view === "contacts" ? "contacts" : "");
@@ -271,6 +286,8 @@ export function toBuyerSearch(state: SearchUrlState, catalogue: CatalogueOption[
   if (state.stage.length) search.stage = state.stage;
   if (state.minFit !== null) search.minFit = state.minFit;
   if (state.howSure.length) search.howSure = state.howSure;
+  if (state.tiers.length) search.tiers = state.tiers;
+  if (state.links.length) search.linkStatus = state.links;
   if (state.q) search.q = state.q;
   return search;
 }

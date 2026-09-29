@@ -87,7 +87,7 @@ describe("supplier orders become supplier leads (07 §1, 13 §11)", () => {
     const owner = all.find((l) => /Aramco/i.test(l.buyer));
     expect(owner?.buyer_type).toBe("owner");
     expect(owner?.class).toBe("watch");
-    expect((owner?.reasons as Reason[])[0].text).toMatch(/identify the EPC contractor/);
+    expect((owner?.reasons as Reason[])[0].text).toMatch(/identify the contractor who will build it/);
   });
 });
 
