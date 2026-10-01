@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, authConfigError, isPublicPath, verifySessionToken } from "@/mvp/auth/session";
+import { publicOrigin } from "@/mvp/auth/origin";
 
 /**
  * Session gate (docs/mvp/12 §2). Every page and every /api/* route requires a valid session,
@@ -24,7 +25,7 @@ export async function proxy(request: NextRequest) {
     );
   }
 
-  const loginUrl = new URL("/login", request.url);
+  const loginUrl = new URL("/login", publicOrigin(request.url));
   if (pathname !== "/") loginUrl.searchParams.set("next", `${pathname}${search}`);
   return NextResponse.redirect(loginUrl);
 }

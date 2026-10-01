@@ -73,4 +73,41 @@ describe("DraftPanel", () => {
     });
     expect(screen.getByRole("button", { name: "Marked as sent" })).toBeTruthy();
   });
+
+  it("opens a template automatically for a dummy contact and sends to the configured test inbox", async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({ id: "demo-draft", subject: "Procurement support", body: "Hello Demo, could we discuss your requirements?" }, 201))
+      .mockReturnValueOnce(jsonResponse({ messageId: "provider-id", recipient: "our-inbox@example.com", alreadySent: false }));
+    const onSent = vi.fn();
+    render(<DraftPanel leadId={LEAD_ID} contacts={[{ id: null, name: "Demo procurement contact", detail: "Head of procurement", country: "SA", rule: rule("SA", "consent_needed", "Use official channel"), isDemo: true, companyName: "Selected Sub-Buyer" }]}
+      demoEmail={{ enabled: true, ready: true, recipient: "our-inbox@example.com", error: null }} autoGenerate onClose={() => undefined} onSent={onSent} />);
+    await screen.findByLabelText(/Message/);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ leadId: LEAD_ID, personId: null, templateOnly: true, demoContact: true, demoContactTitle: "Head of procurement" });
+    expect(screen.getByText(/Buyer: Selected Sub-Buyer/)).toBeTruthy();
+    expect(screen.getByText(/dummy address/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send demo email" }));
+    await screen.findByRole("button", { name: "Demo email sent" });
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/mvp/drafts/demo-draft/send");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ subject: "Procurement support", body: "Hello Demo, could we discuss your requirements?" });
+    expect(onSent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show sent after a failed delivery and offers a same-draft retry", async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({ id: "demo-draft", subject: "Support", body: "Hello Buyer" }, 201))
+      .mockReturnValueOnce(jsonResponse({ error: "Provider did not accept the message" }, 502));
+    render(<DraftPanel leadId={LEAD_ID} contacts={contacts} demoEmail={{ enabled: true, ready: true, recipient: "our-inbox@example.com", error: null }} autoGenerate onClose={() => undefined} />);
+    await screen.findByLabelText(/Message/);
+    fireEvent.click(screen.getByRole("button", { name: "Send demo email" }));
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("button", { name: "Demo email sent" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry demo email" })).toBeTruthy();
+    expect((screen.getByLabelText("Subject") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("disables sending when server credentials are missing but still previews a template", async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({ id: "demo-draft", subject: "Support", body: "Hello Buyer" }, 201));
+    render(<DraftPanel leadId={LEAD_ID} contacts={contacts} demoEmail={{ enabled: true, ready: false, recipient: null, error: "Set RESEND_API_KEY" }} autoGenerate onClose={() => undefined} />);
+    await screen.findByLabelText(/Message/);
+    expect((screen.getByRole("button", { name: "Send demo email" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Set RESEND_API_KEY")).toBeTruthy();
+  });
 });

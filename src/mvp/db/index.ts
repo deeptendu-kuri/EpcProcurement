@@ -132,6 +132,7 @@ async function createPgDb(connectionString: string): Promise<Db> {
   const pool = new Pool({
     connectionString,
     max: 5,
+    connectionTimeoutMillis: 15_000,
     types: {
       getTypeParser: ((oid: number, format?: "text" | "binary") =>
         PARSERS[oid] ?? types.getTypeParser(oid, format ?? "text")) as typeof types.getTypeParser,
@@ -183,6 +184,7 @@ function initDb(): Promise<Db> {
   if (!globalForDb.__mvpDb) {
     const pending = (async () => {
       const url = process.env.DATABASE_URL?.trim();
+      if (process.env.RENDER === "true" && !url) throw new Error("DATABASE_URL is required on Render; its local filesystem is not persistent.");
       const db = url ? await createPgDb(url) : await createPgliteDb(path.join(process.cwd(), ".data", "pglite"));
       await migrate(db);
       return db;

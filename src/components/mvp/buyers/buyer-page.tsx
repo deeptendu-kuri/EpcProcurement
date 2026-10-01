@@ -19,6 +19,7 @@ import { BUYER_STAGE_LABELS, HOW_SURE_LABELS, HOW_SURE_STYLES, REACH_LABELS, STA
 import { AddToListDialog } from "../search/lead-lists";
 import { Avatar } from "../search/results-table";
 import { SupplyChainExplorer } from "./supply-chain-explorer";
+import { DEMO_CONTACT_EMAIL, type DemoEmailInfo } from "@/mvp/email/config";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -141,6 +142,10 @@ export interface BuyerPageViewProps {
   buyer: BuyerView;
   detail: LeadDetail;
   companyOutreach: OutreachRule | null;
+  demoEmail?: DemoEmailInfo;
+  contactEmails?: Record<string, string>;
+  composeOnLoad?: boolean;
+  initialContactKey?: string;
 }
 
 /**
@@ -148,11 +153,11 @@ export interface BuyerPageViewProps {
  * supply chain with every contact across it, then Can you sell to them? · How to reach them · Proof · Activity.
  * No project, stage or owner sections.
  */
-export function BuyerPageView({ buyer, detail, companyOutreach }: BuyerPageViewProps) {
+export function BuyerPageView({ buyer, detail, companyOutreach, demoEmail, contactEmails, composeOnLoad, initialContactKey }: BuyerPageViewProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const actions = useLeadActions();
-  const [draftOpen, setDraftOpen] = useState(false);
+  const [draftOpen, setDraftOpen] = useState(Boolean(composeOnLoad));
   const [listOpen, setListOpen] = useState(false);
   const { lead } = detail;
   const status = actions.statusOf(lead.id, lead.status as LeadStatus);
@@ -160,16 +165,19 @@ export function BuyerPageView({ buyer, detail, companyOutreach }: BuyerPageViewP
 
   const outreach = new Map(detail.compliance.outreach.map((item) => [item.personId, item]));
   const contacts: DraftContact[] = [
-    ...detail.people.map((person) => ({
+    ...detail.people.filter(person => person.current_company_id === buyer.companyId).map((person) => ({
       id: person.id,
       name: person.full_name,
       detail: [person.title, person.roles[0] ? BUYING_ROLE_LABELS[person.roles[0].buying_role] : null].filter(Boolean).join(" · "),
       country: outreach.get(person.id)?.country ?? person.country,
       rule: outreach.get(person.id)?.rule ?? null,
+      email: contactEmails?.[person.id],
+      companyName: buyer.name,
     })),
+    ...(demoEmail?.enabled ? [{ id: null, name: "Demo procurement contact", detail: "Demo contact — not scraped", country: buyer.country, rule: null, email: DEMO_CONTACT_EMAIL, companyName: buyer.name, isDemo: true }] : []),
     { id: null, name: `${buyer.name} (company address)`, country: buyer.country, rule: companyOutreach },
   ];
-  const draftBlocked = draftBlockedReason(contacts);
+  const draftBlocked = demoEmail?.enabled ? null : draftBlockedReason(contacts);
   const eligibilitySub = detail.breakdown.criteria.flatMap((criterion) => criterion.subs ?? []).find((sub) => sub.id === "4.1");
   const deal = dealLine(buyer);
   const sources = new Set(buyer.proof.map((item) => item.source)).size;
@@ -222,7 +230,7 @@ export function BuyerPageView({ buyer, detail, companyOutreach }: BuyerPageViewP
       <RejectedBanner gates={detail.gates} leadClass={lead.class} status={lead.status} rejectReason={lead.reject_reason} />
       <BuyerSummary buyer={buyer} />
       <DealsList deals={buyer.deals ?? []} currentLeadId={buyer.leadId} />
-      <SupplyChainExplorer leadId={buyer.leadId} rootShortName={buyer.shortName || buyer.name} />
+      <SupplyChainExplorer leadId={buyer.leadId} rootShortName={buyer.shortName || buyer.name} demoEmail={demoEmail} />
 
       <div className="grid items-start gap-3 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-3">
@@ -240,7 +248,7 @@ export function BuyerPageView({ buyer, detail, companyOutreach }: BuyerPageViewP
         </div>
       </div>
 
-      {draftOpen ? <DraftPanel leadId={lead.id} contacts={contacts} onClose={() => setDraftOpen(false)} onSent={() => startTransition(() => router.refresh())} /> : null}
+      {draftOpen ? <DraftPanel leadId={lead.id} contacts={contacts} demoEmail={demoEmail} autoGenerate initialContactKey={initialContactKey} onClose={() => setDraftOpen(false)} onSent={() => startTransition(() => router.refresh())} /> : null}
       {listOpen ? <AddToListDialog leadIds={[lead.id]} onClose={() => setListOpen(false)} /> : null}
     </div>
   );

@@ -7,7 +7,10 @@ import { NO_STORE, jsonError, readJson, serverError, uuidSchema } from "../_shar
 const draftSchema = z.object({
   leadId: uuidSchema,
   personId: uuidSchema.nullable().default(null),
-});
+  templateOnly: z.boolean().optional(),
+  demoContact: z.boolean().optional(),
+  demoContactTitle: z.string().trim().max(120).optional(),
+}).strict();
 
 /**
  * POST /api/mvp/drafts — { leadId, personId|null } → 201 { id, subject, body, blockedReason? }.
@@ -18,7 +21,7 @@ export async function POST(request: Request) {
   if (body.response) return body.response;
   try {
     if (!(await leadExists(body.data.leadId))) return jsonError(404, "Lead not found.");
-    const draft = await generateDraft(body.data.leadId, body.data.personId);
+    const draft = await generateDraft(body.data.leadId, body.data.personId, body.data);
     return NextResponse.json(draft, { status: 201, headers: NO_STORE });
   } catch (error) {
     return serverError("generate draft", error, "The draft could not be written. Try again in a moment.");

@@ -1,0 +1,112 @@
+# Free cloud demo setup
+
+## What changed
+
+- Clicking a found contact, or **Demo email** for a missing contact at an identified company, opens an editable template automatically.
+- Sub-buyer contact actions use the selected company's buyer record. A derived supply-chain company is saved through the existing buyer flow when necessary.
+- Missing emails display `demo-contact@example.com`, explicitly labelled as a dummy address. Fake people are not added to the scraped contact database.
+- With `DEMO_EMAIL_ENABLED=1`, all delivery goes only to `DEMO_RECIPIENT_EMAIL`. The browser cannot choose a recipient, CC or BCC.
+- **Demo email sent** means Resend accepted the message and returned a provider ID, not that inbox receipt has been confirmed. Failed or uncertain attempts offer a same-draft retry with duplicate protection.
+- Existing discovery, scoring, buyer classifications, tender/owner leads and supply-chain candidate logic are unchanged. Possible companies are still prospects, not verified purchasing customers.
+
+## Accounts and information needed
+
+1. **GitHub:** the private repository containing this app, connected to Render. No GitHub token needs to be shared in chat.
+2. **Render:** a Free Node Web Service, not a Static Site. No paid disk, worker or custom domain is needed.
+3. **Neon:** a new Free PostgreSQL demo database. Copy its connection string including `sslmode=require`. A fresh dedicated database avoids mixing this app with another schema.
+4. **Resend:** a Free account and API key. For the no-domain-purchase setup, create the account using the same inbox that should receive every demo message. The default `onboarding@resend.dev` sender is restricted to the account's own email address; sending elsewhere requires a verified domain.
+5. **Groq:** reuse the existing key if available. Immediate previews use a deterministic template; **Write again** can use the configured AI and falls back to a template on provider failure. Live discovery still depends on the existing sources, extraction configuration and quotas.
+6. **Demo login:** choose the password clients will use. Keep the signing secret private and separate from the password.
+
+The shipped seller profile, catalogue and strengths are examples. For a branded demo, provide the actual seller name and products/services you can supply; we can update `src/mvp/config/client-profile.json`, `catalogue.json` and `strengths.json` without redesigning discovery. Until then, retain their example labels and do not present fictional certifications or capabilities as your own. Settings currently displays this configuration read-only.
+
+Enter secrets directly in `.env.local` locally and Render's Environment settings remotely. Never commit them, put them in `NEXT_PUBLIC_*`, or paste them into screenshots. If credentials have been posted publicly, rotate them.
+
+## Environment variables
+
+Add the following to `.env.local` without replacing existing source/AI settings:
+
+```dotenv
+DATABASE_URL="<Neon PostgreSQL connection string with SSL>"
+DEMO_EMAIL_ENABLED=1
+DEMO_RECIPIENT_EMAIL="<your Resend account inbox>"
+RESEND_API_KEY="<Resend API key>"
+DEMO_EMAIL_FROM="Demo <onboarding@resend.dev>"
+```
+
+Keep `APP_URL` empty for local development. Render needs these variables:
+
+| Variable | Value |
+| --- | --- |
+| `DATABASE_URL` | Neon PostgreSQL SSL connection string |
+| `DEMO_PASSWORD` | Client demo login password |
+| `SESSION_SECRET` | Random secret of at least 32 characters; the Blueprint generates one |
+| `APP_URL` | Actual Render HTTPS origin, e.g. `https://your-service.onrender.com`, without a page path |
+| `DEMO_EMAIL_ENABLED` | `1` |
+| `DEMO_RECIPIENT_EMAIL` | Exactly one authorized test inbox |
+| `RESEND_API_KEY` | Resend API key |
+| `DEMO_EMAIL_FROM` | `Demo <onboarding@resend.dev>` |
+| `GROQ_API_KEY` | Existing free-tier key |
+| `MVP_OFFLINE` | `0` for live discovery |
+| `NODE_VERSION` | `22` |
+
+Copy any existing custom `RSS_FEEDS`, model overrides, Cloudflare configuration or daily token budgets if you want identical source/AI behavior on the cloud. Do not copy the unrelated legacy Supabase variables for this MVP.
+
+For a manually configured service, generate `SESSION_SECRET` locally with:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+## Migrations
+
+Run from the app directory, after configuring the new cloud `DATABASE_URL`:
+
+```powershell
+pnpm.cmd db:migrate
+```
+
+This command connects to PostgreSQL and applies `src/mvp/db/migrations/001_*.sql` through `009_demo_email_delivery.sql` in order. The migration registry skips already-applied files. Each file runs inside a transaction; a failed file is rolled back. Do **not** run `supabase/migrations` for the active MVP.
+
+For a Neon `-pooler` hostname, the migration command automatically uses the matching direct endpoint because its session advisory lock is incompatible with transaction pooling. App traffic continues to use the original pooled `DATABASE_URL`. Other providers can use an optional `MIGRATION_DATABASE_URL` pointing to their direct endpoint.
+
+A fresh database receives the full schema. An existing compatible MVP database receives only pending migrations, including the new email delivery fields. Repeat runs print **Database is up to date**. Existing cloud rows are not reset.
+
+This is a **schema migration, not a local-data transfer**. It does not import `.data/pglite`, historical leads, contacts or articles. For the fastest demo, scrape into the fresh cloud database; the existing sample-data action is available as an explicitly labelled fallback. Local database recovery/import is a separate task; do not delete the original local database to make a fresh demo work.
+
+Render Free does not provide a pre-deploy command. `start:cloud` therefore runs the same migrations before launching Next.js. A database or migration error stops startup instead of serving against ephemeral local storage.
+
+## Render deployment
+
+The repository includes `render.yaml` for a Blueprint. Use it if this app is the repository root. If the repository wraps the app in another directory, set the Web Service **Root Directory** to the actual app folder and configure the settings manually; do not assume the local folder name is the GitHub root.
+
+- Runtime: Node
+- Plan: Free
+- Build command: `corepack pnpm install --frozen-lockfile && corepack pnpm build`
+- Start command: `corepack pnpm start:cloud`
+- Health check: `/api/mvp/health`
+- Environment: values listed above
+
+Once Render gives you the service URL, set `APP_URL` to that exact HTTPS origin and redeploy if necessary. This keeps login redirects and secure cookies on the public URL rather than the host's internal address.
+
+No deployment, repository push, real PostgreSQL migration or external email delivery should be claimed verified until performed with the actual accounts and settings.
+
+## Demo acceptance checklist
+
+1. Check cloud logs: build succeeded, migrations completed, server listening, readiness endpoint returns `200 {"ok":true}`.
+2. Open a private browser window on the public URL, log in and run the existing live discovery flow. Keep the results page open until it completes.
+3. Open a lead, click a named contact or **Demo email**, confirm the selected company, displayed contact address and prefilled editable template.
+4. Repeat for a sub-buyer and for a contact clicked from SuperSearch.
+5. Send one message. Confirm the UI shows **Demo email sent**, a provider ID and a history entry; confirm actual receipt in the authorized inbox and check the Resend dashboard if needed.
+6. Refresh and verify the saved lead/draft/history persisted in Neon. Check mobile layout and a signed-out API request.
+7. Have a few prepared relevant buyer examples saved before the meeting, clearly distinguishing real source evidence from sample data and possible candidates.
+
+Free Render services sleep after 15 minutes without inbound traffic and have ephemeral local files. Neon holds persistent data. Existing long-running search work is not a durable job queue, and reliable always-on scheduling is outside this minimal demo upgrade. Warm up the public link before the meeting; free tiers and upstream scraping/AI services can throttle, sleep or fail. No honest setup can guarantee zero cloud failures.
+
+## References
+
+- [Render Free limitations](https://render.com/docs/free)
+- [Deploy Next.js on Render](https://render.com/docs/deploy-nextjs-app)
+- [Neon Free plan](https://neon.com/blog/how-to-make-the-most-of-neons-free-plan)
+- [Resend test-domain recipient restriction](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain)
+- [Resend idempotency keys](https://resend.com/docs/dashboard/emails/idempotency-keys)

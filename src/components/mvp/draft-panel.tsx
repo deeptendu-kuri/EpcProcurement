@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Ban, Check, Copy, Loader2, Mail, Send, X } from "lucide-react";
 import { marketName } from "@/mvp/config/markets";
 import type { OutreachRule } from "@/mvp/types";
-import { createDraft, updateDraft, type DraftResult } from "./api-client";
+import { createDraft, sendDemoDraft, updateDraft, type DraftResult } from "./api-client";
+import { DEMO_CONTACT_EMAIL, type DemoEmailInfo } from "@/mvp/email/config";
 import { PERMISSION_LABELS } from "./labels";
 
 export interface DraftContact {
@@ -14,7 +15,12 @@ export interface DraftContact {
   detail?: string;
   country: string | null;
   rule: OutreachRule | null;
+  email?: string | null;
+  companyName?: string;
+  isDemo?: boolean;
 }
+
+const keyOf = (contact: DraftContact) => contact.isDemo ? "demo" : contact.id ?? "company";
 
 /** Why email is not allowed for this contact, in plain words, or null when it is allowed. */
 export function emailBlockReason(contact: DraftContact | undefined): string | null {
@@ -41,20 +47,29 @@ export function DraftPanel({
   contacts,
   onClose,
   onSent,
+  demoEmail,
+  autoGenerate = false,
+  initialContactKey,
 }: {
   leadId: string;
   contacts: DraftContact[];
   onClose: () => void;
   onSent?: () => void;
+  demoEmail?: DemoEmailInfo;
+  autoGenerate?: boolean;
+  initialContactKey?: string;
 }) {
-  const [contactKey, setContactKey] = useState<string>(contacts[0]?.id ?? "company");
+  const startingContact = contacts.find(c => keyOf(c) === initialContactKey) ?? contacts[0];
+  const [contactKey, setContactKey] = useState<string>(startingContact ? keyOf(startingContact) : "company");
   const [draft, setDraft] = useState<DraftResult | null>(null);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [busy, setBusy] = useState<"generate" | "send" | null>(null);
+  const [busy, setBusy] = useState<"generate" | "send" | null>(autoGenerate && (demoEmail?.enabled || !emailBlockReason(startingContact)) ? "generate" : null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [sent, setSent] = useState(false);
+  const [delivery, setDelivery] = useState<{ recipient: string; messageId: string } | null>(null);
+  const [attempted, setAttempted] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -66,25 +81,50 @@ export function DraftPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const contact = contacts.find((item) => (item.id ?? "company") === contactKey);
-  const precheck = emailBlockReason(contact);
+  const contact = contacts.find((item) => keyOf(item) === contactKey);
+  const personId = contact?.id ?? null;
+  const isDemoContact = Boolean(contact?.isDemo);
+  const contactTitle = contact?.detail;
+  const precheck = demoEmail?.enabled ? null : emailBlockReason(contact);
   const blocked = precheck ?? draft?.blockedReason ?? null;
 
-  const generate = async () => {
+  const generate = async (templateOnly = false, signal?: AbortSignal) => {
     setBusy("generate");
     setError(null);
     setSent(false);
     try {
-      const result = await createDraft(leadId, contact?.id ?? null);
+      const result = await createDraft(leadId, personId, {
+        ...(templateOnly ? { templateOnly: true } : {}),
+        ...(isDemoContact ? { demoContact: true, demoContactTitle: contactTitle } : {}), signal,
+      });
+      if (signal?.aborted) return;
       setDraft(result);
       setSubject(result.subject ?? "");
       setBody(result.body ?? "");
+      setAttempted(false);
+      setDelivery(null);
     } catch (err) {
+      if (signal?.aborted) return;
       setError(err instanceof Error ? err.message : "The draft could not be written.");
     } finally {
-      setBusy(null);
+      if (!signal?.aborted) setBusy(null);
     }
   };
+
+  useEffect(() => {
+    if (!autoGenerate || precheck) return;
+    const controller = new AbortController();
+    createDraft(leadId, personId, {
+      templateOnly: true, ...(isDemoContact ? { demoContact: true, demoContactTitle: contactTitle } : {}), signal: controller.signal,
+    }).then(result => {
+      if (controller.signal.aborted) return;
+      setDraft(result); setSubject(result.subject ?? ""); setBody(result.body ?? "");
+      setAttempted(false); setSent(false); setDelivery(null); setError(null);
+    }).catch(err => {
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "The draft could not be written.");
+    }).finally(() => { if (!controller.signal.aborted) setBusy(null); });
+    return () => controller.abort();
+  }, [autoGenerate, precheck, contactKey, leadId, personId, isDemoContact, contactTitle]);
 
   const copy = async () => {
     try {
@@ -109,6 +149,21 @@ export function DraftPanel({
     } finally {
       setBusy(null);
     }
+  };
+
+  const sendDemo = async () => {
+    if (!draft || !demoEmail?.ready) return;
+    setBusy("send");
+    setError(null);
+    setAttempted(true);
+    try {
+      const result = await sendDemoDraft(draft.id, { subject, body });
+      setDelivery(result);
+      setSent(true);
+      onSent?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delivery could not be confirmed. Retry the same draft.");
+    } finally { setBusy(null); }
   };
 
   const words = wordCount(body);
@@ -139,6 +194,7 @@ export function DraftPanel({
             <label htmlFor="draft-contact" className="text-sm font-semibold text-[#344054]">Contact</label>
             <select
               id="draft-contact"
+              disabled={busy === "send" || (attempted && !sent)}
               value={contactKey}
               onChange={(event) => {
                 setContactKey(event.target.value);
@@ -146,22 +202,39 @@ export function DraftPanel({
                 setSubject("");
                 setBody("");
                 setSent(false);
+                setAttempted(false);
+                setDelivery(null);
+                if (autoGenerate) setBusy(demoEmail?.enabled || !emailBlockReason(contacts.find(c => keyOf(c) === event.target.value)) ? "generate" : null);
               }}
               className="control focus-ring h-10 px-2 text-sm"
             >
               {contacts.map((item) => (
-                <option key={item.id ?? "company"} value={item.id ?? "company"}>
+                <option key={keyOf(item)} value={keyOf(item)}>
                   {item.name}
                   {item.detail ? ` · ${item.detail}` : ""}
                 </option>
               ))}
             </select>
+            {contact?.companyName ? <p className="text-sm text-[#344054]">Buyer: {contact.companyName}</p> : null}
+            <p className="text-sm text-[#344054]">
+              Contact email: {contact?.email || (demoEmail?.enabled ? DEMO_CONTACT_EMAIL : "Not found")}
+              {demoEmail?.enabled && (!contact?.email || contact.email === DEMO_CONTACT_EMAIL) ? <span className="ml-1 text-xs text-[#92400e]">(dummy address — display only)</span> : null}
+            </p>
             {contact?.rule ? (
               <p className="text-xs text-[#667085]">
                 Contact rules{contact.country ? ` (${marketName(contact.country)})` : ""}: email {PERMISSION_LABELS[contact.rule.email]}
               </p>
             ) : null}
           </div>
+
+          {demoEmail?.enabled ? (
+            <div className="rounded-md border border-[#bfdbfe] bg-[#eff6ff] p-3 text-sm text-[#1e40af]">
+              <p className="font-semibold">Demo delivery only</p>
+              <p>All messages go to {demoEmail.recipient || "the configured test inbox"}, never to this contact.</p>
+              <p className="mt-1 text-xs">This is a test preview, not permission to contact the real buyer.</p>
+              {!demoEmail.ready ? <p className="mt-1 font-semibold">{demoEmail.error}</p> : null}
+            </div>
+          ) : null}
 
           {blocked ? (
             <div role="alert" className="flex gap-2 rounded-md border border-[#fecdca] bg-[#fef3f2] p-3 text-sm text-[#b42318]">
@@ -175,8 +248,8 @@ export function DraftPanel({
 
           <button
             type="button"
-            onClick={generate}
-            disabled={Boolean(precheck) || busy !== null}
+            onClick={() => void generate()}
+            disabled={Boolean(precheck) || busy !== null || (attempted && !sent)}
             className="btn-primary focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy === "generate" ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Mail size={16} aria-hidden />}
@@ -191,7 +264,7 @@ export function DraftPanel({
                   id="draft-subject"
                   value={subject}
                   onChange={(event) => setSubject(event.target.value)}
-                  disabled={sent}
+                  disabled={sent || busy !== null || attempted}
                   className="control focus-ring h-10 px-3 text-sm"
                 />
               </div>
@@ -204,7 +277,7 @@ export function DraftPanel({
                   id="draft-body"
                   value={body}
                   onChange={(event) => setBody(event.target.value)}
-                  disabled={sent}
+                  disabled={sent || busy !== null || attempted}
                   rows={12}
                   className="control focus-ring px-3 py-2 text-sm leading-6"
                 />
@@ -220,15 +293,17 @@ export function DraftPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={markSent}
-                  disabled={sent || busy !== null}
+                  onClick={demoEmail?.enabled ? sendDemo : markSent}
+                  disabled={sent || busy !== null || Boolean(demoEmail?.enabled && !demoEmail.ready)}
                   className="btn-quiet focus-ring inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50"
                 >
                   {busy === "send" ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <Send size={15} aria-hidden />}
-                  {sent ? "Marked as sent" : "Mark as sent"}
+                  {demoEmail?.enabled ? sent ? "Demo email sent" : attempted ? "Retry demo email" : "Send demo email" : sent ? "Marked as sent" : "Mark as sent"}
                 </button>
               </div>
-              <p className="text-xs text-[#667085]">Send it from your own mail app, then mark it as sent so the buyer history stays complete.</p>
+              {demoEmail?.enabled ? (
+                <p className="text-xs text-[#667085]">{delivery ? `Accepted by the email provider for ${delivery.recipient}. Message ID: ${delivery.messageId}. Check that inbox for receipt.` : "Sent is shown only after the email provider accepts the message. No buyer is emailed in this demo."}</p>
+              ) : <p className="text-xs text-[#667085]">Send it from your own mail app, then mark it as sent so the buyer history stays complete.</p>}
             </>
           ) : null}
 

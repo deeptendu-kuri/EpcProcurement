@@ -104,7 +104,7 @@ export async function passwordMatches(candidate: string, expected: string): Prom
 
 /** Paths reachable without a session. Everything else (pages and /api/*) requires one. */
 export function isPublicPath(pathname: string): boolean {
-  return pathname === "/login" || pathname === "/api/mvp/login";
+  return pathname === "/login" || pathname === "/api/mvp/login" || pathname === "/api/mvp/health";
 }
 
 /**

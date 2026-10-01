@@ -213,6 +213,7 @@ function TopTabs({ tab, right }: { tab: Tab; right?: React.ReactNode }) {
 }
 
 export interface SearchWorkspaceProps {
+  demoEmail?: boolean;
   tab: Tab;
   state: SearchUrlState;
   catalogue: CatalogueOption[];
@@ -224,7 +225,7 @@ export interface SearchWorkspaceProps {
  * SuperSearch | Lead Lists tabs, the count line, Buyers | Contacts, Select all, Add to list, Export,
  * Find contacts · the buyer sidebar. Filters live in the URL; 25 buyers per page.
  */
-export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorkspaceProps) {
+export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: SearchWorkspaceProps) {
   const router = useRouter();
   const toast = useToast();
   const { status, now } = useAppStatus();
@@ -435,6 +436,17 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
     toast.show({ message: "Showing each buyer’s buying team. Use “Find” on a missing person to search for them." });
   };
 
+  const emailContact = async (row: ContactRow) => {
+    const key = contactKey(row);
+    setConfirming(previous => new Set(previous).add(key));
+    try {
+      const leadId = isDerivedId(row.leadId) && row.derivedKey ? await saveDerivedBuyer(row.derivedKey) : row.leadId;
+      if (!leadId) throw new Error("Save this company as a buyer first.");
+      router.push(`/buyers/${encodeURIComponent(leadId)}?compose=1&contact=${encodeURIComponent(row.person?.id || "demo")}`);
+    } catch (err) { toast.show({ message: err instanceof Error ? err.message : "Could not open the email.", tone: "error" }); }
+    finally { setConfirming(previous => { const next = new Set(previous); next.delete(key); return next; }); }
+  };
+
   const panel = (
     <FilterPanel
       key={panelKey}
@@ -576,7 +588,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets }: SearchWorksp
               <p className="mb-2 text-[13px] text-[#374151]" data-testid="contacts-count">
                 <b className="tabular-nums text-[#111827]">{contacts.total}</b> people to approach · <b className="tabular-nums text-[#111827]">{contacts.found}</b> found
               </p>
-              <ContactsTable rows={contacts.rows} onOpenBuyer={setOpen} onAdd={setAddingContact} onConfirm={(row) => void confirmRow(row)} busy={confirming} />
+              <ContactsTable rows={contacts.rows} onOpenBuyer={setOpen} onAdd={setAddingContact} onConfirm={(row) => void confirmRow(row)} busy={confirming} onEmail={(row) => void emailContact(row)} demoEmail={demoEmail} />
               <div className="mt-3">
                 <Pagination page={contactsPage} size={PAGE_SIZE} total={contacts.total} onPage={goToPage} />
               </div>

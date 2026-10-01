@@ -772,8 +772,14 @@ export async function updateDraft(
   if (!isUuid(id)) return null;
   return getDb().tx(async (tx) => {
     const current = (await tx.query<OutreachDraftRow>("select * from outreach_drafts where id = $1 for update", [id])).rows[0];
-    if (!current) return null;
-    if (current.blocked_reason && patch.status === "sent_externally") {
+      if (!current) return null;
+      if (current.delivery_first_attempt_at) {
+        throw new DraftBlockedError("An attempted demo delivery cannot be edited or marked as sent manually. Use its Send action to retry the same message.");
+      }
+      if (current.demo_only && patch.status === "sent_externally") {
+        throw new DraftBlockedError("Use Send demo email. Demo drafts are marked sent only after the email provider accepts them.");
+      }
+      if (current.blocked_reason && patch.status === "sent_externally") {
       throw new DraftBlockedError(current.blocked_reason);
     }
     const updated = (

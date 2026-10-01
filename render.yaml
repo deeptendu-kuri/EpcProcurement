@@ -1,0 +1,33 @@
+# Connect this repository in Render as a Blueprint, or use these settings manually.
+# No paid worker, disk, database, or custom domain is provisioned.
+services:
+  - type: web
+    name: industrial-buyer-demo
+    runtime: node
+    plan: free
+    buildCommand: corepack pnpm install --frozen-lockfile && corepack pnpm build
+    startCommand: corepack pnpm start:cloud
+    healthCheckPath: /api/mvp/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false
+      - key: DEMO_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: APP_URL
+        sync: false
+      - key: DEMO_EMAIL_ENABLED
+        value: "1"
+      - key: DEMO_RECIPIENT_EMAIL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: DEMO_EMAIL_FROM
+        value: "Demo <onboarding@resend.dev>"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MVP_OFFLINE
+        value: "0"

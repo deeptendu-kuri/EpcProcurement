@@ -57,9 +57,12 @@ describe("auth config", () => {
     expect(await passwordMatches("", "open sesame")).toBe(false);
   });
 
-  it("only exposes /login and the login API", () => {
+  it("only exposes login and the minimal cloud readiness probe", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/api/mvp/login")).toBe(true);
+    expect(isPublicPath("/api/mvp/health")).toBe(true);
+    expect(isPublicPath("/api/mvp/health/x")).toBe(false);
+    expect(isPublicPath("/api/mvp/email/config")).toBe(false);
     expect(isPublicPath("/api/mvp/logout")).toBe(false);
     expect(isPublicPath("/login/x")).toBe(false);
     expect(isPublicPath("/")).toBe(false);

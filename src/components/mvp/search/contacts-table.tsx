@@ -19,13 +19,15 @@ export interface ContactsTableProps {
   onConfirm?: (row: ContactRow) => void;
   /** Row keys being confirmed. */
   busy?: ReadonlySet<string>;
+  onEmail?: (row: ContactRow) => void;
+  demoEmail?: boolean;
 }
 
 /**
  * Contacts view of SuperSearch (docs/mvp/14 §8, 15 §E): one row per buying-team slot of each buyer —
  * the person when we have one, otherwise "Not found" with Find · + Add.
  */
-export function ContactsTable({ rows, onOpenBuyer, onAdd, onConfirm, busy }: ContactsTableProps) {
+export function ContactsTable({ rows, onOpenBuyer, onAdd, onConfirm, busy, onEmail, demoEmail }: ContactsTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[860px] border-collapse text-[13.5px]" aria-label="Contacts">
@@ -52,7 +54,7 @@ export function ContactsTable({ rows, onOpenBuyer, onAdd, onConfirm, busy }: Con
                       {row.person ? initials(row.person.name) : "?"}
                     </span>
                     <div className="min-w-0">
-                      <p className="font-semibold text-[#111827]">{row.person ? row.person.name : row.slotTitle}</p>
+                      {row.person && onEmail ? <button type="button" disabled={saving} onClick={() => onEmail(row)} className="text-left font-semibold text-[var(--accent)] hover:underline">{row.person.name}</button> : <p className="font-semibold text-[#111827]">{row.person ? row.person.name : row.slotTitle}</p>}
                       <p className="text-xs text-[var(--muted)]">{row.person ? (row.person.title ?? row.slotTitle) : "Not found yet"}</p>
                     </div>
                   </div>
@@ -98,6 +100,7 @@ export function ContactsTable({ rows, onOpenBuyer, onAdd, onConfirm, busy }: Con
                       ) : null}
                     </span>
                   )}
+                  {onEmail && (row.person || demoEmail) ? <button type="button" disabled={saving} onClick={() => onEmail(row)} aria-label={`Email ${row.person?.name || "demo contact"} at ${row.company}`} className="ml-2 text-xs font-semibold text-[var(--accent)] hover:underline">{row.person ? "Email" : "Demo email"}</button> : null}
                 </td>
               </tr>
             );

@@ -45,8 +45,13 @@ export interface DraftResult {
   blockedReason?: string;
 }
 
-export function createDraft(leadId: string, personId: string | null) {
-  return apiJson<DraftResult>("/api/mvp/drafts", { method: "POST", body: { leadId, personId } });
+export function createDraft(leadId: string, personId: string | null, options: { templateOnly?: boolean; demoContact?: boolean; demoContactTitle?: string; signal?: AbortSignal } = {}) {
+  const { signal, ...body } = options;
+  return apiJson<DraftResult>("/api/mvp/drafts", { method: "POST", body: { leadId, personId, ...body }, signal });
+}
+
+export function sendDemoDraft(id: string, body: { subject: string; body: string }) {
+  return apiJson<{ messageId: string; recipient: string; alreadySent: boolean }>(`/api/mvp/drafts/${id}/send`, { method: "POST", body });
 }
 
 export function updateDraft(id: string, body: { subject?: string; body?: string; status?: "sent_externally" }) {

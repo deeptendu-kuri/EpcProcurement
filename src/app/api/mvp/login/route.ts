@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { publicOrigin } from "@/mvp/auth/origin";
 import {
   SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
 
   const fail = (code: "config" | "invalid", status: number, message: string) => {
     if (!isForm) return NextResponse.json({ error: message }, { status });
-    const url = new URL("/login", request.url);
+    const url = new URL("/login", publicOrigin(request.url));
     url.searchParams.set("error", code);
     if (next) url.searchParams.set("next", next);
     return NextResponse.redirect(url, 303);
@@ -50,13 +51,13 @@ export async function POST(request: NextRequest) {
   }
 
   const target = safeNextPath(next);
-  const response = isForm ? NextResponse.redirect(new URL(target, request.url), 303) : NextResponse.json({ ok: true, next: target });
+  const response = isForm ? NextResponse.redirect(new URL(target, publicOrigin(request.url)), 303) : NextResponse.json({ ok: true, next: target });
   response.cookies.set({
     name: SESSION_COOKIE,
     value: await createSessionToken(secret),
     httpOnly: true,
     sameSite: "lax",
-    secure: request.nextUrl.protocol === "https:",
+    secure: publicOrigin(request.url).startsWith("https:"),
     path: "/",
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });

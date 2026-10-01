@@ -78,6 +78,8 @@ export interface ChainContactsTableProps {
   onAdd: (row: ChainContactRow) => void;
   onConfirm: (row: ChainContactRow) => void;
   onFindCandidates: (row: ChainContactRow) => void;
+  onEmail?: (row: ChainContactRow) => void;
+  demoEmail?: boolean;
 }
 
 export function rowKey(row: Pick<ChainContactRow, "nodeId" | "slotId">): string {
@@ -88,7 +90,7 @@ export function rowKey(row: Pick<ChainContactRow, "nodeId" | "slotId">): string 
  * All contacts in this supply chain (docs/mvp/15 §E): every node × buying-team slot across the tiers.
  * Tier · Company · Person / role · Why them · Status · Action (Find · + Add / Confirm / Find candidates).
  */
-export function ChainContactsTable({ rows, loading = false, busy, onAdd, onConfirm, onFindCandidates }: ChainContactsTableProps) {
+export function ChainContactsTable({ rows, loading = false, busy, onAdd, onConfirm, onFindCandidates, onEmail, demoEmail }: ChainContactsTableProps) {
   const [tier, setTier] = useState<TierFilter>("all");
   const [deciders, setDeciders] = useState(false);
   const [missingOnly, setMissingOnly] = useState(false);
@@ -154,7 +156,7 @@ export function ChainContactsTable({ rows, loading = false, busy, onAdd, onConfi
                   <td className="px-2.5 py-2.5">
                     {row.person ? (
                       <>
-                        <span className="font-semibold text-[#111827]">{row.person.name}</span>
+                        {onEmail ? <button type="button" onClick={() => onEmail(row)} disabled={saving} className="text-left font-semibold text-[var(--accent)] hover:underline">{row.person.name}</button> : <span className="font-semibold text-[#111827]">{row.person.name}</span>}
                         <span className="text-[#374151]"> · {row.person.title || row.title}</span> <SlotRoleTag role={row.role} />
                         <ContactPoints email={row.person.email} phone={row.person.phone} linkedinUrl={row.person.linkedinUrl} />
                       </>
@@ -167,6 +169,11 @@ export function ChainContactsTable({ rows, loading = false, busy, onAdd, onConfi
                   <td className="px-2.5 py-2.5 text-xs text-[var(--muted)]">{row.why}</td>
                   <td className="px-2.5 py-2.5"><StatusChip status={row.status} /></td>
                   <td className="px-2.5 py-2.5">
+                    {onEmail && row.companyIdentified && (row.person || demoEmail) ? (
+                      <button type="button" disabled={saving} onClick={() => onEmail(row)} aria-label={`Email ${row.person?.name || "demo contact"} at ${row.companyName}`} className="mb-1 mr-2 inline-flex items-center gap-1 whitespace-nowrap text-xs font-semibold text-[var(--accent)] hover:underline disabled:opacity-50">
+                        <Mail size={12} aria-hidden /> {row.person ? "Email" : "Demo email"}
+                      </button>
+                    ) : null}
                     {!row.companyIdentified || row.status === "company_first" ? (
                       <button type="button" onClick={() => onFindCandidates(row)} className="whitespace-nowrap text-[12.5px] text-[var(--accent)] hover:underline">
                         Find candidates

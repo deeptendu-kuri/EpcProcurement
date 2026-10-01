@@ -467,6 +467,15 @@ export interface OutreachDraftRow {
   created_by: string | null;
   created_at: string;
   updated_at: string | null;
+  demo_only: boolean;
+  delivery_state: "sending" | "sent" | "failed" | null;
+  delivery_recipient: string | null;
+  delivery_from: string | null;
+  provider_message_id: string | null;
+  delivery_error: string | null;
+  delivery_first_attempt_at: string | null;
+  delivery_attempted_at: string | null;
+  delivery_sent_at: string | null;
 }
 
 export interface LlmUsageRow {

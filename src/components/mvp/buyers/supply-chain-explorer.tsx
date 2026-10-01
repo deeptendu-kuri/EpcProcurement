@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { ChainContactRow, ChainNode, SupplyChain } from "@/mvp/buyers/types";
 import { ApiError } from "../api-client";
 import { useToast } from "../shell/toast";
@@ -8,6 +9,9 @@ import { AddContactModal, type AddContactValues } from "./add-contact-modal";
 import { addContact, confirmContact, getChain, getChainContacts, removeNodeCompany, setNodeCompany } from "./chain-api";
 import { ChainContactsTable, rowKey } from "./chain-contacts-table";
 import { SupplyChainTree } from "./supply-chain-tree";
+import { saveDerivedBuyer } from "./chain-api";
+import { DraftPanel, type DraftContact } from "../draft-panel";
+import { DEMO_CONTACT_EMAIL, type DemoEmailInfo } from "@/mvp/email/config";
 
 function withSet<T>(set: ReadonlySet<T>, value: T, on: boolean): Set<T> {
   const next = new Set(set);
@@ -20,7 +24,8 @@ function withSet<T>(set: ReadonlySet<T>, value: T, on: boolean): Set<T> {
  * The supply-chain tree and "All contacts in this supply chain" for one buyer (docs/mvp/15 §B, §E).
  * Loads GET /api/mvp/chain/[leadId] (+ /contacts); tier-3 suppliers load on "Expand".
  */
-export function SupplyChainExplorer({ leadId, rootShortName }: { leadId: string; rootShortName: string }) {
+export function SupplyChainExplorer({ leadId, rootShortName, demoEmail }: { leadId: string; rootShortName: string; demoEmail?: DemoEmailInfo }) {
+  const router = useRouter();
   const toast = useToast();
   const [chain, setChain] = useState<SupplyChain | null>(null);
   const [contacts, setContacts] = useState<ChainContactRow[]>([]);
@@ -31,6 +36,7 @@ export function SupplyChainExplorer({ leadId, rootShortName }: { leadId: string;
   const [busyRows, setBusyRows] = useState<Set<string>>(new Set());
   const [candidatesFor, setCandidatesFor] = useState<string | null>(null);
   const [adding, setAdding] = useState<ChainContactRow | null>(null);
+  const [emailDraft, setEmailDraft] = useState<{ leadId: string; contact: DraftContact } | null>(null);
   const [retry, setRetry] = useState(0);
   const expandedRef = useRef<Set<string>>(new Set());
   const firstLoadRef = useRef(true);
@@ -140,6 +146,24 @@ export function SupplyChainExplorer({ leadId, rootShortName }: { leadId: string;
     }
   };
 
+  const openEmail = async (row: ChainContactRow) => {
+    const node = chain?.nodes.find(item => item.nodeId === row.nodeId);
+    if (!node?.companyId) return;
+    const key = rowKey(row);
+    setBusyRows(previous => withSet(previous, key, true));
+    try {
+      const targetLeadId = node.leadId || (node.derivedKey ? await saveDerivedBuyer(node.derivedKey) : null);
+      if (!targetLeadId) throw new Error("Save this company as a buyer before drafting an email.");
+      setEmailDraft({ leadId: targetLeadId, contact: {
+        id: row.person?.id ?? null, name: row.person?.name ?? "Demo procurement contact", detail: row.person?.title || row.title,
+        country: null, rule: null, email: row.person?.email || (demoEmail?.enabled ? DEMO_CONTACT_EMAIL : null),
+        companyName: row.companyName, isDemo: !row.person,
+      } });
+    } catch (err) {
+      toast.show({ message: err instanceof Error ? err.message : "Could not open the email draft.", tone: "error" });
+    } finally { setBusyRows(previous => withSet(previous, key, false)); }
+  };
+
   const findCandidates = (row: ChainContactRow) => {
     if (row.tier === 3) {
       const node = chain?.nodes.find((item) => item.nodeId === row.nodeId);
@@ -188,13 +212,14 @@ export function SupplyChainExplorer({ leadId, rootShortName }: { leadId: string;
 
       {!error ? (
         <section id="chain-contacts" aria-label="Contacts in this supply chain" className="scroll-mt-20 rounded-[14px] border border-[var(--line)] bg-white px-[18px] py-3.5">
-          <ChainContactsTable rows={contacts} loading={contactsLoading} busy={busyRows} onAdd={setAdding} onConfirm={(row) => void confirm(row)} onFindCandidates={findCandidates} />
+          <ChainContactsTable rows={contacts} loading={contactsLoading} busy={busyRows} onAdd={setAdding} onConfirm={(row) => void confirm(row)} onFindCandidates={findCandidates} onEmail={(row) => void openEmail(row)} demoEmail={demoEmail?.enabled} />
         </section>
       ) : null}
 
       {adding ? (
         <AddContactModal company={adding.companyName} slotTitle={adding.title} onSubmit={(values) => submitContact(adding, values)} onClose={() => setAdding(null)} />
       ) : null}
+      {emailDraft ? <DraftPanel key={`${emailDraft.leadId}:${emailDraft.contact.id || "demo"}`} leadId={emailDraft.leadId} contacts={[emailDraft.contact]} demoEmail={demoEmail} autoGenerate onClose={() => setEmailDraft(null)} onSent={() => router.refresh()} /> : null}
     </>
   );
 }
