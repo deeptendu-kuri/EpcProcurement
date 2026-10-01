@@ -82,6 +82,7 @@ The repository includes `render.yaml` for a Blueprint. Use it if this app is the
 
 - Runtime: Node
 - Plan: Free
+- Region: Ohio, matching the current demo database's US East (Ohio) region
 - Build command: `corepack pnpm install --frozen-lockfile && corepack pnpm build`
 - Start command: `corepack pnpm start:cloud`
 - Health check: `/api/mvp/health`

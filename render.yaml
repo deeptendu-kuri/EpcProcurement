@@ -5,6 +5,8 @@ services:
     name: industrial-buyer-demo
     runtime: node
     plan: free
+    # Match the demo Neon database's us-east-2 region to reduce SQL round-trip latency.
+    region: ohio
     buildCommand: corepack pnpm install --frozen-lockfile && corepack pnpm build
     startCommand: corepack pnpm start:cloud
     healthCheckPath: /api/mvp/health
