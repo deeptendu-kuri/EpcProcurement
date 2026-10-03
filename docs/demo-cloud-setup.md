@@ -22,6 +22,21 @@ The shipped seller profile, catalogue and strengths are examples. For a branded 
 
 Enter secrets directly in `.env.local` locally and Render's Environment settings remotely. Never commit them, put them in `NEXT_PUBLIC_*`, or paste them into screenshots. If credentials have been posted publicly, rotate them.
 
+## Approved email automation (guided-workflow branch)
+
+Product-scoped leads now use **Contact → review template → Approve & automate demo email → Outreach**. Approval saves a persistent database job; it does not display a sent confirmation. Only Resend acceptance can mark the email sent. The Outreach page shows queued, sending, paused, cancelled, accepted or needs-review states, with provider ID and any delivery error. The lead's conversation and activity retain the history.
+
+Automation is locked in both application code and the database to `deeptendukuri@gmail.com`. No browser recipient, CC/BCC or follow-up schedule is accepted. Buyer fit must be approved before queuing and is checked again before sending. This test mode does not validate a dummy contact or move it into Verified CRM.
+
+The queue freezes approved text, deduplicates company/product/contact across searches, claims jobs atomically, and reuses the draft's provider idempotency key for bounded retries. A job outside the 23-hour retry window needs manual review. Unattempted jobs can be paused/resumed/cancelled; an uncertain delivery cannot be cancelled to release duplicate protection. No historical drafts are automatically approved or sent.
+
+- Set `MVP_OUTREACH_WORKER=on` for the Node background worker. Default is off. It checks for one due job every 15 seconds while the server is awake, independently of the browser.
+- For an external scheduler, set server-only `OUTREACH_WORKER_SECRET` to 32+ random characters and invoke **POST `/api/mvp/outreach/worker`** with `Authorization: Bearer <secret>`. No query-string token, browser session or unauthenticated GET can invoke it. Each invocation processes at most one job. An external scheduler is not provisioned by this change.
+- Free-host sleep still delays delivery; durable storage is not an always-on worker. Use Neon/PostgreSQL in the cloud, never ephemeral PGlite. Verify the worker configuration after deployment.
+- Automatic follow-ups, inbound reply interpretation and calendar booking remain disabled/unconnected. Connect reply detection and stop-on-reply/opt-out handling before enabling follow-ups. This is one approved initial email per campaign, not a self-learning sales agent.
+
+The legacy company view retains its existing manual single-inbox Send action; an approved campaign draft cannot bypass the queue through that action or be edited/marked sent manually.
+
 ## Environment variables
 
 Add the following to `.env.local` without replacing existing source/AI settings:
@@ -66,7 +81,7 @@ Run from the app directory, after configuring the new cloud `DATABASE_URL`:
 pnpm.cmd db:migrate
 ```
 
-This command connects to PostgreSQL and applies `src/mvp/db/migrations/001_*.sql` through `009_demo_email_delivery.sql` in order. The migration registry skips already-applied files. Each file runs inside a transaction; a failed file is rolled back. Do **not** run `supabase/migrations` for the active MVP.
+This command connects to PostgreSQL and applies `src/mvp/db/migrations/001_*.sql` through `011_demo_campaigns.sql` in order. Migration 010 preserves product/search provenance; migration 011 adds the initially empty approved-email queue. The migration registry skips already-applied files. Each file runs inside a transaction; a failed file is rolled back. Do **not** run `supabase/migrations` for the active MVP.
 
 For a Neon `-pooler` hostname, the migration command automatically uses the matching direct endpoint because its session advisory lock is incompatible with transaction pooling. App traffic continues to use the original pooled `DATABASE_URL`. Other providers can use an optional `MIGRATION_DATABASE_URL` pointing to their direct endpoint.
 

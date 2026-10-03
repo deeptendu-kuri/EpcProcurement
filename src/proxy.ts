@@ -11,6 +11,9 @@ export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const isApi = pathname === "/api" || pathname.startsWith("/api/");
 
+  // This one machine endpoint enforces its own long bearer secret, not a browser session.
+  if (pathname === "/api/mvp/outreach/worker") return NextResponse.next();
+
   if (isPublicPath(pathname)) return NextResponse.next();
 
   const configError = authConfigError();

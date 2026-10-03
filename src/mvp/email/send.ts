@@ -13,7 +13,7 @@ export interface DemoSendResult {
 }
 
 /** No recipient argument exists: all delivery is locked to the server-configured inbox. */
-export async function sendDemoEmail(id: string, text: { subject: string; body: string }): Promise<DemoSendResult> {
+export async function sendDemoEmail(id: string, text: { subject: string; body: string }, campaign?: { id: string; leaseToken: string }): Promise<DemoSendResult> {
   let settings: ReturnType<typeof demoEmailSettings>;
   try { settings = demoEmailSettings(); }
   catch (error) { throw new DemoSendError(503, error instanceof Error ? error.message : "Demo sending is not configured."); }
@@ -23,6 +23,12 @@ export async function sendDemoEmail(id: string, text: { subject: string; body: s
     await tx.query("select pg_advisory_xact_lock(78240321)");
     const current = (await tx.query<OutreachDraftRow>("select * from outreach_drafts where id = $1 for update", [id])).rows[0];
     if (!current) throw new DemoSendError(404, "Draft not found.");
+    const queued = (await tx.query<{ id: string; lease_token: string | null; status: string; recipient: string; lease_valid: boolean }>(
+      "select id, lease_token, status, recipient, (locked_until > now()) as lease_valid from demo_campaigns where draft_id = $1", [id])).rows[0];
+    if (queued && (!campaign || queued.id !== campaign.id || queued.lease_token !== campaign.leaseToken || queued.status !== "sending" || !queued.lease_valid))
+      throw new DemoSendError(409, "This draft belongs to an approved campaign. Use Outreach, not manual Send.");
+    if (campaign && (!queued || queued.recipient !== settings.recipient || settings.recipient !== "deeptendukuri@gmail.com"))
+      throw new DemoSendError(409, "Campaign recipient changed; no email was sent.");
     if (current.blocked_reason) throw new DemoSendError(409, current.blocked_reason);
     if (current.delivery_state === "sent" && current.provider_message_id) return current;
     const scope = current as OutreachDraftRow & { opportunity_id?: string | null };

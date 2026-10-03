@@ -5,6 +5,8 @@ import { Ban, Check, Copy, Loader2, Mail, Send, X } from "lucide-react";
 import { marketName } from "@/mvp/config/markets";
 import type { OutreachRule } from "@/mvp/types";
 import { createDraft, sendDemoDraft, updateDraft, type DraftResult } from "./api-client";
+import { apiJson } from "./api-client";
+import Link from "next/link";
 import { DEMO_CONTACT_EMAIL, type DemoEmailInfo } from "@/mvp/email/config";
 import { PERMISSION_LABELS } from "./labels";
 
@@ -72,6 +74,7 @@ export function DraftPanel({
   const [sent, setSent] = useState(false);
   const [delivery, setDelivery] = useState<{ recipient: string; messageId: string } | null>(null);
   const [attempted, setAttempted] = useState(false);
+  const [queued, setQueued] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -168,6 +171,16 @@ export function DraftPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delivery could not be confirmed. Retry the same draft.");
     } finally { setBusy(null); }
+  };
+
+  const approveAutomation = async () => {
+    if (!draft || !demoEmail?.ready) return;
+    setBusy("send"); setError(null);
+    try {
+      await apiJson("/api/mvp/outreach/campaigns", { method: "POST", body: { draftId: draft.id, subject, body } });
+      setQueued(true); setAttempted(true); onSent?.();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not approve automatic delivery."); }
+    finally { setBusy(null); }
   };
 
   const words = wordCount(body);
@@ -297,14 +310,15 @@ export function DraftPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={demoEmail?.enabled ? sendDemo : markSent}
-                  disabled={sent || busy !== null || Boolean(demoEmail?.enabled && !demoEmail.ready)}
+                  onClick={demoEmail?.enabled ? opportunityId ? approveAutomation : sendDemo : markSent}
+                  disabled={queued || sent || busy !== null || Boolean(demoEmail?.enabled && !demoEmail.ready)}
                   className="btn-quiet focus-ring inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold disabled:opacity-50"
                 >
                   {busy === "send" ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <Send size={15} aria-hidden />}
-                  {demoEmail?.enabled ? sent ? "Demo email sent" : attempted ? "Retry demo email" : "Send demo email" : sent ? "Marked as sent" : "Mark as sent"}
+                  {queued ? "Approved — queued" : demoEmail?.enabled ? opportunityId ? "Approve & automate demo email" : sent ? "Demo email sent" : attempted ? "Retry demo email" : "Send demo email" : sent ? "Marked as sent" : "Mark as sent"}
                 </button>
               </div>
+              {queued ? <div role="status" className="rounded-lg bg-[var(--subtle)] p-3 text-sm">Email approved and queued, not yet sent. <Link href="/outreach" className="font-semibold text-[var(--accent)]">Track delivery in Outreach →</Link></div> : null}
               {demoEmail?.enabled ? (
                 <p className="text-xs text-[#667085]">{delivery ? `Accepted by the email provider for ${delivery.recipient}. Message ID: ${delivery.messageId}. Check that inbox for receipt.` : "Sent is shown only after the email provider accepts the message. No buyer is emailed in this demo."}</p>
               ) : <p className="text-xs text-[#667085]">Send it from your own mail app, then mark it as sent so the buyer history stays complete.</p>}

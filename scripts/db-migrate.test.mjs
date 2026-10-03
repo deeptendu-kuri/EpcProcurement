@@ -31,8 +31,8 @@ describe("cloud migration command", () => {
     const db = await PGlite.create();
     try {
       const applied = await applyMigrations(clientOf(db));
-      expect(applied).toHaveLength(10);
-      expect(applied.at(-1)).toBe("010_search_opportunities.sql");
+      expect(applied).toHaveLength(11);
+      expect(applied.at(-1)).toBe("011_demo_campaigns.sql");
       expect(await applyMigrations(clientOf(db))).toEqual([]);
       expect((await db.query("select demo_only, delivery_state from outreach_drafts")).rows).toEqual([]);
       expect((await db.query("select keyword, product_name from search_opportunities")).rows).toEqual([]);

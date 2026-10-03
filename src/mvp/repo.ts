@@ -773,6 +773,8 @@ export async function updateDraft(
   return getDb().tx(async (tx) => {
     const current = (await tx.query<OutreachDraftRow>("select * from outreach_drafts where id = $1 for update", [id])).rows[0];
       if (!current) return null;
+      if ((await tx.query("select id from demo_campaigns where draft_id = $1", [id])).rows.length)
+        throw new DraftBlockedError("Approved campaign drafts are locked. Manage them in Outreach.");
       if (current.delivery_first_attempt_at) {
         throw new DraftBlockedError("An attempted demo delivery cannot be edited or marked as sent manually. Use its Send action to retry the same message.");
       }

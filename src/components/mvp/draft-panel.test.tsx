@@ -33,6 +33,20 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe("DraftPanel", () => {
+  it("approves a scoped email into the queue without displaying sent prematurely", async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({ id: "scoped-draft", subject: "Line pipe", body: "Hello, line pipe requirements?" }, 201))
+      .mockReturnValueOnce(jsonResponse({ id: "campaign-id", status: "queued", recipient: "deeptendukuri@gmail.com" }));
+    render(<DraftPanel leadId={LEAD_ID} opportunityId="66666666-6666-4666-8666-666666666666" contacts={[contacts[0]]}
+      demoEmail={{ enabled: true, ready: true, recipient: "deeptendukuri@gmail.com", error: null }} autoGenerate onClose={() => undefined} />);
+    await screen.findByLabelText(/Message/);
+    fireEvent.click(screen.getByRole("button", { name: "Approve & automate demo email" }));
+    await screen.findByRole("button", { name: "Approved — queued" });
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/mvp/outreach/campaigns");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ draftId: "scoped-draft", subject: "Line pipe", body: "Hello, line pipe requirements?" });
+    expect(screen.getByRole("link", { name: /Track delivery in Outreach/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Demo email sent" })).toBeNull();
+    expect((screen.getByLabelText("Subject") as HTMLInputElement).disabled).toBe(true);
+  });
   it("shows the blocked reason and disables drafting when the contact's country needs consent", () => {
     render(<DraftPanel leadId={LEAD_ID} contacts={contacts} onClose={() => undefined} />);
     fireEvent.change(screen.getByLabelText("Contact"), { target: { value: PERSON_SA } });

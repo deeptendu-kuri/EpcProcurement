@@ -58,7 +58,7 @@ fs.mkdirSync(output, { recursive: true });
     await page.getByRole('button', { name: 'Contact lead / Preview demo email' }).click();
     const draft = await (await draftResponse).json(); assert.ok(draft.body.includes('line pipe'));
     await page.getByRole('dialog').waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Send demo email', exact: true }).isDisabled(), true, 'No live key in browser-test server');
+    assert.equal(await page.getByRole('button', { name: 'Approve & automate demo email', exact: true }).isDisabled(), true, 'No live key in browser-test server');
     await page.screenshot({ path: path.join(output, 'email-preview.png'), fullPage: true, caret: 'initial' });
     await page.keyboard.press('Escape');
     await page.getByLabel('Summary', { exact: true }).fill('Reviewed pipeline fit; awaiting validated procurement email.');

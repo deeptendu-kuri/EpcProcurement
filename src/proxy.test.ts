@@ -27,6 +27,8 @@ const PROTECTED_APIS = [
   "/api/mvp/runs",
   "/api/mvp/leads",
   "/api/mvp/logout",
+  "/api/mvp/outreach/campaigns",
+  "/api/mvp/outreach/campaigns/abc",
 ];
 
 beforeEach(() => {
@@ -76,6 +78,11 @@ describe("proxy session gate", () => {
   it("leaves /login and the login API public", async () => {
     expect(passedThrough(await proxy(request("/login")))).toBe(true);
     expect(passedThrough(await proxy(request("/api/mvp/login")))).toBe(true);
+  });
+
+  it("delegates only the exact machine endpoint to its own bearer authentication", async () => {
+    expect(passedThrough(await proxy(request("/api/mvp/outreach/worker")))).toBe(true);
+    expect((await proxy(request("/api/mvp/outreach/worker/extra"))).status).toBe(401);
   });
 
   const EXTENSION_PAGES = ["/legacy/lead-lists/x.png", "/leads/x.css", "/legacy/companies/a.svg", "/find/x.woff2"];

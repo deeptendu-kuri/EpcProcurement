@@ -19,7 +19,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
   const db = getDb();
   const [events, drafts, points] = await Promise.all([
     db.query<{ id: number; body: string; created_at: string }>("select id, body, created_at from opportunity_events where opportunity_id = $1 order by id desc limit 100", [id]),
-    db.query<{ id: string; subject: string | null; body: string | null; delivery_state: string | null; delivery_recipient: string | null; created_at: string }>("select id, subject, body, delivery_state, delivery_recipient, created_at from outreach_drafts where opportunity_id = $1 order by created_at desc limit 50", [id]),
+    db.query<{ id: string; subject: string | null; body: string | null; delivery_state: string | null; delivery_recipient: string | null; campaign_status: string | null; created_at: string }>("select d.id, d.subject, d.body, d.delivery_state, d.delivery_recipient, d.created_at, c.status as campaign_status from outreach_drafts d left join demo_campaigns c on c.draft_id = d.id where d.opportunity_id = $1 order by d.created_at desc limit 50", [id]),
     db.query<{ person_id: string; value: string; verified_at: string | null; source: string }>("select cp.person_id, cp.value, cp.verified_at, cp.source from contact_points cp join people p on p.id = cp.person_id where p.current_company_id = $1 and cp.kind = 'email' order by cp.created_at desc", [buyer.companyId]),
   ]);
   return <OpportunityWorkspace key={id} opportunity={opportunity} buyer={buyer} events={events.rows} drafts={drafts.rows} points={points.rows} demoEmail={demoEmailInfo()} returnTo={returnTo} />;
