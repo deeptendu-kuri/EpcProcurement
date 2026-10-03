@@ -15,6 +15,7 @@ import { gdeltSource } from "./sources/gdelt";
 import { rssSource } from "./sources/rss";
 import { tedSource } from "./sources/ted";
 import { publisherKeyFor } from "./text";
+import { captureOpportunities } from "@/mvp/opportunities";
 
 export { fixtureDocs } from "./sources/fixtures";
 export { failStaleRuns } from "./active-runs";
@@ -52,6 +53,8 @@ export async function startRun(input: RunInput): Promise<string> {
     leadKinds: (input.leadKinds ?? []).filter((k) => k === "bid" || k === "supply_subcontract"),
   };
   if (input.offline === true) clean.offline = true;
+  if (input.productId) clean.productId = input.productId;
+  if (input.contactRole) clean.contactRole = input.contactRole;
   if (!clean.leadKinds.length) clean.leadKinds = ["bid", "supply_subcontract"];
   if (!clean.markets.length) clean.markets = [...getClientProfile().markets];
   const { rows } = await db.query<{ id: string }>(
@@ -252,6 +255,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
       }
       try {
         const doc = await storeDocument(db, runId, { ...raw, title, text, publishedAt, publisherKey: raw.publisherKey ?? publisherKeyFor(raw.url) });
+        await db.query("insert into run_documents (run_id, document_id) values ($1,$2) on conflict do nothing", [runId, doc.id]);
         progress.counters.itemsRead++;
         if (doc.state === "known") known++;
         if (progress.counters.itemsRead % 5 === 0) await progress.emit("read", `Read ${progress.counters.itemsRead} items`);
@@ -361,6 +365,8 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
       throw new Error(`Scoring failed: ${errorText(error)}`);
     }
 
+    const scoped = await captureOpportunities(runId, input, db);
+    if (input.productId) await progress.emit("info", `${scoped} product-matched buyer prospects saved to this search. Contact validation is a separate step.`);
     // ── done ──
     await progress.emit("done", `Done: ${progress.summary()}${progress.counters.updatedLeads ? ` · ${progress.counters.updatedLeads} updated` : ""}`);
     await db.query("update runs set status = 'done', finished_at = now(), counters = $2::jsonb where id = $1 and status <> 'cancelled'", [runId, JSON.stringify(progress.counters)]);

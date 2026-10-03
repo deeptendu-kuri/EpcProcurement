@@ -29,12 +29,12 @@ export function RecentRuns({ runs }: { runs: RunRow[] }) {
                 <span className="text-[#667085]">{formatDateTime(run.started_at ?? run.created_at)}</span>
                 <span className={`font-semibold ${status.className}`}>{status.label}</span>
                 {newLeads !== undefined ? (
-                  <span className="tabular-nums text-[#344054]">{newLeads} new {newLeads === 1 ? "buyer" : "buyers"}</span>
+                  <span className="tabular-nums text-[#344054]">{newLeads} new raw leads{input?.productId ? " · filtered in CRM" : ""}</span>
                 ) : null}
                 <span className="ml-auto flex gap-3">
                   <Link href={`/find?run=${run.id}`} className="font-semibold text-[#1d4ed8] hover:underline">Progress</Link>
                   {run.status === "done" ? (
-                    <Link href="/search" className="font-semibold text-[#1d4ed8] hover:underline">Buyers →</Link>
+                    <Link href={input?.productId ? `/crm?search=${run.id}` : "/search"} className="font-semibold text-[#1d4ed8] hover:underline">{input?.productId ? "Open search results →" : "Legacy buyers →"}</Link>
                   ) : null}
                 </span>
               </li>

@@ -1,13 +1,16 @@
 import { z } from "zod";
-import { MARKET_CODES } from "@/mvp/types";
+import { COUNTRY_CODES } from "@/mvp/config/countries";
+import { getCatalogue } from "@/mvp/config/buyers-config";
 
 /** Body of "Search now" and the search part of a saved search. */
 export const runInputSchema = z.object({
   query: z.string().trim().min(2, "Type what you offer.").max(200),
+  productId: z.string().refine(id => getCatalogue().items.some(item => item.id === id), "Select a product from your catalogue.").optional(),
+  contactRole: z.enum(["buyer", "decision_maker", "technical_approver", "influencer", "approver", "vendor_registration"]).optional(),
   markets: z
-    .array(z.string().trim().toUpperCase().pipe(z.enum(MARKET_CODES)))
+    .array(z.string().trim().toUpperCase().refine(code => COUNTRY_CODES.includes(code), "Choose a valid country."))
     .min(1, "Pick at least one market.")
-    .max(MARKET_CODES.length)
+    .max(20, "Search up to 20 countries at once to keep free-tier searches manageable.")
     .transform((markets) => [...new Set(markets)]),
   leadKinds: z
     .array(z.enum(["bid", "supply_subcontract"]))

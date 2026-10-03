@@ -27,6 +27,8 @@ export async function POST(request: Request) {
     const savedSearch = await createSavedSearch({
       name: body.data.name,
       query: body.data.query,
+      productId: body.data.productId,
+      contactRole: body.data.contactRole,
       markets: body.data.markets,
       leadKinds: body.data.leadKinds,
       refreshHours: body.data.refreshHours,

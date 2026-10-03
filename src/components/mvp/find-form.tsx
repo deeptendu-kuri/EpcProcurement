@@ -8,14 +8,9 @@ import { apiJson } from "./api-client";
 import { RunProgress } from "./run-progress";
 import { EVENTS, emit } from "./shell/events";
 import { useToast } from "./shell/toast";
-
-type KindChoice = "both" | LeadKind;
-
-const KIND_OPTIONS: { value: KindChoice; label: string }[] = [
-  { value: "both", label: "Both" },
-  { value: "bid", label: "Open tenders" },
-  { value: "supply_subcontract", label: "Companies that won work" },
-];
+import Link from "next/link";
+import { COUNTRIES } from "@/mvp/config/countries";
+import { CONTACT_ROLES } from "@/mvp/opportunities/workflow";
 
 interface TicketBody {
   ticketId: string;
@@ -29,6 +24,7 @@ export interface FindFormProps {
   markets: { code: string; name: string }[];
   /** Product names and keywords offered as quick-fill chips. */
   suggestions: string[];
+  products: { id: string; name: string }[];
   /** A run to show progress for on load (e.g. /find?run=…). */
   initialRunId?: string | null;
   /** A queued search to follow on load (e.g. /find?ticket=…). */
@@ -36,14 +32,15 @@ export interface FindFormProps {
 }
 
 /** Find (09 §4.1, 13 §7): what you offer + markets + lead type → Search now (queued) → live progress; Save this search. */
-export function FindForm({ markets, suggestions, initialRunId = null, initialTicketId = null }: FindFormProps) {
+export function FindForm({ markets, products, suggestions, initialRunId = null, initialTicketId = null }: FindFormProps) {
   const router = useRouter();
   const pathname = usePathname();
   const toast = useToast();
   const [, startTransition] = useTransition();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(products[0]?.name ?? "");
   const [selected, setSelected] = useState<string[]>(markets.map((market) => market.code));
-  const [kind, setKind] = useState<KindChoice>("both");
+  const [productId, setProductId] = useState(products[0]?.id ?? "");
+  const [contactRole, setContactRole] = useState("buyer");
   const [runId, setRunId] = useState<string | null>(initialRunId);
   const [ticketId, setTicketId] = useState<string | null>(initialRunId ? null : initialTicketId);
   const [position, setPosition] = useState(0);
@@ -98,15 +95,16 @@ export function FindForm({ markets, suggestions, initialRunId = null, initialTic
   const toggleMarket = (code: string) =>
     setSelected((current) => (current.includes(code) ? current.filter((value) => value !== code) : [...current, code]));
 
-  const leadKinds = (): LeadKind[] => (kind === "both" ? ["bid", "supply_subcontract"] : [kind]);
+  const leadKinds = (): LeadKind[] => ["supply_subcontract"];
 
   const validate = (): boolean => {
     if (query.trim().length < 2) {
       setError("Type what you offer, e.g. “line pipe”.");
       return false;
     }
-    if (!selected.length) {
-      setError("Pick at least one market.");
+    if (!productId) { setError("Select the product you want to sell."); return false; }
+    if (!selected.length || selected.length > 20) {
+      setError("Pick between 1 and 20 countries.");
       return false;
     }
     return true;
@@ -118,7 +116,7 @@ export function FindForm({ markets, suggestions, initialRunId = null, initialTic
     if (!validate()) return;
     setSubmitting(true);
     try {
-      const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), markets: selected, leadKinds: leadKinds() } });
+      const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), productId, contactRole, markets: selected, leadKinds: leadKinds() } });
       emit(EVENTS.refreshStatus);
       if (ticket.runId) {
         setRunId(ticket.runId);
@@ -148,6 +146,8 @@ export function FindForm({ markets, suggestions, initialRunId = null, initialTic
         body: {
           name: saveName.trim() || query.trim(),
           query: query.trim(),
+          productId,
+          contactRole,
           markets: selected,
           leadKinds: leadKinds(),
           refreshHours: refreshHours === "manual" ? null : Number(refreshHours),
@@ -173,6 +173,25 @@ export function FindForm({ markets, suggestions, initialRunId = null, initialTic
   return (
     <div className="flex flex-col gap-4">
       <form onSubmit={submit} className="card flex flex-col gap-4 p-4 sm:p-5" aria-label="Search for opportunities">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="flex flex-col gap-1 text-sm font-semibold">Product to sell
+            <select aria-label="Product to sell" className="control h-11 px-2" value={productId} onChange={e => { setProductId(e.target.value); setQuery(products.find(p => p.id === e.target.value)?.name ?? ""); }}>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-semibold">Add a country
+            <select aria-label="Add a country" className="control h-11 px-2" value="" onChange={e => { if (e.target.value && !selected.includes(e.target.value)) setSelected(s => [...s, e.target.value]); }}>
+              <option value="">Select any country</option>
+              {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-semibold">Contact role wanted
+            <select aria-label="Contact role wanted" className="control h-11 px-2" value={contactRole} onChange={e => setContactRole(e.target.value)}>
+              {CONTACT_ROLES.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <p className="text-xs text-[#6b7280]">Buyer-only search: companies that won work and could buy the selected product. No open tenders or project owners. Country selection does not guarantee source coverage.</p>
         <div className="flex flex-col gap-2 sm:flex-row" data-tour="find-query">
           <label htmlFor="find-query" className="sr-only">What do you offer?</label>
           <input
@@ -192,7 +211,7 @@ export function FindForm({ markets, suggestions, initialRunId = null, initialTic
         {suggestions.length ? (
           <div className="flex flex-wrap items-center gap-1.5" aria-label="Suggestions from your products">
             {suggestions.map((text) => (
-              <button key={text} type="button" onClick={() => setQuery(text)} className="chip hover:border-[var(--line-strong)]">
+              <button key={text} type="button" onClick={() => { setQuery(text); const product = products.find(p => p.name === text); if (product) setProductId(product.id); }} className="chip hover:border-[var(--line-strong)]">
                 {text}
               </button>
             ))}
@@ -202,7 +221,7 @@ export function FindForm({ markets, suggestions, initialRunId = null, initialTic
         <div className="flex flex-col gap-4" data-tour="find-markets">
           <fieldset className="flex flex-wrap items-center gap-2">
             <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6b7280]">Markets</legend>
-            {markets.map((market) => {
+            {selected.map(code => COUNTRIES.find(c => c.code === code) ?? { code, name: code }).map((market) => {
               const on = selected.includes(market.code);
               return (
                 <button
@@ -221,15 +240,6 @@ export function FindForm({ markets, suggestions, initialRunId = null, initialTic
             })}
           </fieldset>
 
-          <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6b7280]">Looking for</legend>
-            {KIND_OPTIONS.map((option) => (
-              <label key={option.value} className="inline-flex items-center gap-2 text-sm text-[#374151]">
-                <input type="radio" name="lead-kind" value={option.value} checked={kind === option.value} onChange={() => setKind(option.value)} className="h-4 w-4 accent-[var(--accent)]" />
-                {option.label}
-              </label>
-            ))}
-          </fieldset>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-3" data-tour="find-save">
@@ -276,7 +286,7 @@ export function FindForm({ markets, suggestions, initialRunId = null, initialTic
           Waiting in line{position > 0 ? ` (number ${position})` : ""}: another search is running. Yours starts right after it.
         </section>
       ) : null}
-      {runId ? <RunProgress key={runId} runId={runId} onFinished={onFinished} /> : null}
+      {runId ? <><RunProgress key={runId} runId={runId} onFinished={onFinished} /><Link href={`/crm?search=${runId}`} className="btn btn-primary self-start">Open this search’s CRM results</Link></> : null}
     </div>
   );
 }

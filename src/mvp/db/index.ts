@@ -185,7 +185,7 @@ function initDb(): Promise<Db> {
     const pending = (async () => {
       const url = process.env.DATABASE_URL?.trim();
       if (process.env.RENDER === "true" && !url) throw new Error("DATABASE_URL is required on Render; its local filesystem is not persistent.");
-      const db = url ? await createPgDb(url) : await createPgliteDb(path.join(process.cwd(), ".data", "pglite"));
+      const db = url ? await createPgDb(url) : await createPgliteDb(process.env.MVP_DATA_DIR || path.join(process.cwd(), ".data", "pglite"));
       await migrate(db);
       return db;
     })();

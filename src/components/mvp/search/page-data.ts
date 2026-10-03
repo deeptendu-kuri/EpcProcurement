@@ -1,7 +1,7 @@
 /** Server-side data for the SuperSearch pages: catalogue options and markets (never import from a client component). */
 import { getCatalogue } from "@/mvp/config/buyers-config";
 import { marketName } from "@/mvp/config/markets";
-import { getClientProfile } from "@/mvp/config/profile";
+import { COUNTRIES } from "@/mvp/config/countries";
 import type { MarketOption } from "./filter-panel";
 import type { CatalogueOption } from "./search-state";
 
@@ -20,7 +20,7 @@ export function catalogueOptions(): CatalogueOption[] {
 
 export function marketOptions(): MarketOption[] {
   try {
-    return getClientProfile().markets.map((code) => ({ code, name: marketName(code) }));
+    return COUNTRIES.map(({ code }) => ({ code, name: marketName(code) }));
   } catch {
     return [];
   }

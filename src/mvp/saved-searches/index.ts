@@ -12,6 +12,8 @@ const HOUR_MS = 60 * 60 * 1000;
 export interface SavedSearchInput {
   name: string;
   query: string;
+  productId?: string;
+  contactRole?: string;
   markets: string[];
   leadKinds: LeadKind[];
   refreshHours: RefreshHours | null;
@@ -80,6 +82,7 @@ export async function createSavedSearch(input: SavedSearchInput, db: Queryable =
       input.lastRunId && UUID_RE.test(input.lastRunId) ? input.lastRunId : null,
     ],
   );
+  await db.query("update saved_searches set product_id = $2, contact_role = $3 where id = $1", [rows[0].id, input.productId ?? null, input.contactRole ?? null]);
   return (await getSavedSearch(rows[0].id, db))!;
 }
 

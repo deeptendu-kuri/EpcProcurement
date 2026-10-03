@@ -15,6 +15,7 @@ import { companyOutreachRules, contactCountry, outreachRules, isOutreachBlocked 
 import { getClientProfile } from "@/mvp/config/profile";
 import { getBuyerView } from "@/mvp/buyers";
 import { demoEmailEnabled } from "@/mvp/email/config";
+import { getOpportunity } from "@/mvp/opportunities";
 import { getDb, type Queryable } from "@/mvp/db";
 import { getLLM } from "@/mvp/llm";
 import type {
@@ -198,12 +199,12 @@ async function loadFacts(db: Queryable, lead: LeadRow, person: PersonRow | null)
 
 async function storeDraft(
   db: Queryable,
-  row: { leadId: string; personId: string | null; subject: string | null; body: string | null; blockedReason: string | null; model: string | null; demoOnly?: boolean },
+  row: { leadId: string; personId: string | null; subject: string | null; body: string | null; blockedReason: string | null; model: string | null; demoOnly?: boolean; opportunityId?: string },
 ): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `insert into outreach_drafts (lead_id, person_id, subject, body, language, blocked_reason, model, demo_only)
-     values ($1, $2, $3, $4, 'en', $5, $6, $7) returning id`,
-    [row.leadId, row.personId, row.subject, row.body, row.blockedReason, row.model, row.demoOnly ?? false],
+    `insert into outreach_drafts (lead_id, person_id, subject, body, language, blocked_reason, model, demo_only, opportunity_id)
+     values ($1, $2, $3, $4, 'en', $5, $6, $7, $8) returning id`,
+    [row.leadId, row.personId, row.subject, row.body, row.blockedReason, row.model, row.demoOnly ?? false, row.opportunityId ?? null],
   );
   return rows[0].id;
 }
@@ -223,7 +224,7 @@ async function storeDraft(
 export async function generateDraft(
   leadId: string,
   personId: string | null,
-  options: { templateOnly?: boolean; demoContact?: boolean; demoContactTitle?: string } = {},
+  options: { templateOnly?: boolean; demoContact?: boolean; demoContactTitle?: string; opportunityId?: string } = {},
 ): Promise<{ id: string; subject: string; body: string; blockedReason?: string }> {
   const db = getDb();
   const lead = await one<LeadRow>(db, "select * from leads where id = $1", [leadId]);
@@ -232,6 +233,15 @@ export async function generateDraft(
   if (personId && !person) throw new Error("Person not found");
 
   const { facts, buyer } = await loadFacts(db, lead, person);
+  if (options.opportunityId) {
+    const opportunity = await getOpportunity(options.opportunityId);
+    if (!opportunity || opportunity.lead_id !== leadId || opportunity.qualification !== "approved") throw new Error("Review this product opportunity before outreach.");
+    if (person && person.current_company_id !== lead.buyer_company_id) throw new Error("Contact does not belong to this buyer.");
+    facts.clientProducts = [opportunity.product_name];
+    facts.packageName = opportunity.product_name;
+    facts.requirement = null; // do not leak a different product's requirements into this offer
+    facts.discipline = null;
+  }
   const demoOnly = demoEmailEnabled();
   if (!person && options.demoContact && demoOnly) {
     facts.contactName = "Demo procurement contact";
@@ -253,7 +263,7 @@ export async function generateDraft(
     blockedReason = `Email outreach to ${rule.country || "this country"} is ${rule.email.replace("_", " ")}. ${rule.steps[rule.steps.length - 1] ?? ""}`.trim();
 
   if (blockedReason) {
-    const id = await storeDraft(db, { leadId, personId, subject: null, body: null, blockedReason, model: null, demoOnly });
+    const id = await storeDraft(db, { leadId, personId, subject: null, body: null, blockedReason, model: null, demoOnly, opportunityId: options.opportunityId });
     return { id, subject: "", body: "", blockedReason };
   }
 
@@ -293,7 +303,7 @@ export async function generateDraft(
   if (rule.email === "opt_out_only") body = `${body}\n\n${OPT_OUT_LINE}`;
   const subject = draft.subject.replace(/\s+/g, " ").trim().slice(0, 150);
 
-  const id = await storeDraft(db, { leadId, personId, subject, body, blockedReason: null, model, demoOnly });
+  const id = await storeDraft(db, { leadId, personId, subject, body, blockedReason: null, model, demoOnly, opportunityId: options.opportunityId });
   await db.query("insert into activities (lead_id, person_id, type, body) values ($1, $2, 'email_draft', $3)", [
     leadId,
     personId,

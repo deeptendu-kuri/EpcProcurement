@@ -51,10 +51,11 @@ export function setRunQueueForTests(queue: RunQueue | undefined): void {
 }
 
 /** The job for a saved search. */
-export function savedSearchJob(search: Pick<SavedSearchRow, "id" | "query" | "markets" | "lead_kinds">): QueueJob {
+export function savedSearchJob(search: Pick<SavedSearchRow, "id" | "query" | "markets" | "lead_kinds" | "product_id" | "contact_role">): QueueJob {
   return {
     savedSearchId: search.id,
-    input: { query: search.query, markets: search.markets ?? [], leadKinds: (search.lead_kinds ?? []) as LeadKind[] },
+    input: { query: search.query, markets: search.markets ?? [], leadKinds: (search.lead_kinds ?? []) as LeadKind[],
+      ...(search.product_id ? { productId: search.product_id } : {}), ...(search.contact_role ? { contactRole: search.contact_role } : {}) },
   };
 }
 

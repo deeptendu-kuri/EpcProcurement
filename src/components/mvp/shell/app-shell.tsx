@@ -34,7 +34,9 @@ import { ToastProvider } from "./toast";
 /** Menu (docs/mvp/14 §10): Overview · SuperSearch · Lead lists · Pipeline · Settings · Help. */
 const NAV = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard, tour: "nav-overview", also: [] as string[] },
-  { href: "/search", label: "SuperSearch", icon: Search, tour: "nav-search", also: ["/buyers"] },
+  { href: "/find", label: "Find buyers", icon: Compass, tour: "nav-find", also: [] as string[] },
+  { href: "/crm", label: "Buyer CRM", icon: ListChecks, tour: "nav-crm", also: ["/opportunities"] },
+  { href: "/search", label: "Advanced search", icon: Search, tour: "nav-search", also: ["/buyers"] },
   { href: "/lists", label: "Lead lists", icon: ListChecks, tour: "nav-lists", also: [] as string[] },
   { href: "/pipeline", label: "Pipeline", icon: SquareKanban, tour: "nav-pipeline", also: [] as string[] },
   { href: "/settings", label: "Settings", icon: Settings, tour: "nav-settings", also: [] as string[] },
@@ -290,15 +292,15 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
   const pathname = usePathname() ?? "/";
   const statusValue = useStatus(initialStatus);
   const { status, now } = statusValue;
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
     // Restore the collapsed sidebar after hydration (per browser).
     const timer = setTimeout(() => {
-      // The icon rail is the default (mockup); "0" = the person expanded it.
-      if (safeStorage.get(COLLAPSED_KEY) === "0") setCollapsed(false);
+      // Visible navigation labels are the default; collapse only by explicit preference.
+      if (safeStorage.get(COLLAPSED_KEY) === "1") setCollapsed(true);
     }, 0);
     return () => clearTimeout(timer);
   }, []);

@@ -45,7 +45,7 @@ export interface DraftResult {
   blockedReason?: string;
 }
 
-export function createDraft(leadId: string, personId: string | null, options: { templateOnly?: boolean; demoContact?: boolean; demoContactTitle?: string; signal?: AbortSignal } = {}) {
+export function createDraft(leadId: string, personId: string | null, options: { templateOnly?: boolean; demoContact?: boolean; demoContactTitle?: string; opportunityId?: string; signal?: AbortSignal } = {}) {
   const { signal, ...body } = options;
   return apiJson<DraftResult>("/api/mvp/drafts", { method: "POST", body: { leadId, personId, ...body }, signal });
 }

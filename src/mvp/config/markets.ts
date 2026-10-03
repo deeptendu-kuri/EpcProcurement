@@ -1,4 +1,5 @@
 import type { MarketCode } from "@/mvp/types";
+import { COUNTRIES } from "./countries";
 
 /** Display names for the slice markets (04 §3 market_code). */
 export const MARKET_NAMES: Record<MarketCode, string> = {
@@ -15,5 +16,5 @@ export const MARKET_NAMES: Record<MarketCode, string> = {
 
 export function marketName(code: string | null | undefined): string {
   if (!code) return "Unknown";
-  return MARKET_NAMES[code.toUpperCase() as MarketCode] ?? code.toUpperCase();
+  return MARKET_NAMES[code.toUpperCase() as MarketCode] ?? COUNTRIES.find(c => c.code === code.toUpperCase())?.name ?? code.toUpperCase();
 }

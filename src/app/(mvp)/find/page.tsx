@@ -9,6 +9,7 @@ import { FindForm } from "@/components/mvp/find-form";
 import { PageHeader } from "@/components/mvp/page-header";
 import { RecentRuns } from "@/components/mvp/recent-runs";
 import { SavedSearchesList } from "@/components/mvp/saved-searches-list";
+import { catalogueOptions } from "@/components/mvp/search/page-data";
 
 interface FindPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -34,12 +35,13 @@ export default async function FindPage({ searchParams }: FindPageProps) {
   }
 
   const [runs, saved] = await Promise.all([listRecentRuns(10), listSavedSearches()]);
-  const suggestions = [...new Set(products.flatMap((product) => [product.name, ...product.keywords.slice(0, 2)]))].slice(0, 8);
+  const suggestions = catalogueOptions().slice(0, 8).map(product => product.name);
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Find opportunities" subtitle="Search live tender portals and trade news for buyers of what you offer." />
+      <PageHeader title="Find buyers" subtitle="Choose what you sell, where to search, and who you want to contact." />
       <FindForm
+        products={catalogueOptions()}
         markets={profile.markets.map((code) => ({ code, name: marketName(code) }))}
         suggestions={suggestions}
         initialRunId={runParam}

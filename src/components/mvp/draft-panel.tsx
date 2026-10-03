@@ -50,6 +50,7 @@ export function DraftPanel({
   demoEmail,
   autoGenerate = false,
   initialContactKey,
+  opportunityId,
 }: {
   leadId: string;
   contacts: DraftContact[];
@@ -58,6 +59,7 @@ export function DraftPanel({
   demoEmail?: DemoEmailInfo;
   autoGenerate?: boolean;
   initialContactKey?: string;
+  opportunityId?: string;
 }) {
   const startingContact = contacts.find(c => keyOf(c) === initialContactKey) ?? contacts[0];
   const [contactKey, setContactKey] = useState<string>(startingContact ? keyOf(startingContact) : "company");
@@ -94,6 +96,7 @@ export function DraftPanel({
     setSent(false);
     try {
       const result = await createDraft(leadId, personId, {
+        ...(opportunityId ? { opportunityId } : {}),
         ...(templateOnly ? { templateOnly: true } : {}),
         ...(isDemoContact ? { demoContact: true, demoContactTitle: contactTitle } : {}), signal,
       });
@@ -115,6 +118,7 @@ export function DraftPanel({
     if (!autoGenerate || precheck) return;
     const controller = new AbortController();
     createDraft(leadId, personId, {
+      ...(opportunityId ? { opportunityId } : {}),
       templateOnly: true, ...(isDemoContact ? { demoContact: true, demoContactTitle: contactTitle } : {}), signal: controller.signal,
     }).then(result => {
       if (controller.signal.aborted) return;
@@ -124,7 +128,7 @@ export function DraftPanel({
       if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "The draft could not be written.");
     }).finally(() => { if (!controller.signal.aborted) setBusy(null); });
     return () => controller.abort();
-  }, [autoGenerate, precheck, contactKey, leadId, personId, isDemoContact, contactTitle]);
+  }, [autoGenerate, precheck, contactKey, leadId, personId, isDemoContact, contactTitle, opportunityId]);
 
   const copy = async () => {
     try {

@@ -132,7 +132,7 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
       {finished ? (
         <div className="mt-3 flex justify-end">
           <Link
-            href="/search"
+            href={run?.adhoc_query?.productId ? `/crm?search=${runId}` : "/search"}
             className="btn-primary focus-ring inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold"
           >
             See the buyers

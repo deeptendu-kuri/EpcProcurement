@@ -16,6 +16,8 @@ export type LeadClass = "genuine" | "research" | "watch" | "rejected";
 
 export interface RunInput {
   query: string;
+  productId?: string;
+  contactRole?: string;
   markets: string[];
   leadKinds: LeadKind[];
   /** Search the sample documents (fixtures) for this run only, whatever MVP_OFFLINE says ("Load sample leads"). */
@@ -789,6 +791,8 @@ export interface SavedSearchRow {
   id: string;
   name: string;
   query: string;
+  product_id?: string | null;
+  contact_role?: string | null;
   markets: string[];
   lead_kinds: LeadKind[];
   refresh_hours: RefreshHours | null;

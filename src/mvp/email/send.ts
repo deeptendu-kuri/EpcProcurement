@@ -25,6 +25,11 @@ export async function sendDemoEmail(id: string, text: { subject: string; body: s
     if (!current) throw new DemoSendError(404, "Draft not found.");
     if (current.blocked_reason) throw new DemoSendError(409, current.blocked_reason);
     if (current.delivery_state === "sent" && current.provider_message_id) return current;
+    const scope = current as OutreachDraftRow & { opportunity_id?: string | null };
+    if (scope.opportunity_id) {
+      const opportunity = (await tx.query<{ qualification: string }>("select qualification from search_opportunities where id = $1 for share", [scope.opportunity_id])).rows[0];
+      if (opportunity?.qualification !== "approved") throw new DemoSendError(409, "This product opportunity needs buyer-fit review before sending.");
+    }
     if (current.status === "sent_externally") throw new DemoSendError(409, "This draft was already marked as sent. Write a new draft for a demo delivery.");
     if (current.delivery_first_attempt_at) {
       if (Date.now() - Date.parse(current.delivery_first_attempt_at) >= 23 * 60 * 60 * 1000)
