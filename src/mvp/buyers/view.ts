@@ -339,7 +339,7 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
   } else if (signal === "contract_won") {
     const what = projectName ?? "a new contract";
     shortReason = [`Won ${ownerShort && !what.includes(ownerShort) ? `${ownerShort} ` : ""}${what}${/contract/i.test(what) ? "" : " contract"}`, money?.local, when].filter(Boolean).join(" · ");
-    longReason = `${shortName} won ${ownerShort ? `${ownerShort}'s ` : ""}${what}${/contract/i.test(what) ? "" : " contract"}${money?.full ? ` (${money.full})` : ""}${when ? ` in ${when}` : ""}. ${role === "subcontractor" ? "They now buy the materials for their package." : "They now order long-lead materials and award subcontracts."}`;
+    longReason = `${shortName} won ${ownerShort ? `${ownerShort}'s ` : ""}${what}${/contract/i.test(what) ? "" : " contract"}${money?.full ? ` (${money.full})` : ""}${when ? ` in ${when}` : ""}. ${role === "subcontractor" ? "They may need materials for their package." : "They may need long-lead materials or subcontracting support."}`;
     triggerPhrase = `the ${what}${/contract/i.test(what) ? "" : " contract"}`;
   } else if (signal === "tender_open") {
     const what = projectName ?? "a new tender";

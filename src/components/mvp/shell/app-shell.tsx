@@ -19,7 +19,6 @@ import {
   PanelLeftOpen,
   Search,
   Settings,
-  SquareKanban,
   X,
   Zap,
 } from "lucide-react";
@@ -35,12 +34,9 @@ import { ToastProvider } from "./toast";
 /** Menu (docs/mvp/14 §10): Overview · SuperSearch · Lead lists · Pipeline · Settings · Help. */
 const NAV = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard, tour: "nav-overview", also: [] as string[] },
-  { href: "/find", label: "Find buyers", icon: Compass, tour: "nav-find", also: [] as string[] },
-  { href: "/crm", label: "Buyer CRM", icon: ListChecks, tour: "nav-crm", also: ["/opportunities"] },
-  { href: "/outreach", label: "Outreach", icon: Mail, tour: "nav-outreach", also: [] as string[] },
-  { href: "/search", label: "Advanced search", icon: Search, tour: "nav-search", also: ["/buyers"] },
-  { href: "/lists", label: "Lead lists", icon: ListChecks, tour: "nav-lists", also: [] as string[] },
-  { href: "/pipeline", label: "Pipeline", icon: SquareKanban, tour: "nav-pipeline", also: [] as string[] },
+  { href: "/find", label: "New search", icon: Compass, tour: "nav-find", also: [] as string[] },
+  { href: "/crm", label: "My leads", icon: ListChecks, tour: "nav-crm", also: ["/opportunities","/search","/buyers","/lists","/pipeline"] },
+  { href: "/outreach", label: "Email automation", icon: Mail, tour: "nav-outreach", also: [] as string[] },
   { href: "/settings", label: "Settings", icon: Settings, tour: "nav-settings", also: [] as string[] },
 ] as const;
 
@@ -205,7 +201,7 @@ function SidebarContent({
       <nav aria-label="Main navigation" className={`flex flex-1 flex-col overflow-y-auto p-2 ${collapsed ? "items-center gap-2" : "gap-0.5"}`}>
         {NAV.map((item) => {
           const active = isActive(pathname, item.href, item.also);
-          const badge = item.href === "/search" && newGenuine > 0 ? newGenuine : null;
+          const badge = item.href === "/crm" && newGenuine > 0 ? newGenuine : null;
           return (
             <Link
               key={item.href}
@@ -400,10 +396,10 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
                   {searching ? <Loader2 size={13} className="animate-spin text-[var(--accent)]" aria-hidden /> : null}
                   {searching ? "Searching…" : statusLabel(status.lastFinishedAt, now)}
                 </span>
-                <Link href="/find" className="btn btn-primary" data-tour="topbar-search-now" title="Run a live search for new buyers">
+                {pathname !== "/find" ? <Link href="/find" className="btn btn-primary" data-tour="topbar-search-now" title="Start a new product search">
                   <Search size={15} aria-hidden />
-                  <span className="hidden sm:inline">Search now</span>
-                </Link>
+                  <span className="hidden sm:inline">New search</span>
+                </Link> : null}
               </div>
             </header>
 

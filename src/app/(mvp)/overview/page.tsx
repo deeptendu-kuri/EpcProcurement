@@ -13,13 +13,14 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
   const verified = results.filter(isVerified);
   const pending = results.filter(r => r.qualification === "pending");
   return <div className="flex flex-col gap-5">
-    <PageHeader title="Your buyer workspace" subtitle="One search at a time. Review fit, find the right contact, then prepare outreach." actions={<Link href="/find" className="btn btn-primary">Find buyers</Link>} />
+    <PageHeader title="Your sales workspace" subtitle="Choose a search to see its projects and leads. Track each conversation through to a meeting." actions={<Link href="/find" className="btn btn-primary">New search</Link>} />
     <section className="card p-5" aria-label="Getting started">
       <h2 className="text-lg font-bold">Start with the product you want to sell</h2>
-      <p className="mt-1 text-sm text-[#6b7280]">Choose a product, country and contact role. We save potential buying companies with evidence; you review the fit before outreach.</p>
-      <ol className="mt-4 grid gap-3 text-sm sm:grid-cols-4">{["1. Find buyers", "2. Review buyer fit", "3. Validate contact", "4. Review email"].map(t => <li key={t} className="rounded-lg bg-[var(--subtle)] p-3 font-semibold">{t}</li>)}</ol>
+      <p className="mt-1 text-sm text-[#6b7280]">Search a product and country. We save evidence-backed project opportunities, check buying contacts and track the email conversation. Configure the demo funnel once in Email automation.</p>
+      <ol className="mt-4 grid gap-3 text-sm sm:grid-cols-4">{["1. New search", "2. Projects & contacts", "3. Email conversation", "4. Booked meeting"].map(t => <li key={t} className="rounded-lg bg-[var(--subtle)] p-3 font-semibold">{t}</li>)}</ol>
     </section>
     <section className="card p-5" data-tour="overview-kpis" aria-label="Selected search">
+      <form action="/overview" className="mb-4 flex flex-wrap items-end gap-2"><label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-semibold">Which search would you like to view?<select name="search" defaultValue={selected?.id || ""} className="control h-11 min-w-0 px-3"><option value="" disabled>Select your product search</option>{searches.filter(s=>s.adhoc_query?.productId).map(s=><option value={s.id} key={s.id}>{s.adhoc_query?.query} · {s.adhoc_query?.markets.map(marketName).join(", ")} · {formatDateTime(s.created_at)}</option>)}</select></label><button disabled={!searches.some(s=>s.adhoc_query?.productId)} className="btn btn-primary h-11">View this search</button></form>
       <div className="flex flex-wrap items-center justify-between gap-3"><div>
         <p className="text-xs font-semibold uppercase text-[#6b7280]">Selected search — no mixed results</p>
         <h2 className="mt-1 text-xl font-bold">{selected?.adhoc_query?.query ?? "No product search yet"}</h2>

@@ -102,7 +102,7 @@ export function GlobalSearch() {
         aria-autocomplete="list"
         aria-activedescendant={showList && active >= 0 ? `${listId}-${active}` : undefined}
         aria-label="Search buyers by company or project"
-        placeholder="Search company or project…"
+        placeholder="Search saved leads…"
         value={query}
         onChange={(event) => {
           setQuery(event.target.value);

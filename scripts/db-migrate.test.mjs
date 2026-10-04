@@ -31,12 +31,14 @@ describe("cloud migration command", () => {
     const db = await PGlite.create();
     try {
       const applied = await applyMigrations(clientOf(db));
-      expect(applied).toHaveLength(12);
-      expect(applied.at(-1)).toBe("012_contact_enrichment.sql");
+      expect(applied).toHaveLength(13);
+      expect(applied.at(-1)).toBe("013_local_sales_funnel.sql");
       expect(await applyMigrations(clientOf(db))).toEqual([]);
       expect((await db.query("select demo_only, delivery_state from outreach_drafts")).rows).toEqual([]);
       expect((await db.query("select keyword, product_name from search_opportunities")).rows).toEqual([]);
       expect((await db.query("select action, status from enrichment_requests")).rows).toEqual([]);
+      expect((await db.query("select enabled from funnel_control")).rows).toEqual([{enabled:false}]);
+      expect((await db.query("select state from funnel_threads")).rows).toEqual([]);
     } finally { await db.close(); }
   }, 120_000);
   it("rolls back a failing migration without recording it or losing earlier migrations", async () => {

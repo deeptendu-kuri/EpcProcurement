@@ -8,6 +8,7 @@
     "start": "next start",
     "start:cloud": "node scripts/start-cloud.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
+    "funnel:check": "node scripts/check-funnel-connections.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

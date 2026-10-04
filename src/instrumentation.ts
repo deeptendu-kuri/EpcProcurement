@@ -10,6 +10,8 @@ export async function register() {
     startScheduler();
     const { startOutreachWorker } = await import("./mvp/email/worker");
     startOutreachWorker();
+    const { startFunnelWorker } = await import("./mvp/automation/worker");
+    startFunnelWorker();
   } catch (error) {
     console.error("[instrumentation] scheduler did not start", error);
   }

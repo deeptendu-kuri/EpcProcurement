@@ -1,6 +1,7 @@
 import { getDb } from "@/mvp/db";
 import type { OutreachDraftRow } from "@/mvp/types";
 import { demoEmailSettings } from "./config";
+import { paceResend } from "./pacing";
 
 export class DemoSendError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -21,8 +22,13 @@ export async function sendDemoEmail(id: string, text: { subject: string; body: s
   const draft = await db.tx(async (tx) => {
     // Serialise claims across drafts too, to enforce the small demo quota.
     await tx.query("select pg_advisory_xact_lock(78240321)");
+    if ((await tx.query("select recipient from funnel_suppressions where recipient=$1",[settings.recipient])).rows.length)
+      throw new DemoSendError(409,"The demo recipient opted out. Delivery remains suppressed.");
     const current = (await tx.query<OutreachDraftRow>("select * from outreach_drafts where id = $1 for update", [id])).rows[0];
     if (!current) throw new DemoSendError(404, "Draft not found.");
+    if ((await tx.query(`select ft.id from funnel_threads ft join leads l on l.buyer_company_id=ft.company_id
+      where l.id=$1 limit 1`,[current.lead_id])).rows.length)
+      throw new DemoSendError(409,"This buyer belongs to the automatic funnel. Use its conversation rather than a separate manual send.");
     const queued = (await tx.query<{ id: string; lease_token: string | null; status: string; recipient: string; lease_valid: boolean }>(
       "select id, lease_token, status, recipient, (locked_until > now()) as lease_valid from demo_campaigns where draft_id = $1", [id])).rows[0];
     if (queued && (!campaign || queued.id !== campaign.id || queued.lease_token !== campaign.leaseToken || queued.status !== "sending" || !queued.lease_valid))
@@ -61,6 +67,7 @@ export async function sendDemoEmail(id: string, text: { subject: string; body: s
 
   let messageId: string;
   try {
+    await paceResend();
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { authorization: `Bearer ${settings.apiKey}`, "content-type": "application/json", "Idempotency-Key": `demo-draft-${id}` },

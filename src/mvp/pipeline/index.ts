@@ -14,6 +14,7 @@ import { fixturesSource } from "./sources/fixtures";
 import { gdeltSource } from "./sources/gdelt";
 import { rssSource } from "./sources/rss";
 import { tedSource } from "./sources/ted";
+import { tavilySource } from "./sources/tavily";
 import { publisherKeyFor } from "./text";
 import { captureOpportunities } from "@/mvp/opportunities";
 
@@ -26,7 +27,7 @@ const READ_CONCURRENCY = 3;
 
 /** Live sources for a run. Fixtures are available only through explicit sample/offline mode. */
 export function liveSources(): Source[] {
-  return [tedSource, bingNewsSource, gdeltSource, rssSource];
+  return [...(process.env.TAVILY_API_KEY?.trim() ? [tavilySource] : []), tedSource, bingNewsSource, gdeltSource, rssSource];
 }
 
 /**

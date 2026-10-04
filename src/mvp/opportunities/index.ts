@@ -10,6 +10,7 @@ export interface Opportunity {
   contact_role: string; buying_reason: string; evidence_ids: string[]; qualification: string;
   summary: string; owner_name: string; next_action: string; follow_up_at: string | null; created_at: string;
   name: string; country: string | null; is_sample: boolean; validated_emails: number; sent: boolean;
+  project_id?: string | null; project_name?: string | null; project_country?: string | null;
 }
 /** Conservative product-specific eligibility. Inference remains a prospect, never a confirmed order. */
 export function eligibleForProduct(record: BuyerRecord, productId: string): boolean {
@@ -53,7 +54,7 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
   });
   return count;
 }
-const OPPORTUNITY_SQL = `select o.*, c.canonical_name as name, c.country, l.is_sample,
+const OPPORTUNITY_SQL = `select o.*, c.canonical_name as name, c.country, l.is_sample, l.project_id, pj.name as project_name, pj.country as project_country,
   (select count(distinct cp.id)::int from contact_points cp join people p on p.id = cp.person_id
     where p.current_company_id = l.buyer_company_id and p.confirmed_at > now() - interval '90 days'
       and cp.kind = 'email' and cp.verified_at is not null
@@ -67,8 +68,9 @@ const OPPORTUNITY_SQL = `select o.*, c.canonical_name as name, c.country, l.is_s
           when 'technical_approver' then pr.buying_role in ('technical_evaluator','discipline_lead')
           when 'influencer' then pr.buying_role in ('project_director','package_manager')
           else false end)) as validated_emails,
-  exists(select 1 from outreach_drafts d where d.opportunity_id = o.id and d.delivery_state = 'sent') as sent
-  from search_opportunities o join leads l on l.id = o.lead_id join companies c on c.id = l.buyer_company_id`;
+  (exists(select 1 from outreach_drafts d where d.opportunity_id = o.id and d.delivery_state = 'sent')
+    or exists(select 1 from funnel_threads ft join funnel_messages fm on fm.thread_id=ft.id where ft.opportunity_id=o.id and fm.direction='out' and fm.state='accepted')) as sent
+  from search_opportunities o join leads l on l.id = o.lead_id join companies c on c.id = l.buyer_company_id left join projects pj on pj.id=l.project_id`;
 export async function listOpportunities(runId?: string): Promise<Opportunity[]> {
   return (await getDb().query<Opportunity>(`${OPPORTUNITY_SQL} ${runId ? "where o.run_id = $1" : ""} order by o.created_at desc, o.id limit 2000`, runId ? [runId] : [])).rows;
 }

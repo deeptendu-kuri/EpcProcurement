@@ -8,7 +8,7 @@ export function journey(qualification: string, validatedEmails: number, sent: bo
   if (qualification !== "approved") return { stage: "Review buyer fit", action: "Review buyer fit", step: 0 };
   if (sent) return { stage: "Demo email sent", action: "Review conversation", step: 3 };
   if (!validatedEmails || sample) return { stage: "Contact validation needed", action: "Find and validate contact", step: 1 };
-  return { stage: "Ready for outreach", action: "Review email", step: 2 };
+  return { stage: "Ready for outreach", action: "View automation", step: 2 };
 }
 export const CONTACT_ROLES = [
   { id: "buyer", name: "Purchase / Procurement Manager" },

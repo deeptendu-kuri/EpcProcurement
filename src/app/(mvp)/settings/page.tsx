@@ -5,6 +5,7 @@ import { getClientProfile } from "@/mvp/config/profile";
 import { marketName } from "@/mvp/config/markets";
 import { disciplineLabel, formatDate, formatMoney } from "@/components/mvp/labels";
 import { PageHeader } from "@/components/mvp/page-header";
+import { seller } from "@/mvp/automation/config";
 
 /** Human names for the portal registration keys in client-profile.json. */
 const REGISTRATION_NAMES: Record<string, string> = {
@@ -171,9 +172,11 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
 }
 
 function ProfileTab({ profile }: { profile: ReturnType<typeof getClientProfile> }) {
+  const identity=seller();
   return (
     <div className="flex flex-col gap-4">
-
+      <Card title="Current email agent identity"><p className="font-semibold">{identity.name} · {identity.email}</p><p className="mt-2">{identity.description}</p><p className="mt-2">The agent uses the exact searched product and lead evidence. It does not use the example certifications or registrations below as seller claims.</p><Link href="/outreach" className="btn btn-primary mt-3">Open email automation setup</Link></Card>
+      <details className="card p-4"><summary className="cursor-pointer font-semibold">Advanced: existing example discovery/scoring profile</summary><div className="mt-4 flex flex-col gap-4">
       {profile.is_example ? (
         <p role="note" className="rounded-lg border border-[#fedf89] bg-[#fffaeb] px-3 py-2 text-sm font-semibold text-[#b54708]">
           This is an example profile. Replace it with your company’s real data before relying on the results.
@@ -306,6 +309,7 @@ function ProfileTab({ profile }: { profile: ReturnType<typeof getClientProfile> 
           <List items={profile.excluded_company_names} />
         </Card>
       ) : null}
+      </div></details>
     </div>
   );
 }

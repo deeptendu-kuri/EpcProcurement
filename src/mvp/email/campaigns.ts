@@ -27,6 +27,8 @@ export async function approveCampaign(draftId: string, text: { subject: string; 
   const settings = automationSettings();
   return getDb().tx(async tx => {
     await tx.query("select pg_advisory_xact_lock(78240321)");
+    if ((await tx.query("select recipient from funnel_suppressions where recipient=$1",[AUTOMATION_RECIPIENT])).rows.length)
+      throw new DemoSendError(409,"The demo recipient opted out. Manual approval cannot bypass suppression.");
     const draft = (await tx.query<OutreachDraftRow & { opportunity_id: string | null }>(
       "select * from outreach_drafts where id = $1 for update", [draftId])).rows[0];
     if (!draft) throw new DemoSendError(404, "Draft not found.");
@@ -42,6 +44,8 @@ export async function approveCampaign(draftId: string, text: { subject: string; 
       "select qualification, company_id, product_id, lead_id from search_opportunities where id = $1 for share", [draft.opportunity_id])).rows[0];
     if (opportunity?.qualification !== "approved" || opportunity.lead_id !== draft.lead_id)
       throw new DemoSendError(409, "Review and approve this product's buyer fit first.");
+    if ((await tx.query("select id from funnel_threads where company_id=$1 and product_id=$2",[opportunity.company_id,opportunity.product_id])).rows.length)
+      throw new DemoSendError(409,"This company/product already belongs to the automatic funnel. Open its conversation instead of approving another email.");
     const contactKey = draft.person_id ?? "company";
     const duplicate = await tx.query("select id from demo_campaigns where company_id = $1 and product_id = $2 and contact_key = $3 and status <> 'cancelled'", [opportunity.company_id, opportunity.product_id, contactKey]);
     if (duplicate.rows.length) throw new DemoSendError(409, "An approved campaign already exists for this company, product and contact. Check Outreach.");

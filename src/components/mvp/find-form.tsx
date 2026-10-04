@@ -173,7 +173,7 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
   return (
     <div className="flex flex-col gap-4">
       <form onSubmit={submit} className="card flex flex-col gap-4 p-4 sm:p-5" aria-label="Search for opportunities">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm font-semibold">Product to sell
             <select aria-label="Product to sell" className="control h-11 px-2" value={productId} onChange={e => { setProductId(e.target.value); setQuery(products.find(p => p.id === e.target.value)?.name ?? ""); }}>
               {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -185,13 +185,16 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
               {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm font-semibold">Contact role wanted
-            <select aria-label="Contact role wanted" className="control h-11 px-2" value={contactRole} onChange={e => setContactRole(e.target.value)}>
+        </div>
+        <details className="text-sm"><summary className="cursor-pointer font-semibold text-[var(--text-2)]">Optional: prioritize a contact role</summary><p className="mt-2 text-xs text-[var(--text-2)]">Search finds projects and buying companies first. Relevant contacts are listed with role tags; procurement is the default outreach priority.</p>
+          <label className="mt-2 flex max-w-md flex-col gap-1 text-sm font-semibold">Priority contact role
+            <select aria-label="Priority contact role" className="control h-11 px-2" value={contactRole} onChange={e => setContactRole(e.target.value)}>
               {CONTACT_ROLES.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </label>
-        </div>
+        </details>
         <p className="text-xs text-[#6b7280]">Buyer-only search: companies that won work and could buy the selected product. No open tenders or project owners. Country selection does not guarantee source coverage.</p>
+        <p className="rounded-lg bg-[var(--accent-soft)] p-3 text-sm">Automatic demo outreach starts after product fit and named-contact validation pass, if enabled before this search. <Link href="/outreach" className="font-semibold text-[var(--accent-2)] underline">Set up email automation →</Link></p>
         <div className="flex flex-col gap-2 sm:flex-row" data-tour="find-query">
           <label htmlFor="find-query" className="sr-only">What do you offer?</label>
           <input
