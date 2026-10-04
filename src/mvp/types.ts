@@ -151,6 +151,8 @@ export interface RunCounters {
   factsKept?: number;
   factsDropped?: number;
   newLeads?: number;
+  /** Product-scoped prospects actually saved to this search, not global/raw lead creation. */
+  scopedProspects?: number;
   updatedLeads?: number;
 }
 

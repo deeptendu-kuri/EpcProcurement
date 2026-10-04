@@ -169,7 +169,7 @@ describe("offline run over fixtures", () => {
     const stages = new Set(events.map((e) => e.stage));
     for (const stage of ["collect", "read", "filter", "extract", "check", "resolve", "score", "done"]) expect(stages).toContain(stage);
     expect(events.at(-1)!.message).toContain("Searched 1 of 1 sources");
-    expect(events.at(-1)!.message).toContain("3 new leads");
+    expect(events.at(-1)!.message).toContain("3 new raw lead records");
 
     const docs = await db.query<{ status: string; is_sample: boolean; filter_reason: string | null; url: string }>("select status, is_sample, filter_reason, url from source_documents");
     expect(docs.rows).toHaveLength(13);

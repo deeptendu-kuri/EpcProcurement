@@ -22,6 +22,7 @@ export function RecentRuns({ runs }: { runs: RunRow[] }) {
             const input = run.adhoc_query;
             const status = STATUS_TEXT[run.status];
             const newLeads = run.counters?.newLeads;
+            const prospects = run.counters?.scopedProspects;
             return (
               <li key={run.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
                 <span className="font-semibold text-[#101828]">{input?.query ?? "Search"}</span>
@@ -29,7 +30,7 @@ export function RecentRuns({ runs }: { runs: RunRow[] }) {
                 <span className="text-[#667085]">{formatDateTime(run.started_at ?? run.created_at)}</span>
                 <span className={`font-semibold ${status.className}`}>{status.label}</span>
                 {newLeads !== undefined ? (
-                  <span className="tabular-nums text-[#344054]">{newLeads} new raw leads{input?.productId ? " · filtered in CRM" : ""}</span>
+                  <span className="tabular-nums text-[#344054]">{prospects !== undefined ? `${prospects} buyer prospects saved · ` : ""}{newLeads} new raw lead records{input?.productId && prospects === undefined ? " · buyer count unavailable for this older search" : ""}</span>
                 ) : null}
                 <span className="ml-auto flex gap-3">
                   <Link href={`/find?run=${run.id}`} className="font-semibold text-[#1d4ed8] hover:underline">Progress</Link>

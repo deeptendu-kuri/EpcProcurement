@@ -39,6 +39,8 @@ The legacy company view retains its existing manual single-inbox Send action; an
 
 ## Live contact enrichment (guided-workflow branch)
 
+Live discovery no longer substitutes fixtures when sources are empty or fail. An answered search can return zero real prospects; if every source fails, the run fails visibly. Explicit offline/sample mode remains available for tests. Progress and recent searches distinguish raw lead records from the product-scoped buyer prospects actually saved to CRM.
+
 Open a product-scoped prospect and use **Find & validate company contacts**:
 
 1. Enter and confirm the buying company's actual website domain. Do not use the project owner's site or guess from a company name.

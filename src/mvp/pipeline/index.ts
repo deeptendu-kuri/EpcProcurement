@@ -24,7 +24,7 @@ export { failStaleRuns } from "./active-runs";
 export const MAX_DOCS_PER_RUN = 60;
 const READ_CONCURRENCY = 3;
 
-/** Live sources for a run (fixtures are the fallback). */
+/** Live sources for a run. Fixtures are available only through explicit sample/offline mode. */
 export function liveSources(): Source[] {
   return [tedSource, bingNewsSource, gdeltSource, rssSource];
 }
@@ -33,7 +33,7 @@ export function liveSources(): Source[] {
  * Start a "Search now" run (docs/mvp/12 §1 F1, 05, 06).
  *
  * Inserts a `runs` row (status 'queued' → 'running'), returns its id immediately, and continues in the
- * background: collect (TED, Bing News, GDELT, RSS; fixtures when MVP_OFFLINE=1 or a source fails) → read → filter →
+ * background: collect (TED, Bing News, GDELT, RSS; fixtures only in explicit offline mode) → read → filter →
  * extract (getLLM('extract_a'/'extract_b'), mock in demo mode) → quote check → agreement → resolve →
  * graph, then calls `buildSignalsAndScore(runId)`. Progress is appended to `run_events` with
  * `RunCounters`; `runs.status` ends as 'done' or 'failed' (a scoring failure also ends as 'failed').
@@ -76,7 +76,7 @@ export async function waitForRun(runId: string): Promise<void> {
 // ───────────────────────── progress ─────────────────────────
 
 class Progress {
-  readonly counters: Required<Pick<RunCounters, "sourcesTotal" | "sourcesDone" | "sourcesFailed" | "itemsRead" | "relevant" | "factsKept" | "factsDropped" | "newLeads" | "updatedLeads">> = {
+  readonly counters: Required<Pick<RunCounters, "sourcesTotal" | "sourcesDone" | "sourcesFailed" | "itemsRead" | "relevant" | "factsKept" | "factsDropped" | "newLeads" | "updatedLeads">> & Pick<RunCounters, "scopedProspects"> = {
     sourcesTotal: 0, sourcesDone: 0, sourcesFailed: 0, itemsRead: 0, relevant: 0, factsKept: 0, factsDropped: 0, newLeads: 0, updatedLeads: 0,
   };
   /** Sources that failed in this run, with the reason ("Bing News (HTTP 429)"): named in the progress line. */
@@ -102,7 +102,8 @@ class Progress {
   summary(): string {
     const c = this.counters;
     const failed = this.failedSources.length ? [`${this.failedSources.length === 1 ? "1 source" : `${this.failedSources.length} sources`} failed: ${this.failedSources.join("; ")}`] : [];
-    return [`Searched ${c.sourcesDone + c.sourcesFailed} of ${c.sourcesTotal} sources`, `read ${c.itemsRead} items`, `${c.relevant} relevant`, `${c.newLeads} new leads`, ...failed].join(" · ");
+    return [`Searched ${c.sourcesDone + c.sourcesFailed} of ${c.sourcesTotal} sources`, `read ${c.itemsRead} items`, `${c.relevant} relevant`, `${c.newLeads} new raw lead records`,
+      ...(c.scopedProspects === undefined ? [] : [`${c.scopedProspects} buyer prospects saved`]), ...failed].join(" · ");
   }
 }
 
@@ -218,11 +219,9 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
       }),
     );
     if (!offline && raws.length === 0) {
-      progress.counters.sourcesTotal++;
-      const why = progress.counters.sourcesFailed === sources.length ? "All live sources failed" : "Live sources returned nothing";
-      await progress.emit("collect", `${why} – using sample data (marked "Sample data")`);
-      raws = await fixturesSource.collect(ctx);
-      progress.counters.sourcesDone++;
+      if (progress.counters.sourcesFailed === sources.length)
+        throw new Error("All live sources failed. No sample data was substituted. Retry when the sources are available.");
+      await progress.emit("collect", "Live sources returned no documents. No sample data was substituted.");
     }
     if (raws.length > MAX_DOCS_PER_RUN) {
       // Keep structured and fixture documents first, then the newest.
@@ -366,6 +365,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     }
 
     const scoped = await captureOpportunities(runId, input, db);
+    if (input.productId) progress.counters.scopedProspects = scoped;
     if (input.productId) await progress.emit("info", `${scoped} product-matched buyer prospects saved to this search. Contact validation is a separate step.`);
     // ── done ──
     await progress.emit("done", `Done: ${progress.summary()}${progress.counters.updatedLeads ? ` · ${progress.counters.updatedLeads} updated` : ""}`);

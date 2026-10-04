@@ -14,9 +14,10 @@ describe("run progress helpers", () => {
 
   it("builds the counters line from what is known", () => {
     expect(countersLine({ sourcesTotal: 5, sourcesDone: 2, sourcesFailed: 1, itemsRead: 24, relevant: 6, newLeads: 3 })).toBe(
-      "Searched 3 of 5 sources · read 24 items · 6 relevant · 3 new leads",
+      "Searched 3 of 5 sources · read 24 items · 6 relevant · 3 new raw lead records",
     );
-    expect(countersLine({ itemsRead: 1, newLeads: 1 })).toBe("Read 1 items · 1 new lead");
+    expect(countersLine({ itemsRead: 1, newLeads: 1 })).toBe("Read 1 items · 1 new raw lead records");
+    expect(countersLine({ newLeads: 15, scopedProspects: 0 })).toBe("0 buyer prospects saved · 15 new raw lead records");
     expect(countersLine({})).toBe("");
   });
 
