@@ -11,14 +11,17 @@ import { apiJson } from "../api-client";
 import { PageHeader } from "../page-header";
 import { formatDateTime } from "../labels";
 import { marketName } from "@/mvp/config/markets";
+import type { EnrichmentView } from "@/mvp/enrichment";
+import { ContactEnrichment } from "./contact-enrichment";
 
 interface Props {
   opportunity: Opportunity; buyer: BuyerView; returnTo: string; demoEmail: DemoEmailInfo;
   events: { id: number; body: string; created_at: string }[];
   drafts: { id: string; subject: string | null; body: string | null; delivery_state: string | null; delivery_recipient: string | null; campaign_status: string | null; created_at: string }[];
   points: { person_id: string; value: string; verified_at: string | null; source: string }[];
+  enrichment?: EnrichmentView;
 }
-export function OpportunityWorkspace({ opportunity: o, buyer, returnTo, events, drafts, points, demoEmail }: Props) {
+export function OpportunityWorkspace({ opportunity: o, buyer, returnTo, events, drafts, points, demoEmail, enrichment }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState("overview");
   const [busy, setBusy] = useState(false);
@@ -60,9 +63,10 @@ export function OpportunityWorkspace({ opportunity: o, buyer, returnTo, events, 
         <details className="mt-4"><summary className="cursor-pointer text-sm font-semibold">View supporting evidence ({o.evidence_ids.length})</summary><ul className="mt-2 space-y-3">{buyer.proof.filter(p => o.evidence_ids.includes(p.evidenceId)).map(p => <li key={p.evidenceId} className="rounded-lg bg-[var(--subtle)] p-3 text-sm"><p>{p.sentence}</p>{p.url && /^https?:\/\//.test(p.url) ? <a href={p.url} target="_blank" rel="noreferrer" className="text-xs text-[var(--accent-2)] underline">{p.source} — open source</a> : <span className="text-xs">{p.source}</span>}</li>)}</ul></details>
       </section>
       <section id="contacts" className="card p-4"><h2 className="font-bold">Contact: {CONTACT_ROLES.find(r => r.id === o.contact_role)?.name}</h2>
-        {contacts.filter(c => !c.isDemo).length ? <ul className="mt-3 space-y-2">{contacts.filter(c => !c.isDemo).map(c => <li key={c.id} className="rounded-lg border border-[var(--line)] p-3 text-sm"><p className="font-semibold">{c.name} · {c.detail}</p><p>{c.email || "No email found"}</p><p className="text-xs text-[#6b7280]">Contact found. Role confirmation alone does not validate deliverability.</p></li>)}</ul> : <p className="mt-2 text-sm text-[#6b7280]">No named contact found for this role. We will not substitute an unrelated employee.</p>}
-        <p className="mt-3 text-sm">{verifiedProspect(o.qualification, o.validated_emails, o.is_sample) ? "This prospect meets the verified CRM criteria." : "Email validation needed. FullEnrich is not configured; this prospect stays in Discovered CRM."}</p>
-        <div className="mt-3 flex flex-wrap gap-2"><Link className="btn btn-secondary" href={`/buyers/${o.lead_id}`}>Find / add a contact (advanced)</Link><button className="btn btn-secondary" disabled title="FullEnrich credentials and integration are needed">Validate with FullEnrich — not connected</button><button disabled={o.qualification !== "approved" || !demoEmail.enabled} className="btn btn-primary" onClick={() => setCompose(true)}>Contact lead / Preview demo email</button></div>
+        {!contacts.some(c => !c.isDemo) ? <p className="mt-2 text-sm text-[#6b7280]">No named contact found for the requested role yet. The lookup below can find relevant buying-team contacts; unrelated employees are not substituted.</p> : null}
+        <p className="mt-3 text-sm">{verifiedProspect(o.qualification, o.validated_emails, o.is_sample) ? "This prospect meets the verified CRM criteria." : "Review current contact role and validate email to qualify for Verified CRM. Sending a demo email does not qualify a contact."}</p>
+        <ContactEnrichment opportunityId={o.id} sample={o.is_sample} initial={enrichment} />
+        <div className="mt-3 flex flex-wrap gap-2"><Link className="btn btn-secondary" href={`/buyers/${o.lead_id}`}>Find / add a contact (advanced)</Link><button disabled={o.qualification !== "approved" || !demoEmail.enabled} className="btn btn-primary" onClick={() => setCompose(true)}>Contact lead / Preview demo email</button></div>
         {o.qualification !== "approved" ? <p className="mt-2 text-xs text-[#b54708]">Review buyer fit to unlock the email preview.</p> : null}
         <p className="mt-2 text-xs text-[#6b7280]">Demo sends only to {demoEmail.recipient || "the configured test inbox"}. It does not email scraped contacts or move them into Verified CRM.</p>
       </section>

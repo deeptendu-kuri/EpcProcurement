@@ -37,7 +37,24 @@ The queue freezes approved text, deduplicates company/product/contact across sea
 
 The legacy company view retains its existing manual single-inbox Send action; an approved campaign draft cannot bypass the queue through that action or be edited/marked sent manually.
 
-## Environment variables
+## Live contact enrichment (guided-workflow branch)
+
+Open a product-scoped prospect and use **Find & validate company contacts**:
+
+1. Enter and confirm the buying company's actual website domain. Do not use the project owner's site or guess from a company name.
+2. **Find contacts with Hunter** requests at most five personal addresses. Only named contacts with a relevant buying-team title are saved, as unverified candidates. Generic mailboxes, unrelated departments and mismatched domains are excluded. A lookup may return none.
+3. Review the person's current employment/role separately; the confirmation button records your manual review, not a provider guarantee of employment.
+4. **Check email with Hunter** stores the exact provider outcome. Only a complete valid result with positive SMTP/MX checks, no catch-all, no disposable/webmail flags and no blocking is marked deliverability-validated. Finding an address or a high confidence score is not validation. Phone validation is not included.
+
+Set server-only `HUNTER_API_KEY` in the ignored environment file and restart the app. Hunter's `test-api-key` returns dummy responses and is rejected. Requests have a 20-second timeout, no automatic provider retry, a persistent audit and one-day cache. Cached checks keep their original validation timestamp. `HUNTER_DAILY_REQUEST_LIMIT=5` caps actual requests across the app's database per UTC day (configurable 1–25); this is not the provider's credit allowance. Provider quota/auth failures appear in the contact panel. Sample leads cannot use live enrichment.
+
+Verified CRM requires approved product fit, a recent user-reviewed company/role, an active matching buying role and recent provider email validation (90-day expiry), and excludes samples. A domain change clears earlier Hunter validation. These checks do not prove that the company has committed to purchasing.
+
+This contact feature does not automatically start search-completion outreach or process inbound replies. The existing approved single-inbox queue is unchanged. Live Hunter results need proof with a real configured key and actual source-backed buyer; mocked tests are not live-provider proof.
+
+For the no-purchased-domain reply demo, Resend provides a public account-specific `<id>.resend.app` receiving domain under **Emails → Receiving → ⋯ → Receiving address**. Once configured, the app can use a Reply-To address there and poll the receiving API locally. This receiving connection is not implemented yet. Existing sent messages without that Reply-To will not automatically reach the app when replied to. A custom verified sending domain is a separate requirement for production delivery beyond Resend's account-email test restriction. See [Resend receiving](https://resend.com/docs/dashboard/receiving/introduction).
+
+## Email environment variables
 
 Add the following to `.env.local` without replacing existing source/AI settings:
 
@@ -81,7 +98,7 @@ Run from the app directory, after configuring the new cloud `DATABASE_URL`:
 pnpm.cmd db:migrate
 ```
 
-This command connects to PostgreSQL and applies `src/mvp/db/migrations/001_*.sql` through `011_demo_campaigns.sql` in order. Migration 010 preserves product/search provenance; migration 011 adds the initially empty approved-email queue. The migration registry skips already-applied files. Each file runs inside a transaction; a failed file is rolled back. Do **not** run `supabase/migrations` for the active MVP.
+This command connects to PostgreSQL and applies `src/mvp/db/migrations/001_*.sql` through `012_contact_enrichment.sql` in order. Migration 010 preserves product/search provenance; migration 011 adds the initially empty approved-email queue; migration 012 adds contact-check metadata and an initially empty provider audit/cache. The migration registry skips already-applied files. Each file runs inside a transaction; a failed file is rolled back. Do **not** run `supabase/migrations` for the active MVP.
 
 For a Neon `-pooler` hostname, the migration command automatically uses the matching direct endpoint because its session advisory lock is incompatible with transaction pooling. App traffic continues to use the original pooled `DATABASE_URL`. Other providers can use an optional `MIGRATION_DATABASE_URL` pointing to their direct endpoint.
 

@@ -15,7 +15,7 @@ describe("guided workspace", () => {
     expect((screen.getByLabelText("Summary", { exact: true }) as HTMLTextAreaElement).value).toBe("Saved review notes");
     expect((screen.getByRole("button", { name: "Contact lead / Preview demo email" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("link", { name: /Back to filtered CRM/ }).getAttribute("href")).toBe("/crm?search=run-1&country=IN");
-    expect(screen.getByText(/FullEnrich is not configured/)).toBeTruthy();
+    expect(screen.getByText(/Hunter is not connected/)).toBeTruthy();
   });
   it("opens a scoped preview after review without representing missing integrations as working", () => {
     show({ qualification: "approved" });

@@ -55,10 +55,12 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
 }
 const OPPORTUNITY_SQL = `select o.*, c.canonical_name as name, c.country, l.is_sample,
   (select count(distinct cp.id)::int from contact_points cp join people p on p.id = cp.person_id
-    where p.current_company_id = l.buyer_company_id and cp.kind = 'email' and cp.verified_at is not null
+    where p.current_company_id = l.buyer_company_id and p.confirmed_at > now() - interval '90 days'
+      and cp.kind = 'email' and cp.verified_at is not null
       and cp.verified_at > now() - interval '90 days' and cp.source like 'provider:%'
       and cp.value ~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$'
-      and exists (select 1 from person_roles pr where pr.person_id = p.id and
+      and exists (select 1 from person_roles pr where pr.person_id = p.id
+        and (pr.company_id = p.current_company_id or pr.company_id is null) and pr.end_date is null and
         case o.contact_role when 'buyer' then pr.buying_role in ('procurement_lead','package_manager')
           when 'decision_maker' then pr.buying_role in ('decision_maker','executive')
           when 'approver' then pr.buying_role in ('decision_maker','project_director')

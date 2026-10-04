@@ -29,6 +29,7 @@ const PROTECTED_APIS = [
   "/api/mvp/logout",
   "/api/mvp/outreach/campaigns",
   "/api/mvp/outreach/campaigns/abc",
+  "/api/mvp/opportunities/abc/enrichment",
 ];
 
 beforeEach(() => {
