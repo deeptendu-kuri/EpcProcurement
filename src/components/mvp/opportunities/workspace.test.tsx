@@ -16,7 +16,7 @@ describe("guided workspace", () => {
     expect(screen.queryByRole("button", { name: /Send|Preview demo email/ })).toBeNull();
     expect(screen.getByRole("link",{name:"View automation & next step"}).getAttribute("href")).toBe("/outreach");
     expect(screen.getByRole("link", { name: /Back to filtered CRM/ }).getAttribute("href")).toBe("/crm?search=run-1&country=IN");
-    expect(screen.getByText(/Hunter is not connected/)).toBeTruthy();
+    expect(screen.getByText(/Contact verification is not connected/)).toBeTruthy();
   });
   it("shows the real conversation path and integration requirements instead of a manual send button", () => {
     show({ qualification: "approved" });

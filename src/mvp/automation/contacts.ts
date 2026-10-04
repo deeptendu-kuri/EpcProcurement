@@ -17,11 +17,11 @@ export async function prepareContact(o: Opportunity): Promise<ReadyContact|null>
         when 'decision_maker' then pr.buying_role in ('decision_maker','executive') when 'approver' then pr.buying_role in ('decision_maker','project_director')
         when 'technical_approver' then pr.buying_role in ('technical_evaluator','discipline_lead') when 'influencer' then pr.buying_role in ('project_director','package_manager') else false end)
     order by cp.verified_at desc nulls last,p.full_name limit 1`,[o.id,o.contact_role])).rows[0];
-  if (!p) throw new Error("No reviewed current buying-team contact. Review a named contact's employer/role in Contacts; Hunter deliverability alone does not prove employment.");
+  if (!p) throw new Error("No reviewed current buying-team contact. Review a named contact's employer/role in Contacts; email deliverability alone does not prove employment.");
   if (!p.point_id) {
     await enrichOpportunity(o.id,{action:"find",personId:p.id});
     const updated=await enrichmentView(o.id);const found=updated.contacts.find(c=>c.id===p.id&&c.point_id);
-    if (!found?.point_id) throw new Error("Hunter did not find this contact's email. Nothing was guessed.");
+    if (!found?.point_id) throw new Error("No published or provider-found email for this contact. Nothing was guessed.");
     p.point_id=found.point_id;
   }
   if (!p.verified_at || Date.parse(p.verified_at)<Date.now()-90*24*60*60_000 || !p.source?.startsWith("provider:")) {

@@ -1,5 +1,6 @@
 import { mvpEnv } from "@/mvp/config/env";
 import { getClientProfile } from "@/mvp/config/profile";
+import { getCatalogueItem } from "@/mvp/config/buyers-config";
 import { getDb, type Db } from "@/mvp/db";
 import { buildSignalsAndScore } from "@/mvp/scoring";
 import type { RunCounters, RunInput, RunStage } from "@/mvp/types";
@@ -157,7 +158,7 @@ export function maxAiDocsPerRun(): number {
 const TITLE_ACTION = /\b(?:award|awarded|awards|wins|won|secures?|secured|bags?|order|orders|contract|tender|bid|rfq|prequalification)\b/i;
 
 /** Rank a news document for AI reading: buying action and scope in the headline, product words, freshness. */
-export function aiPriority(item: { raw: RawDoc; stored: { text: string } }, profile: ReturnType<typeof getClientProfile>): number {
+export function aiPriority(item: { raw: RawDoc; stored: { text: string } }, profile: ReturnType<typeof getClientProfile>, productId?: string): number {
   const title = item.raw.title ?? "";
   const text = item.stored.text;
   const products = profile.products.filter((p) => p.active).flatMap((p) => p.keywords.map((k) => k.toLowerCase()));
@@ -166,6 +167,17 @@ export function aiPriority(item: { raw: RawDoc; stored: { text: string } }, prof
   if (findScope(title, scopeTermsFor(profile, []))) score += 2;
   if (products.some((k) => hasTerm(text, k))) score += 2;
   if (/\b(?:EPC|engineering, procurement and construction)\b/i.test(text)) score += 1;
+  if(productId) {
+    // Only reading priority, never proof of buyer fit. Scarce AI slots should favour
+    // construction/procurement buyers of the searched product over sellers' order news.
+    const product=getCatalogueItem(productId);
+    if(product?.keywords.some(k=>hasTerm(title,k)))score+=4;
+    if(product?.keywords.some(k=>hasTerm(text,k)))score+=2;
+    const buyingWork=/\b(?:EPC|contractor|subcontractor|construction|installation|procurement)\b/i.test(title);
+    if(buyingWork)score+=5;
+    if(!buyingWork && /\b(?:manufacturer|pipe mill|stockist)\b|\b(?:steel )?pipes?\s+(?:supply )?(?:orders?|supply contracts?)\b/i.test(title))score-=6;
+    if(/\b(?:invites? bids?|open tender|tender invitation)\b/i.test(title))score-=8;
+  }
   if (item.raw.publishedAt) {
     const ageDays = (Date.now() - new Date(item.raw.publishedAt).getTime()) / 86_400_000;
     score += ageDays <= 30 ? 2 : ageDays <= 120 ? 1 : 0;
@@ -305,7 +317,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     const cap = maxAiDocsPerRun();
     const needsAi = relevant.filter((r) => !r.raw.structured && !r.raw.isSample);
     if (!offline && needsAi.length > cap) {
-      const ranked = [...needsAi].sort((a, b) => aiPriority(b, profile) - aiPriority(a, profile));
+      const ranked = [...needsAi].sort((a, b) => aiPriority(b, profile,input.productId) - aiPriority(a, profile,input.productId));
       const deferred = new Set(ranked.slice(cap));
       for (const item of deferred) {
         await db.query("update source_documents set status = 'new', filter_reason = $2 where id = $1", [item.stored.id, "deferred: per-run AI limit (read in a later run)"]);

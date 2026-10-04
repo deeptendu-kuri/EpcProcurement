@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { getDb } from "@/mvp/db";
-import { AUTOMATION_RECIPIENT, calendarPreferences } from "./config";
+import { AUTOMATION_RECIPIENT, calendarPreferences, seller } from "./config";
 import { businessTime } from "./policy";
 
 function encryptionKey() {
@@ -111,7 +111,7 @@ export async function bookDemoMeeting(threadId: string,start: string,product: st
     || !businessTime(new Date(Date.parse(end)-1),p.timeZone,p.startHour,p.endHour)) throw new Error("Meeting slot expired or is outside working hours.");
   if ((await busy(token,start,end)).length) throw new Error("That slot is no longer free. Ask the buyer to select another time.");
   const data=await google("calendars/primary/events?conferenceDataVersion=1&sendUpdates=all",token,{method:"POST",body:JSON.stringify({
-    id,summary:`[Demo] ${product} discussion — Deeptendu Kuri`,description:"EPC procurement MVP demo. No real buyer was invited.",
+    id,summary:`[Demo] ${product} discussion — ${seller().name}`,description:"EPC procurement MVP demo. No real buyer was invited.",
     start:{dateTime:start,timeZone:p.timeZone},end:{dateTime:end,timeZone:p.timeZone},attendees:[{email:AUTOMATION_RECIPIENT}],
     conferenceData:{createRequest:{requestId:id,conferenceSolutionKey:{type:"hangoutsMeet"}}},
   })});

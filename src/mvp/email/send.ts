@@ -1,6 +1,6 @@
 import { getDb } from "@/mvp/db";
 import type { OutreachDraftRow } from "@/mvp/types";
-import { demoEmailSettings } from "./config";
+import { demoEmailSettings, AUTOMATION_RECIPIENT } from "./config";
 import { paceResend } from "./pacing";
 
 export class DemoSendError extends Error {
@@ -33,7 +33,7 @@ export async function sendDemoEmail(id: string, text: { subject: string; body: s
       "select id, lease_token, status, recipient, (locked_until > now()) as lease_valid from demo_campaigns where draft_id = $1", [id])).rows[0];
     if (queued && (!campaign || queued.id !== campaign.id || queued.lease_token !== campaign.leaseToken || queued.status !== "sending" || !queued.lease_valid))
       throw new DemoSendError(409, "This draft belongs to an approved campaign. Use Outreach, not manual Send.");
-    if (campaign && (!queued || queued.recipient !== settings.recipient || settings.recipient !== "deeptendukuri@gmail.com"))
+    if (campaign && (!queued || queued.recipient !== settings.recipient || settings.recipient !== AUTOMATION_RECIPIENT))
       throw new DemoSendError(409, "Campaign recipient changed; no email was sent.");
     if (current.blocked_reason) throw new DemoSendError(409, current.blocked_reason);
     if (current.delivery_state === "sent" && current.provider_message_id) return current;

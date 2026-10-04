@@ -1,10 +1,10 @@
 import { randomUUID, timingSafeEqual, createHash } from "node:crypto";
 import { getDb } from "@/mvp/db";
 import type { OutreachDraftRow } from "@/mvp/types";
-import { demoEmailSettings } from "./config";
+import { demoEmailSettings, AUTOMATION_RECIPIENT } from "./config";
 import { DemoSendError, sendDemoEmail } from "./send";
 
-export const AUTOMATION_RECIPIENT = "deeptendukuri@gmail.com";
+export { AUTOMATION_RECIPIENT };
 export type CampaignStatus = "queued" | "sending" | "accepted" | "paused" | "cancelled" | "review";
 export interface Campaign {
   id: string; draft_id: string; opportunity_id: string; recipient: string;

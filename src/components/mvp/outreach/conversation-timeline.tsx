@@ -5,9 +5,9 @@ import { apiJson } from "../api-client";
 import { formatDateTime } from "../labels";
 import type { listFunnelThreads,listThreadMessages } from "@/mvp/automation/engine";
 type Data={threads:Awaited<ReturnType<typeof listFunnelThreads>>;messages:Awaited<ReturnType<typeof listThreadMessages>>};
-export function ConversationTimeline({opportunityId}:{opportunityId:string}) {
+export function ConversationTimeline({opportunityId,testThreadId}:{opportunityId?:string;testThreadId?:string}) {
   const [data,setData]=useState<Data|null>(null);const [error,setError]=useState(false);
-  useEffect(()=>{let cancelled=false;const load=async()=>{try{const result=await apiJson<Data>(`/api/mvp/automation/conversation/${opportunityId}`);if(!cancelled){setData(result);setError(false);}}catch{if(!cancelled)setError(true);}};const first=setTimeout(()=>{void load();},0);const timer=setInterval(()=>{void load();},10_000);return()=>{cancelled=true;clearTimeout(first);clearInterval(timer);};},[opportunityId]);
+  useEffect(()=>{let cancelled=false;const endpoint=testThreadId?`/api/mvp/automation/test/${testThreadId}`:`/api/mvp/automation/conversation/${opportunityId}`;const load=async()=>{try{const result=await apiJson<Data>(endpoint);if(!cancelled){setData(result);setError(false);}}catch{if(!cancelled)setError(true);}};const first=setTimeout(()=>{void load();},0);const timer=setInterval(()=>{void load();},10_000);return()=>{cancelled=true;clearTimeout(first);clearInterval(timer);};},[opportunityId,testThreadId]);
   const thread=data?.threads[0];
   return <section className="mt-4" aria-label="Automatic email conversation"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Email automation timeline</h3><Link href="/outreach" className="btn btn-secondary btn-sm">Setup / pause automation</Link></div>
     {error?<p role="status" className="mt-2 text-sm text-red-700">Conversation could not refresh. No email was requested from this page.</p>:null}

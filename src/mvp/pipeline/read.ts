@@ -352,11 +352,17 @@ export function pagePublishedAt(doc: Document): string | null {
 /** Main text of an HTML page (Readability, then plain body text as fallback) and its publication date. */
 export async function htmlToText(html: string, url: string): Promise<{ title: string | null; text: string; publishedAt: string | null }> {
   const [{ JSDOM }, { Readability }] = await Promise.all([import("jsdom"), import("@mozilla/readability")]);
-  const dom = new JSDOM(html, { url });
+  // Scraping needs article text, not layout. Removing style blocks before DOM construction
+  // avoids costly stylesheet parsing (and repeated CSS errors) on large news websites.
+  const articleHtml=html.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi," ");
+  const dom = new JSDOM(articleHtml, { url });
   try {
     const doc = dom.window.document;
     const pageTitle = doc.title || null;
     const publishedAt = pagePublishedAt(doc);
+    // Keep JSON-LD long enough to read publication dates, then prevent code from becoming
+    // fallback article/contact "evidence" on pages that Readability cannot identify.
+    doc.querySelectorAll("script,style,noscript,template").forEach(node=>node.remove());
     const article = new Readability(doc.cloneNode(true) as Document).parse();
     const text = article?.textContent?.trim() ? article.textContent : (doc.body?.textContent ?? "");
     return { title: article?.title || pageTitle, text: cleanText(text), publishedAt };

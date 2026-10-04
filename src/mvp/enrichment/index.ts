@@ -5,13 +5,15 @@ import { getBuyerView } from "@/mvp/buyers";
 import { clearChainCache } from "@/mvp/buyers/chain-db";
 import { slotDefs } from "@/mvp/buyers/team";
 import { companyDomain, EnrichmentError, findHunterEmail, hunterConfigured, searchHunter, verifyHunterEmail } from "./hunter";
+import { emailableConfigured, verifyEmailableEmail } from "./emailable";
+import { publicContactsConfigured, searchPublishedContacts } from "./public-contacts";
 
 export interface EnrichedContact {
   id: string; name: string; title: string | null; confirmed_at: string | null;
   email: string | null; point_id: string | null; verified_at: string | null;
   validation_status: string | null; validation_checked_at: string | null; source: string | null;
 }
-export interface EnrichmentView { configured: boolean; domain: string | null; domainConfirmed: boolean; contacts: EnrichedContact[] }
+export interface EnrichmentView { configured: boolean; discoveryProvider?: string; verificationProvider?: string; domain: string | null; domainConfirmed: boolean; contacts: EnrichedContact[] }
 interface Context { company_id: string; lead_id: string; is_sample: boolean; domain: string | null; domain_confirmed_at: string | null }
 export type EnrichmentInput = { action: "search"; domain: string; domainConfirmed: true }
   | { action: "find"; personId: string } | { action: "verify"; personId: string; pointId: string }
@@ -29,16 +31,16 @@ export async function enrichmentView(id: string): Promise<EnrichmentView> {
     cp.value as email, cp.id as point_id, cp.verified_at, cp.validation_status, cp.validation_checked_at, cp.source
     from people p left join contact_points cp on cp.person_id = p.id and cp.kind = 'email'
     where p.current_company_id = $1 order by p.full_name, cp.created_at desc limit 100`, [c.company_id])).rows;
-  return { configured: hunterConfigured(), domain: c.domain, domainConfirmed: Boolean(c.domain_confirmed_at), contacts: rows };
+  return { configured: hunterConfigured() || emailableConfigured(), discoveryProvider:hunterConfigured()?"Hunter":"Public website research",verificationProvider:emailableConfigured()?"Emailable":"Hunter", domain: c.domain, domainConfirmed: Boolean(c.domain_confirmed_at), contacts: rows };
 }
 function quotaLimit() {
   const value = Number(process.env.HUNTER_DAILY_REQUEST_LIMIT ?? "5");
   return Number.isInteger(value) && value >= 1 && value <= 25 ? value : 5;
 }
 /** Reserve a provider request atomically across processes; never hold a transaction during HTTP. */
-async function providerRequest<T>(opportunityId: string, companyId: string, action: "search" | "find" | "verify", input: string, perform: () => Promise<T>): Promise<T> {
-  if (!hunterConfigured()) throw new EnrichmentError(503, "Hunter is not connected. Set HUNTER_API_KEY in the ignored server environment file.");
-  const hash = createHash("sha256").update(input).digest("hex");
+async function providerRequest<T>(opportunityId: string, companyId: string, action: "search" | "find" | "verify", input: string, perform: () => Promise<T>, provider: "hunter" | "public" = "hunter"): Promise<T> {
+  if (provider==="hunter" ? !hunterConfigured() : !publicContactsConfigured()) throw new EnrichmentError(503, "Contact discovery provider is not configured. Public research requires Tavily and Groq.");
+  const hash = createHash("sha256").update(`${provider}:${input}`).digest("hex");
   const db = getDb();
   const reservation = await db.tx(async tx => {
     await tx.query("select pg_advisory_xact_lock(78240322)");
@@ -49,7 +51,7 @@ async function providerRequest<T>(opportunityId: string, companyId: string, acti
     if (existing?.status === "running") throw new EnrichmentError(409, "This lookup is already running. Wait before trying again.");
     if (existing?.status === "failed") throw new EnrichmentError(429, "This lookup recently failed. Wait one minute before retrying.");
     const used = (await tx.query<{ total: number }>("select count(*)::int as total from enrichment_requests where created_at >= date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'")).rows[0].total;
-    if (used >= quotaLimit()) throw new EnrichmentError(429, "The app's daily Hunter request cap was reached. Try tomorrow or review HUNTER_DAILY_REQUEST_LIMIT.");
+    if (used >= quotaLimit()) throw new EnrichmentError(429, "The app's daily contact-discovery request cap was reached. Try tomorrow or review HUNTER_DAILY_REQUEST_LIMIT.");
     const job = (await tx.query<{ id: string }>(`insert into enrichment_requests (company_id, opportunity_id, action, input_hash)
       values ($1,$2,$3,$4) returning id`, [companyId, opportunityId, action, hash])).rows[0];
     return { cached: false as const, id: job.id };
@@ -83,15 +85,16 @@ export async function enrichOpportunity(id: string, input: EnrichmentInput): Pro
     const domain = companyDomain(input.domain);
     const buyer = await getBuyerView(c.lead_id);
     if (!buyer) throw new EnrichmentError(404, "Buyer not found.");
-    const candidates = await providerRequest(id, c.company_id, "search", domain, () => searchHunter(domain));
+    const useHunter=hunterConfigured();const provider=useHunter?"Hunter":"Public website research";
+    const candidates = await providerRequest(id, c.company_id, "search", domain, () => useHunter?searchHunter(domain):searchPublishedContacts(domain),useHunter?"hunter":"public");
     const defs = slotDefs(buyer.role);
     let imported = 0;
     await db.tx(async tx => {
       await tx.query("select pg_advisory_xact_lock(78240323)");
-      // A domain change invalidates earlier Hunter validation, not historical manual data.
+      // A domain change invalidates earlier provider validation, not historical manual data.
       const current = (await tx.query<{ domain: string | null }>("select domain from companies where id = $1 for update", [c.company_id])).rows[0];
       if (current.domain && current.domain !== domain) await tx.query(`update contact_points set verified_at = null, validation_status = 'domain_changed'
-        where source like 'provider:hunter%' and person_id in (select id from people where current_company_id = $1)`, [c.company_id]);
+        where source like 'provider:%' and person_id in (select id from people where current_company_id = $1)`, [c.company_id]);
       await tx.query("update companies set domain = $2, domain_confirmed_at = now() where id = $1", [c.company_id, domain]);
       for (const candidate of candidates) {
         const matches = defs.filter(d => d.match?.test(candidate.title));
@@ -100,15 +103,15 @@ export async function enrichOpportunity(id: string, input: EnrichmentInput): Pro
         // A same-name employee with another title is not automatically the same identity.
         const existing = (await tx.query<{ id: string }>("select id from people where current_company_id = $1 and normalized_name = $2 and lower(coalesce(title,'')) = lower($3) order by created_at limit 1", [c.company_id, normalized, candidate.title])).rows[0];
         const personId = existing?.id ?? (await tx.query<{ id: string }>(`insert into people
-          (full_name, normalized_name, current_company_id, title, source, notes) values ($1,$2,$3,$4,'provider:hunter', $5) returning id`,
-          [candidate.name, normalized, c.company_id, candidate.title, `Hunter discovery candidate; employment/role and email require separate checks. Sources: ${candidate.sources.join(", ")}`])).rows[0].id;
+          (full_name, normalized_name, current_company_id, title, source, notes) values ($1,$2,$3,$4,$5,$6) returning id`,
+          [candidate.name, normalized, c.company_id, candidate.title,useHunter?"provider:hunter":"public-web", `${provider} candidate; employment/role and email require separate checks. Sources: ${candidate.sources.join(", ")}`])).rows[0].id;
         for (const role of new Set(matches.map(d => ROLE_MAP[d.role]).filter(Boolean))) await tx.query(`insert into person_roles (person_id, company_id, buying_role)
           select $1,$2,$3 where not exists (select 1 from person_roles where person_id = $1 and company_id = $2 and buying_role = $3 and end_date is null)`, [personId, c.company_id, role]);
         await tx.query(`insert into contact_points (person_id,kind,value,source,validation_status)
-          values ($1,'email',$2,'provider:hunter:discovery','not_checked') on conflict do nothing`, [personId, candidate.email]);
+          values ($1,'email',$2,$3,'not_checked') on conflict do nothing`, [personId, candidate.email,useHunter?"provider:hunter:discovery":"public-web:discovery"]);
         imported++;
       }
-      await event(tx, id, `Hunter returned ${candidates.length} named candidates; saved ${imported} matching buying-team roles for the confirmed domain. These are not validated contacts.`);
+      await event(tx, id, `${provider} returned ${candidates.length} named candidates; saved ${imported} matching buying-team roles for the confirmed domain. These are not validated contacts.`);
     });
     message = imported ? `${imported} relevant named contacts saved. Confirm their current role and validate the email next.` : "No named buying-team contacts found on this domain. No contacts were invented.";
   } else {
@@ -128,27 +131,34 @@ export async function enrichOpportunity(id: string, input: EnrichmentInput): Pro
       if (!c.domain || !c.domain_confirmed_at) throw new EnrichmentError(409, "Confirm the buyer company's official website using Find contacts first.");
       const domain = companyDomain(c.domain);
       if (input.action === "find") {
-        const email = await providerRequest(id, c.company_id, "find", `${domain}:${p.full_name}`, () => findHunterEmail(domain, p.full_name));
+        const useHunter=hunterConfigured();
+        const email = useHunter ? await providerRequest(id, c.company_id, "find", `${domain}:${p.full_name}`, () => findHunterEmail(domain, p.full_name))
+          : (await providerRequest(id,c.company_id,"search",domain,()=>searchPublishedContacts(domain),"public")).find(candidate=>candidate.name.toLowerCase()===p.full_name.toLowerCase())?.email ?? null;
         if (email) await db.query(`insert into contact_points (person_id,kind,value,source,validation_status)
-          values ($1,'email',$2,'provider:hunter:finder','not_checked') on conflict do nothing`, [p.id, email]);
-        message = email ? "Email found and saved; it still needs validation." : "Hunter did not find an email for this person. No address was guessed.";
+          values ($1,'email',$2,$3,'not_checked') on conflict do nothing`, [p.id, email,useHunter?"provider:hunter:finder":"public-web:discovery"]);
+        message = email ? "Email found and saved; it still needs validation." : "No published or provider-found email for this person. No address was guessed.";
         await event(db, id, `${p.full_name}: ${message}`);
       } else {
         const point = (await db.query<{ id: string; value: string }>("select id, value from contact_points where id = $1 and person_id = $2 and kind = 'email'", [input.pointId, p.id])).rows[0];
         if (!point) throw new EnrichmentError(404, "Email does not belong to this contact.");
-        const result = await providerRequest(id, c.company_id, "verify", `${domain}:${point.value.toLowerCase()}`, () => verifyHunterEmail(point.value, domain));
+        const useEmailable=emailableConfigured();const provider=useEmailable?"Emailable":"Hunter";
+        const result = useEmailable ? await verifyEmailableEmail(point.value,domain)
+          : await providerRequest(id, c.company_id, "verify", `${domain}:${point.value.toLowerCase()}`, () => verifyHunterEmail(point.value, domain));
         await db.tx(async tx => {
           const current = (await tx.query<{ domain: string }>("select domain from companies where id = $1 for share", [c.company_id])).rows[0];
           if (current.domain !== domain) throw new EnrichmentError(409, "Company domain changed during verification. Review the contact again.");
-          await tx.query(`update contact_points set source = 'provider:hunter:verifier', verified_at = case when $2::boolean then $6::timestamptz else null end,
+          await tx.query(`update contact_points set source = $7, verified_at = case when $2::boolean then $6::timestamptz else null end,
             validation_status = $3, validation_checked_at = $6::timestamptz where id = $1 and person_id = $4 and value = $5`,
-            [point.id, result.deliverable, result.deliverable ? "valid" : result.status === "valid" ? "needs_review" : result.status, p.id, point.value, result.checkedAt]);
-          await event(tx, id, `${p.full_name}: Hunter email check ${result.deliverable ? "valid (deliverability only)" : result.status + " — not validated"}. Role/employment and product fit remain separate reviews.`);
+            [point.id, result.deliverable, result.deliverable ? "valid" : ["valid","deliverable"].includes(result.status) ? "needs_review" : result.status, p.id, point.value, result.checkedAt,`provider:${provider.toLowerCase()}:verifier`]);
+          await event(tx, id, `${p.full_name}: ${provider} email check ${result.deliverable ? "valid (deliverability only)" : result.status + " — not validated"}. Role/employment and product fit remain separate reviews.`);
         });
-        message = result.deliverable ? "Hunter validated email deliverability. Current role/employment and buyer fit still require review." : `Hunter result: ${result.status}. This email was not marked validated.`;
+        message = result.deliverable ? `${provider} validated email deliverability. Current role/employment and buyer fit still require review.` : `${provider} result: ${result.status}. This email was not marked validated.`;
       }
     }
   }
   clearChainCache();
+  // Contact review/verification is a funnel prerequisite, not a second Send approval.
+  // Wake waiting conversations after a successful change instead of waiting six hours.
+  await db.query("update funnel_threads set next_action_at=now() where opportunity_id=$1 and state='needs_contact' and not paused",[id]);
   return { message, view: await enrichmentView(id) };
 }

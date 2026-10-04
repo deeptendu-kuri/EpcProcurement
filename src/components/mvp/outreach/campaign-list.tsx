@@ -22,10 +22,10 @@ export function CampaignList({ campaigns, workerEnabled }: { campaigns: Campaign
     finally { setBusy(null); }
   }
   return <div className="flex flex-col gap-4">
-    <div className="card p-4 text-sm"><p className="font-semibold">Test-inbox delivery only · deeptendukuri@gmail.com</p>
+    <div className="card p-4 text-sm"><p className="font-semibold">Earlier manually approved test-inbox emails</p>
       <p className="mt-1 text-[#667085]">Review buyer fit → open Contact → review email → approve → automatic delivery. No scraped buyer is emailed.</p>
       <p className="mt-2 text-[#667085]">{workerEnabled ? "Automatic worker enabled while this server is awake. Jobs survive restarts." : "Automatic worker is off. Approved emails remain queued until the authenticated worker is enabled or triggered."} Free hosting can sleep; a timed delivery is not guaranteed.</p>
-      <p className="mt-2 text-[#667085]">Follow-ups, inbound replies and meeting scheduling are not connected yet. Automatic follow-ups are disabled to avoid emailing someone who already replied.</p>
+      <p className="mt-2 text-[#667085]">This older queue does not process replies or schedule meetings. Use the automatic conversations above for the email → reply → meeting workflow.</p>
     </div>
     {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
     {!campaigns.length ? <section className="card p-6"><h2 className="font-bold">No approved emails yet</h2><p className="mt-2 text-sm text-[#667085]">Choose a lead, approve its buyer fit, then click Contact to review an email.</p><Link href="/crm" className="btn btn-primary mt-4">Open leads</Link></section> : campaigns.map(c => <article key={c.id} className="card p-5">

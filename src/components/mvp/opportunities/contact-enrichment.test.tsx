@@ -24,7 +24,7 @@ describe("contact lookup guidance", () => {
     const ui = render(<ContactEnrichment opportunityId="opp" sample={true} initial={ready} />);
     expect((screen.getByRole("button", { name: "Find contacts with Hunter" }) as HTMLButtonElement).disabled).toBe(true);
     ui.rerender(<ContactEnrichment opportunityId="opp2" sample={false} key="opp2" />);
-    expect(screen.getByText(/Hunter is not connected/)).toBeTruthy();
+    expect(screen.getByText(/Contact verification is not connected/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Find contacts with Hunter" }) as HTMLButtonElement).disabled).toBe(true);
     expect(api).not.toHaveBeenCalled();
   });

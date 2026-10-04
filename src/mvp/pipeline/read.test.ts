@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { BlockedUrlError, allowLocalFetchForTests, assertPublicHttpUrl, isPublicIp } from "./net-guard";
-import { MAX_BODY_BYTES, fetchPageText, getText, timedFetch } from "./read";
+import { MAX_BODY_BYTES, fetchPageText, getText, timedFetch, htmlToText } from "./read";
 
 let server: Server;
 let base = "";
@@ -76,6 +76,14 @@ describe("timedFetch / getText", () => {
     expect(res.truncated).toBe(true);
     expect(res.text.length).toBe(MAX_BODY_BYTES);
   });
+});
+describe("article-only HTML extraction",()=>{
+  it("keeps real article text and publication metadata while excluding large styles and script-only fake contacts",async()=>{
+    const css='@supports (display:grid){.nested{color:red}}'.repeat(1000);
+    const page=await htmlToText(`<html><head><title>Contract award</title><style>${css}</style><script type="application/ld+json">{"datePublished":"2026-10-01"}</script></head><body><article><h1>Contract award</h1><p>Unit EPC won a pipeline construction contract, including line pipe procurement.</p></article><script>const fabricatedContact="Fake Person, CEO, fake@buyer.co";</script><noscript>Tracking text</noscript></body></html>`,"https://buyer.co/award");
+    expect(page.text).toContain("Unit EPC won a pipeline construction contract");expect(page.text).not.toMatch(/nested|Fake Person|fake@buyer.co|Tracking text/);
+    expect(page.publishedAt).toBe("2026-10-01T00:00:00.000Z");
+  },30_000); // jsdom's cold import can be slow alongside the full database-test suite.
 });
 
 describe("SSRF guard", () => {

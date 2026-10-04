@@ -14,8 +14,8 @@ export function localFunnelEnv(input, root) {
     ...input, NODE_ENV: "production", DATABASE_URL: "", MIGRATION_DATABASE_URL: "", RENDER: "",
     MVP_DATA_DIR: path.resolve(root, "tmp/automation-demo-db-20261003"),
     MVP_OFFLINE: "0", MVP_SCHEDULER: "off", MVP_OUTREACH_WORKER: "off", MVP_FUNNEL_WORKER: worker,
-    DEMO_EMAIL_ENABLED: "1", DEMO_RECIPIENT_EMAIL: "deeptendukuri@gmail.com",
-    DEMO_EMAIL_FROM: "Demo <onboarding@resend.dev>", APP_URL: "http://localhost:3007",
+    DEMO_EMAIL_ENABLED: "1", DEMO_RECIPIENT_EMAIL: input.APPROVED_DEMO_RECIPIENT_EMAIL?.trim().toLowerCase() || "deeptendukuri@gmail.com",
+    DEMO_EMAIL_FROM: `${(input.SALES_PERSON_NAME?.trim() || "Sales demo").replace(/[<>\r\n"]/g,"").slice(0,80)} | Procurement demo <onboarding@resend.dev>`, APP_URL: "http://localhost:3007",
     DEMO_PASSWORD: input.DEMO_PASSWORD?.trim() || "showcase-demo",
   };
 }

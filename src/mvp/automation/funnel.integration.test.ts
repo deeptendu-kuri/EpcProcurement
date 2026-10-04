@@ -27,7 +27,7 @@ beforeEach(async () => {
     GROQ_API_KEY: "integration-private", HUNTER_API_KEY: "integration-private", GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "test-secret",
     SESSION_SECRET: "integration-session-secret-".repeat(3), APP_URL: "http://localhost:3007", SALES_TIMEZONE: "Asia/Kolkata",
     SALES_START_HOUR: "10", SALES_END_HOUR: "18", MEETING_DURATION_MINUTES: "30" })) vi.stubEnv(key, value);
-  await db.exec("delete from funnel_messages;delete from funnel_threads;delete from funnel_integrations;delete from enrichment_requests;delete from search_opportunities;delete from leads;delete from projects;delete from runs;delete from contact_points;delete from person_roles;delete from people;delete from companies;delete from evidence;delete from llm_usage;update funnel_control set enabled=false,enabled_at=null,worker_until=null,worker_lease=null,last_error=null;");
+  await db.exec("delete from funnel_messages;delete from funnel_threads;delete from funnel_integrations;delete from enrichment_requests;delete from contact_verification_requests;delete from search_opportunities;delete from leads;delete from projects;delete from runs;delete from contact_points;delete from person_roles;delete from people;delete from companies;delete from evidence;delete from llm_usage;update funnel_control set enabled=false,enabled_at=null,worker_until=null,worker_lease=null,last_error=null;");
   inbox = []; sent = []; events = []; decisions = []; receivingFails = false; fetchMock.mockReset();
   fetchMock.mockImplementation(async (input: string | URL, options: RequestInit = {}) => {
     const url = new URL(String(input));
@@ -54,6 +54,10 @@ beforeEach(async () => {
       }
     }
     if (url.origin === "https://oauth2.googleapis.com") return response({ access_token: "test-access" });
+    if (url.origin === "https://api.emailable.com" && url.pathname === "/v1/verify") {
+      expect((options.headers as Record<string,string>).authorization).toBe("Bearer live_integration_private");
+      return response({email:url.searchParams.get("email"),state:"deliverable",accept_all:false,disposable:false,role:false,no_reply:false,mailbox_full:false,mx_record:"mx.buyer.co"});
+    }
     if (url.origin === "https://www.googleapis.com") {
       if (url.pathname.endsWith("/freeBusy")) return response({ calendars: { "deeptendukuri@gmail.com": { busy: [] } } });
       if (url.pathname.includes("/events/") && !options.method) return response({}, 404);
@@ -88,7 +92,6 @@ async function readyContact(opportunity: string) {
   const contact = (await enrichOpportunity(opportunity, { action: "search", domain: "buyer.co", domainConfirmed: true })).view.contacts[0];
   await enrichOpportunity(opportunity, { action: "confirm_role", personId: contact.id });
   await controlThread((await thread(opportunity)).id, "retry");
-  decisions.push({ subject: "Line pipe requirements", body: "Hello Jane, could we discuss your line pipe requirements? Kind regards, Deeptendu Kuri" });
 }
 async function incoming(opportunity: string, text: string) {
   const t = await thread(opportunity);
@@ -99,6 +102,23 @@ async function incoming(opportunity: string, text: string) {
 }
 
 describe("joined local funnel with real adapters and mocked provider HTTP", () => {
+  it("automatically sends a seller email using Emailable once a searched buyer's published current contact is reviewed",async()=>{
+    vi.stubEnv("HUNTER_API_KEY","");vi.stubEnv("EMAILABLE_API_KEY","live_integration_private");
+    const o=await seedCompletedSearch();await processFunnelTick();expect((await thread(o)).state).toBe("needs_contact");
+    const opportunity=(await getOpportunity(o))!;
+    const company=(await db.query<{company_id:string}>("select company_id from search_opportunities where id=$1",[o])).rows[0].company_id;
+    await db.query("update companies set domain='buyer.co',domain_confirmed_at=now() where id=$1",[company]);
+    const person=(await db.query<{id:string}>("insert into people(full_name,normalized_name,title,current_company_id,source) values('Jane Doe','jane doe','Procurement Manager',$1,'public-web') returning id",[company])).rows[0].id;
+    await db.query("insert into contact_points(person_id,kind,value,source,validation_status) values($1,'email','jane@buyer.co','public-web:discovery','not_checked')",[person]);
+    await db.query("update funnel_threads set next_action_at='2099-01-01T00:00:00Z' where opportunity_id=$1",[o]);
+    await enrichOpportunity(o,{action:"confirm_role",personId:person});
+    expect(Date.parse((await thread(o)).next_action_at)).toBeLessThan(Date.now()+5000);
+    await processFunnelTick();expect(sent).toHaveLength(1);expect(isVerified((await getOpportunity(opportunity.id))!)).toBe(true);
+    expect(String(sent[0].text)).toContain("Congratulations on your recent contract award");expect(String(sent[0].text)).toContain("procurement options for Line pipe");
+    expect((await db.query("select source,validation_status from contact_points where person_id=$1",[person])).rows[0]).toMatchObject({source:"provider:emailable:verifier",validation_status:"valid"});
+    expect((await db.query("select id from contact_verification_requests")).rows).toHaveLength(1);
+    await processFunnelTick();expect(sent).toHaveLength(1);
+  });
   it("runs completed search → reviewed contact → Hunter validation → email → AI reply → Calendar meeting in one persistent conversation", async () => {
     const o = await seedCompletedSearch();
     await processFunnelTick();
@@ -107,6 +127,9 @@ describe("joined local funnel with real adapters and mocked provider HTTP", () =
     expect(isVerified((await getOpportunity(o))!)).toBe(true); expect(sent).toHaveLength(1);
     expect(sent[0].reply_to).toMatch(/^lead-[a-f0-9]{48}@demo123\.resend\.app$/);
     expect(String(sent[0].text).toLowerCase()).toContain("line pipe"); expect((await thread(o)).state).toBe("active");
+    expect(sent[0].text).toContain("Congratulations on your recent contract award.");
+    expect(sent[0].text).toContain("I'm Deeptendu Kuri");expect(sent[0].text).toContain("quality expectations and budget");
+    expect(sent[0].text).not.toContain("your line pipe offering");
 
     decisions.push({ intent: "question", confidence: 0.95, summary: "Asked about line pipe specifications", body: "Could you share the required grade and dimensions so we can discuss the line pipe requirements?" });
     const firstReply = await incoming(o, "What specifications do you need from me?"); await processFunnelTick();
@@ -128,7 +151,7 @@ describe("joined local funnel with real adapters and mocked provider HTTP", () =
     expect((await getOpportunity(o))!.summary).toContain("Meeting:");
     expect((await listThreadMessages(o)).filter(m => m.direction === "in")).toHaveLength(3);
     await processFunnelTick(); expect(sent).toHaveLength(4); expect(events).toHaveLength(1);
-    expect((await db.query("select id from llm_usage where provider='groq' and purpose='sales_funnel' and ok=true")).rows).toHaveLength(5);
+    expect((await db.query("select id from llm_usage where provider='groq' and purpose='sales_funnel' and ok=true")).rows).toHaveLength(4);
   });
 
   it("blocks the joined flow when receiving permissions fail, and resumes safely after restoration", async () => {

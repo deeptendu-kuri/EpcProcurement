@@ -8,6 +8,8 @@ export interface DemoEmailInfo {
 }
 
 const email = z.email();
+// Server-approved single inbox, independent of request bodies and scraped contacts.
+export const AUTOMATION_RECIPIENT = process.env.APPROVED_DEMO_RECIPIENT_EMAIL?.trim().toLowerCase() || "deeptendukuri@gmail.com";
 export const DEMO_CONTACT_EMAIL = "demo-contact@example.com";
 
 export function demoEmailEnabled(): boolean {
