@@ -52,9 +52,9 @@ Set server-only `HUNTER_API_KEY` in the ignored environment file and restart the
 
 Verified CRM requires approved product fit, a recent user-reviewed company/role, an active matching buying role and recent provider email validation (90-day expiry), and excludes samples. A domain change clears earlier Hunter validation. These checks do not prove that the company has committed to purchasing.
 
-This contact feature does not automatically start search-completion outreach or process inbound replies. The existing approved single-inbox queue is unchanged. Live Hunter results need proof with a real configured key and actual source-backed buyer; mocked tests are not live-provider proof.
+Contact enrichment by itself does not start outreach. The opt-in **Local research-to-meeting demo** described below adds search-completion outreach and inbound reply processing; it is separate from the earlier approved single-inbox queue. Live Hunter results need proof with a real configured key and actual source-backed buyer; mocked tests are not live-provider proof.
 
-For the no-purchased-domain reply demo, Resend provides a public account-specific `<id>.resend.app` receiving domain under **Emails → Receiving → ⋯ → Receiving address**. Once configured, the app can use a Reply-To address there and poll the receiving API locally. This receiving connection is not implemented yet. Existing sent messages without that Reply-To will not automatically reach the app when replied to. A custom verified sending domain is a separate requirement for production delivery beyond Resend's account-email test restriction. See [Resend receiving](https://resend.com/docs/dashboard/receiving/introduction).
+For the no-purchased-domain reply demo, Resend provides a public account-specific `<id>.resend.app` receiving domain under **Emails → Receiving → ⋯ → Receiving address**. The local funnel below implements unique Reply-To addresses and receiving API polling; actual receiving still needs account configuration and live proof. Existing sent messages without that Reply-To will not automatically reach the app when replied to. A custom verified sending domain is a separate requirement for production delivery beyond Resend's account-email test restriction. See [Resend receiving](https://resend.com/docs/dashboard/receiving/introduction).
 
 ## Email environment variables
 
