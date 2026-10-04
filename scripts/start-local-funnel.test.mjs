@@ -1,0 +1,24 @@
+// @vitest-environment node
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { localFunnelEnv } from "./start-local-funnel.mjs";
+
+describe("local funnel startup isolation", () => {
+  const root = path.resolve(".");
+  const base = { SESSION_SECRET: "local-test-secret-".repeat(3) };
+  it("overrides inherited cloud settings and preserves server-only provider keys", () => {
+    const env = localFunnelEnv({ ...base, DATABASE_URL: "postgresql://cloud.invalid/db", MIGRATION_DATABASE_URL: "cloud",
+      RENDER: "true", APP_URL: "https://cloud.invalid", MVP_DATA_DIR: "cloud-dir", MVP_OFFLINE: "1",
+      DEMO_RECIPIENT_EMAIL: "other@example.com", MVP_OUTREACH_WORKER: "on", GROQ_API_KEY: "test-private", RESEND_API_KEY: "test-private" }, root);
+    expect(env.DATABASE_URL).toBe(""); expect(env.MIGRATION_DATABASE_URL).toBe(""); expect(env.RENDER).toBe("");
+    expect(env.APP_URL).toBe("http://localhost:3007"); expect(env.MVP_DATA_DIR).toBe(path.resolve(root, "tmp/automation-demo-db-20261003"));
+    expect(env.DEMO_RECIPIENT_EMAIL).toBe("deeptendukuri@gmail.com"); expect(env.MVP_OFFLINE).toBe("0");
+    expect(env.MVP_OUTREACH_WORKER).toBe("off"); expect(env.MVP_FUNNEL_WORKER).toBe("off");
+    expect(env.GROQ_API_KEY).toBe("test-private"); expect(env.RESEND_API_KEY).toBe("test-private");
+  });
+  it("requires explicit worker activation and a stable session secret", () => {
+    expect(localFunnelEnv({ ...base, MVP_FUNNEL_WORKER: "on" }, root).MVP_FUNNEL_WORKER).toBe("on");
+    expect(() => localFunnelEnv({ ...base, MVP_FUNNEL_WORKER: "external" }, root)).toThrow("off or on");
+    expect(() => localFunnelEnv({ SESSION_SECRET: "short" }, root)).toThrow("32 characters");
+  });
+});
