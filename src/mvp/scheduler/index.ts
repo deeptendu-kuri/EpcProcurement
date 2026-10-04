@@ -12,6 +12,7 @@ import { startRun } from "@/mvp/pipeline";
 import { dueSavedSearches, markSavedSearchRun } from "@/mvp/saved-searches";
 import type { LeadKind, RunStatus, SavedSearchRow } from "@/mvp/types";
 import { RunQueue, type QueueDeps, type QueueJob, type Ticket } from "./queue";
+import { serverlessRuntime } from "@/mvp/runtime";
 
 export { RunQueue } from "./queue";
 export type { QueueJob, Ticket } from "./queue";
@@ -86,6 +87,7 @@ export async function schedulerTick(now: Date = new Date(), queue: RunQueue = ge
 
 /** True when the scheduler must not run in this process (build, tests, or turned off). */
 export function schedulerDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (serverlessRuntime(env)) return true;
   if (env.NEXT_PHASE === "phase-production-build") return true;
   if (env.VITEST) return true;
   const flag = env.MVP_SCHEDULER?.trim().toLowerCase();

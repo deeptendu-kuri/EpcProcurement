@@ -17,7 +17,8 @@ describe("run progress helpers", () => {
       "Searched 3 of 5 sources · read 24 items · 6 relevant · 3 new raw lead records",
     );
     expect(countersLine({ itemsRead: 1, newLeads: 1 })).toBe("Read 1 items · 1 new raw lead records");
-    expect(countersLine({ newLeads: 15, scopedProspects: 0 })).toBe("0 buyer prospects saved · 15 new raw lead records");
+    expect(countersLine({ newLeads: 15, scopedProspects: 0 })).toBe("0 buyer prospects saved");
+    expect(countersLine({ scopedProspects: 2,deferredPages:4,buyerAnalysisFailed:1 })).toBe("2 buyer prospects saved · 4 pages deferred by budget · 1 analysis failures");
     expect(countersLine({})).toBe("");
   });
 

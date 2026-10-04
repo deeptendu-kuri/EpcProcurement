@@ -37,6 +37,12 @@ async function seed(options:{sample?:boolean;approved?:boolean;company?:string;o
   return {company,lead,run,o,person};
 }
 async function thread(o:string) {return (await db.query("select * from funnel_threads where opportunity_id=$1",[o])).rows[0];}
+async function attachSource(s:Awaited<ReturnType<typeof seed>>) {
+  const doc=(await db.query<{id:string}>("insert into source_documents(source_key,publisher_key,url,canonical_url,content_hash,text) values('unit','unit.example',$1,$1,'unit','Unit EPC performs line pipe construction in India') returning id",[`https://unit.example/${s.o}`])).rows[0].id;
+  await db.query("insert into run_documents(run_id,document_id) values($1,$2)",[s.run,doc]);
+  const evidence=(await db.query<{id:string}>("insert into evidence(document_id,url,quote,extracted_by,quote_verified,tier,publisher_key) values($1,'https://unit.example','Unit EPC performs line pipe construction in India','rule:unit',true,'C','unit.example') returning id",[doc])).rows[0].id;
+  await db.query("update search_opportunities set evidence_ids=$2::uuid[],discovery_kind='company',fit_score=75 where id=$1",[s.o,[evidence]]);
+}
 async function replyTo(o:string,body:string,overrides:Record<string,unknown>={}) {
   const t=await thread(o);const email={id:crypto.randomUUID(),from:"deeptendukuri@gmail.com",to:[`lead-${t.reply_token}@demo123.resend.app`],subject:"Re: Line pipe",
     created_at:new Date(Date.now()+1000).toISOString(),text:body,headers:{},authentication:{dmarc:"pass",dkim:"pass",spf:"pass"},message_id:`<${crypto.randomUUID()}@mail.gmail.com>`,...overrides};
@@ -84,6 +90,27 @@ describe("persistent demo research-to-meeting funnel",()=>{
     expect(await thread(s.o)).toMatchObject({state:"active",person_id:s.person});
     expect((await listThreadMessages(s.o))[0]).toMatchObject({state:"accepted",kind:"initial"});
     await processFunnelTick();expect(mocks.send).toHaveBeenCalledTimes(1);
+  });
+  it("automatically sends an explicitly labelled prospect demo without fabricating a validated buyer contact",async()=>{
+    vi.stubEnv("MVP_PROSPECT_DEMO_OUTREACH","on");await setFunnelEnabled(true);const s=await seed({validated:false});await attachSource(s);
+    await processFunnelTick();expect(await thread(s.o)).toMatchObject({mode:"prospect_demo",state:"active",person_id:null,recipient:"deeptendukuri@gmail.com"});
+    expect(mocks.contact).not.toHaveBeenCalled();expect(mocks.fit).toHaveBeenCalledTimes(1);expect(mocks.send).toHaveBeenCalledTimes(1);
+    expect((await db.query("select verified_at from contact_points")).rows).toEqual([]);
+    // Recipient and delivery mode are frozen: later toggles never turn this into buyer delivery.
+    vi.stubEnv("MVP_PROSPECT_DEMO_OUTREACH","off");await replyTo(s.o,"Can we discuss specs?");mocks.send.mockResolvedValue({id:crypto.randomUUID(),rfcId:null});await processFunnelTick();
+    expect(mocks.send).toHaveBeenCalledTimes(2);expect((await thread(s.o)).recipient).toBe("deeptendukuri@gmail.com");
+  });
+  it("caps prospect demos per search across repeated ticks and blocks revoked/source-less approval",async()=>{
+    vi.stubEnv("MVP_PROSPECT_DEMO_OUTREACH","on");vi.stubEnv("MVP_DEMO_PROSPECTS_PER_SEARCH","1");await setFunnelEnabled(true);
+    const a=await seed({validated:false});const b=await seed({validated:false});await attachSource(a);await attachSource(b);
+    await db.query("update search_opportunities set run_id=$2,fit_score=50 where id=$1",[b.o,a.run]);
+    await processFunnelTick();await processFunnelTick();expect((await db.query("select id from funnel_threads")).rows).toHaveLength(1);
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    await db.query("update search_opportunities set qualification='rejected' where id=$1",[a.o]);
+    await replyTo(a.o,"Can you send specs?");mocks.send.mockResolvedValue({id:crypto.randomUUID(),rfcId:null});await processFunnelTick();
+    expect(mocks.send).toHaveBeenCalledTimes(1);expect((await thread(a.o)).state).toBe("stopped");
+    const c=await seed({approved:true,validated:false});await processFunnelTick();expect((await thread(c.o)).state).toBe("review");
+    expect(mocks.send).toHaveBeenCalledTimes(1);
   });
   it("blocks uncertain product fit, missing named contact, revoked validation and unreadable inbox",async()=>{
     await setFunnelEnabled(true);const s=await seed();mocks.fit.mockResolvedValueOnce({approved:false,reason:"No exact product evidence"});

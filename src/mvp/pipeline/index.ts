@@ -18,6 +18,9 @@ import { tedSource } from "./sources/ted";
 import { tavilySource } from "./sources/tavily";
 import { publisherKeyFor } from "./text";
 import { captureOpportunities } from "@/mvp/opportunities";
+import { buyerPageCandidate } from "@/mvp/discovery/plan";
+import { discoverBuyers, saveBuyer } from "@/mvp/discovery";
+import { requirePersistentWorker } from "@/mvp/runtime";
 
 export { fixtureDocs } from "./sources/fixtures";
 export { failStaleRuns } from "./active-runs";
@@ -47,6 +50,7 @@ export function liveSources(): Source[] {
  * @returns the new run id (uuid).
  */
 export async function startRun(input: RunInput): Promise<string> {
+  requirePersistentWorker();
   const db = getDb();
   await failStaleRuns(db);
   const clean: RunInput = {
@@ -78,7 +82,7 @@ export async function waitForRun(runId: string): Promise<void> {
 // ───────────────────────── progress ─────────────────────────
 
 class Progress {
-  readonly counters: Required<Pick<RunCounters, "sourcesTotal" | "sourcesDone" | "sourcesFailed" | "itemsRead" | "relevant" | "factsKept" | "factsDropped" | "newLeads" | "updatedLeads">> & Pick<RunCounters, "scopedProspects"> = {
+  readonly counters: Required<Pick<RunCounters, "sourcesTotal" | "sourcesDone" | "sourcesFailed" | "itemsRead" | "relevant" | "factsKept" | "factsDropped" | "newLeads" | "updatedLeads">> & Pick<RunCounters, "scopedProspects" | "buyerPagesChecked" | "deferredPages" | "buyerAnalysisFailed"> = {
     sourcesTotal: 0, sourcesDone: 0, sourcesFailed: 0, itemsRead: 0, relevant: 0, factsKept: 0, factsDropped: 0, newLeads: 0, updatedLeads: 0,
   };
   /** Sources that failed in this run, with the reason ("Bing News (HTTP 429)"): named in the progress line. */
@@ -284,6 +288,42 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
       `Read ${progress.counters.itemsRead} items${known ? ` (${known} already known)` : ""}${unreadable ? ` · ${unreadable} could not be read` : ""}`,
     );
     if (await isCancelled(db, runId)) return;
+
+    // Product-scoped live research is company-first, not the legacy award/news lead builder.
+    // One extraction per selected page; known documents use a product/version/content-aware cache.
+    if(!offline && input.productId && readable.length) {
+      const candidates=readable.filter(item=>buyerPageCandidate(item.stored.text,input.productId!));
+      progress.counters.relevant=candidates.length;
+      const cachedIds=new Set((await db.query<{document_id:string}>(`select cache.document_id from buyer_discovery_cache cache join source_documents d on d.id=cache.document_id and d.content_hash=cache.content_hash
+        where cache.document_id=any($1::uuid[]) and cache.product_id=$2 and cache.version=1`,[candidates.map(c=>c.stored.id),input.productId])).rows.map(row=>row.document_id));
+      const ranked=[...candidates].sort((a,b)=>aiPriority(b,profile,input.productId)-aiPriority(a,profile,input.productId));
+      const selected=[...ranked.filter(item=>cachedIds.has(item.stored.id)),...ranked.filter(item=>!cachedIds.has(item.stored.id)).slice(0,maxAiDocsPerRun())];
+      progress.counters.buyerPagesChecked=selected.length;
+      progress.counters.deferredPages=candidates.length-selected.length;
+      await progress.emit("extract",`Checking ${selected.length} buying-activity pages; ${candidates.length-selected.length} deferred by the AI budget. No award is required for company-level potential buyers.`);
+      let saved=0,failed=0;
+      for(const item of selected) {
+        if(await isCancelled(db,runId))return;
+        try {
+          const result=await discoverBuyers(db,runId,input,item.stored,item.raw);
+          progress.counters.factsDropped+=result.invalid;
+          for(const buyer of result.buyers) {
+            if(await saveBuyer(db,runId,input,item.stored.id,item.raw,buyer))saved++;
+            progress.counters.factsKept++;
+          }
+          await progress.emit("check",`${result.buyers.length} evidence-backed potential buyers in ${item.raw.title??'page'}${result.cached?' (cached; no extra AI call)':''}`);
+        } catch {
+          failed++;
+          await progress.emit("error","A buyer-analysis step failed. Its results were not fabricated or approved; check AI configuration/quota.");
+        }
+      }
+      if(selected.length && failed===selected.length)throw new Error("Buyer analysis failed for every selected page. This is not a completed zero-buyer search.");
+      progress.counters.scopedProspects=saved;
+      progress.counters.buyerAnalysisFailed=failed;
+      await progress.emit("done",`${saved} buyer prospects saved. ${failed?'Some analysis failed; coverage is incomplete.':saved?'Open results to see evidence and demo outreach.':'No companies met product and buying-activity checks within this research budget.'}`);
+      await db.query("update runs set status='done',finished_at=now(),counters=$2::jsonb where id=$1 and status<>'cancelled'",[runId,JSON.stringify(progress.counters)]);
+      return;
+    }
 
     // ── filter ──
     const relevant: Relevant[] = [];

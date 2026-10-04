@@ -2,6 +2,7 @@ import { getDb } from "@/mvp/db";
 import { automationSettings, AUTOMATION_RECIPIENT } from "@/mvp/email/campaigns";
 import { hunterConfigured } from "@/mvp/enrichment/hunter";
 import { emailableConfigured } from "@/mvp/enrichment/emailable";
+import { requirePersistentWorker,serverlessRuntime } from "@/mvp/runtime";
 
 export { AUTOMATION_RECIPIENT };
 const identityText = (value: string | undefined, limit: number) => value?.replace(/[\r\n<>]/g," ").trim().slice(0,limit) || null;
@@ -9,6 +10,12 @@ export const seller = () => ({ name: identityText(process.env.SALES_PERSON_NAME,
   company: identityText(process.env.SALES_COMPANY_NAME,160),
   description: "EPC procurement support for the exact searched product. Evaluate sourcing options against the buyer's technical requirements, quality expectations and budget. Certifications, stock, prices and lead times are not confirmed." });
 export function sellerSignature() { const s=seller();return `Kind regards,\n${s.name}${s.company?`\n${s.company}`:""}\nProcurement support\n${s.email}`; }
+/** Explicit demo-only opt-in, frozen on new threads. Never weakens the real contact gate. */
+export function prospectDemoEnabled() { return process.env.MVP_PROSPECT_DEMO_OUTREACH === "on"; }
+export function prospectsPerSearch() {
+  const value=Number(process.env.MVP_DEMO_PROSPECTS_PER_SEARCH??1);
+  return Number.isInteger(value)&&value>=1&&value<=5?value:1;
+}
 export async function calendarConnected() {
   return Boolean((await getDb().query("select account from funnel_integrations where provider='google' and account=$1",[AUTOMATION_RECIPIENT])).rows.length);
 }
@@ -19,6 +26,7 @@ export function receivingDomain(): string {
   return value;
 }
 export function requireFunnelConfig() {
+  requirePersistentWorker();
   const settings = automationSettings();
   receivingDomain();
   if (!process.env.GROQ_API_KEY?.trim()) throw new Error("Groq is required for live qualification and replies; simulated AI never sends automatically.");
@@ -45,7 +53,7 @@ export async function funnelStatus() {
     groq: Boolean(process.env.GROQ_API_KEY?.trim()), hunter: hunterConfigured(), emailable:emailableConfigured(),
     tavily: Boolean(process.env.TAVILY_API_KEY?.trim()), receiving: (() => { try { return receivingDomain(); } catch { return null; } })(),
     calendar: calendar?.account ?? null, calendarSetup: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-    worker: process.env.MVP_FUNNEL_WORKER === "on", preferences: calendarPreferences() };
+    worker: !serverlessRuntime() && process.env.MVP_FUNNEL_WORKER === "on", prospectDemo:prospectDemoEnabled(),prospectsPerSearch:prospectsPerSearch(),preferences: calendarPreferences() };
 }
 export async function setFunnelEnabled(enabled: boolean) {
   if (enabled) {

@@ -2,7 +2,7 @@ import { randomBytes,randomUUID } from "node:crypto";
 import { getCatalogue } from "@/mvp/config/buyers-config";
 import { getDb,type Queryable } from "@/mvp/db";
 import { getOpportunity,isVerified,updateOpportunity,type Opportunity } from "@/mvp/opportunities";
-import { AUTOMATION_RECIPIENT,calendarPreferences,calendarConnected,requireFunnelConfig,receivingDomain,seller } from "./config";
+import { AUTOMATION_RECIPIENT,calendarPreferences,calendarConnected,requireFunnelConfig,receivingDomain,seller,prospectDemoEnabled,prospectsPerSearch } from "./config";
 import { qualifyBuyer,initialEmail,analyseReply } from "./ai";
 import { prepareContact } from "./contacts";
 import { availableSlots,bookDemoMeeting } from "./calendar";
@@ -11,7 +11,7 @@ import { businessTime,FOLLOWUP_DELAY_MS,hardStop,MAX_FOLLOWUPS,messageIdSafe,sel
 
 export interface FunnelThread {
   id:string;opportunity_id:string|null;company_id:string|null;product_id:string;person_id:string|null;reply_token:string;
-  mode:"buyer"|"email_test";recipient:string;test_product:string|null;
+  mode:"buyer"|"email_test"|"prospect_demo";recipient:string;test_product:string|null;
   state:string;paused:boolean;reason:string;next_action_at:string;followups:number;offered_slots:string[];
   meeting_start:string|null;event_id:string|null;meet_url:string|null;summary:string;created_at:string;updated_at:string;
 }
@@ -22,6 +22,11 @@ export interface FunnelMessage {
 }
 const errorText=(e:unknown)=>e instanceof Error?e.message.slice(0,600):"Automation could not complete this step. Review before retrying.";
 const note=async (tx:Queryable,id:string|null,body:string)=>{if(id)await tx.query("insert into opportunity_events(opportunity_id,body) values ($1,$2)",[id,body]);};
+async function approvedDemoOpportunity(o:Opportunity|null) {
+  if(!o || o.is_sample || o.qualification!=="approved")return false;
+  return (await getDb().query(`select e.id from evidence e join run_documents rd on rd.document_id=e.document_id
+    where e.id=any($1::uuid[]) and e.quote_verified=true and rd.run_id=$2 limit 1`,[o.evidence_ids,o.run_id])).rows.length>0;
+}
 
 async function threadContext(t:FunnelThread):Promise<Opportunity|null> {
   if(t.mode!=="email_test")return t.opportunity_id?getOpportunity(t.opportunity_id):null;
@@ -91,16 +96,20 @@ export async function controlThread(id:string,action:"pause"|"resume"|"stop"|"re
 export async function enrollCompletedSearches():Promise<number> {
   const db=getDb();const control=(await db.query<{enabled:boolean;enabled_at:string}>("select enabled,enabled_at from funnel_control where id=1")).rows[0];
   if (!control?.enabled) return 0;
-  const candidates=(await db.query<{id:string;company_id:string;product_id:string}>(`select o.id,o.company_id,o.product_id from search_opportunities o join runs r on r.id=o.run_id join leads l on l.id=o.lead_id
+  const candidates=(await db.query<{id:string;company_id:string;product_id:string}>(`select id,company_id,product_id from (select o.id,o.company_id,o.product_id,o.run_id,o.created_at,
+      row_number() over(partition by o.run_id order by o.fit_score desc,o.created_at,o.id) as rank
+      from search_opportunities o join runs r on r.id=o.run_id join leads l on l.id=o.lead_id
     where r.status='done' and r.created_at >= $1 and not l.is_sample and o.qualification <> 'rejected'
       and not exists(select 1 from demo_campaigns dc where dc.company_id=o.company_id and dc.product_id=o.product_id and dc.status<>'cancelled')
       and not exists(select 1 from outreach_drafts d where d.opportunity_id=o.id and d.delivery_first_attempt_at is not null)
-    order by o.created_at limit 100`,[control.enabled_at])).rows;
+      and not exists(select 1 from funnel_threads ft where ft.company_id=o.company_id and ft.product_id=o.product_id)
+    ) candidates where not $2::boolean or rank <= greatest(0,$3-(select count(*) from funnel_threads ft join search_opportunities existing on existing.id=ft.opportunity_id where existing.run_id=candidates.run_id))
+    order by created_at limit 100`,[control.enabled_at,prospectDemoEnabled(),prospectsPerSearch()])).rows;
   let count=0;
   for (const c of candidates) await db.tx(async tx=>{
-    const inserted=await tx.query(`insert into funnel_threads(opportunity_id,company_id,product_id,reply_token,recipient) values ($1,$2,$3,$4,$5)
-      on conflict do nothing returning id`,[c.id,c.company_id,c.product_id,randomBytes(24).toString("hex"),AUTOMATION_RECIPIENT]);
-    if (inserted.rows.length) {count++;await note(tx,c.id,"Search complete → automatic buyer qualification queued. Demo delivery is Gmail-only; validated contacts are never actual recipients.");}
+    const inserted=await tx.query(`insert into funnel_threads(opportunity_id,company_id,product_id,reply_token,recipient,mode) values ($1,$2,$3,$4,$5,$6)
+      on conflict do nothing returning id`,[c.id,c.company_id,c.product_id,randomBytes(24).toString("hex"),AUTOMATION_RECIPIENT,prospectDemoEnabled()?"prospect_demo":"buyer"]);
+    if (inserted.rows.length) {count++;await note(tx,c.id,prospectDemoEnabled()?"Search complete → check potential buyer fit → automatic approved-inbox demo. Buyer contact validation stays separate; no buyer is contacted.":"Search complete → automatic buyer qualification queued. Demo delivery is Gmail-only; validated contacts are never actual recipients.");}
   });
   return count;
 }
@@ -111,7 +120,7 @@ async function queueMessage(t:FunnelThread,key:string,kind:string,text:{subject:
   const replyTo=replyAddress(t.reply_token);
   await getDb().query(`insert into funnel_messages(thread_id,direction,kind,dedup_key,subject,body,state,reply_to,in_reply_to)
     values ($1,'out',$2,$3,$4,$5,'queued',$6,$7) on conflict (dedup_key) do nothing`,
-    [t.id,kind,key,`[Demo] ${text.subject.replace(/^\[Demo\]\s*/i,"")}`,`${text.body.trim()}\n\nDemo conversation with ${seller().name}. No actual buyer is being contacted. Reply "unsubscribe" to stop.`,replyTo,messageIdSafe(inReplyTo)]);
+    [t.id,kind,key,`[Demo] ${text.subject.replace(/^\[Demo\]\s*/i,"")}`,`${text.body.trim()}\n\n${t.mode==='prospect_demo'?`Research opportunity: ${(await threadContext(t))?.name??'potential company'} — this is an approved-inbox demonstration; buyer contact validation is separate.\n`:''}Demo conversation with ${seller().name}. No actual buyer is being contacted. Reply "unsubscribe" to stop.`,replyTo,messageIdSafe(inReplyTo)]);
 }
 /** Scan the entire bounded inbox before outreach; incomplete/failed polling prevents sending. */
 export async function ingestInbox():Promise<number> {
@@ -211,6 +220,14 @@ async function advanceThread(t:FunnelThread) {
       await updateOpportunity(o.id,{qualification:"approved"});
       await note(getDb(),o.id,`AI approved possible ${o.product_name} buyer fit with verified verbatim evidence: ${fit.reason}. Not a confirmed order.`);
     }
+    if(t.mode==="prospect_demo") {
+      const refreshed=await getOpportunity(o.id);
+      if(!await approvedDemoOpportunity(refreshed)) {await updateState(t,"review","This search needs verified real-source evidence before a prospect demo can send.");return;}
+      if(!refreshed)return;
+      await queueMessage(t,`initial-${t.id}`,"initial",await initialEmail(refreshed,{name:seller().name,title:`Demo recipient representing ${o.name}`}));
+      await updateState(t,"active",`Demo email queued to ${AUTOMATION_RECIPIENT} for ${o.name}. No buyer contacted; contact validation is still separate.`);
+      return;
+    }
     await updateState(t,"needs_contact","Finding a named, role-reviewed, provider-validated contact.");
     t.state="needs_contact";
   }
@@ -254,7 +271,10 @@ async function deliverOne() {
   if (!candidate) return;
   const t=(await db.query<FunnelThread>("select * from funnel_threads where id=$1",[candidate.thread_id])).rows[0];
   const o=await threadContext(t);
-  if(t.mode!=="email_test") {
+  if(t.mode==="prospect_demo" && !await approvedDemoOpportunity(o)) {
+    await updateState(t,"review","Potential buyer approval revoked; approved-inbox demo delivery blocked.");return;
+  }
+  if(t.mode==="buyer") {
   if (!o || !isVerified(o) || o.qualification!=="approved") {await updateState(t,"review","Buyer/contact approval was revoked or expired; delivery blocked.");return;}
   const contact=(await db.query(`select p.id from people p join contact_points cp on cp.person_id=p.id
     where p.id=$1 and p.current_company_id=$2 and p.confirmed_at>now()-interval '90 days'

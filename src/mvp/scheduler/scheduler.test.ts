@@ -51,6 +51,7 @@ describe("due-time logic (docs/mvp/13 §7)", () => {
     expect(schedulerDisabled({ NEXT_PHASE: "phase-production-build" } as unknown as NodeJS.ProcessEnv)).toBe(true);
     expect(schedulerDisabled({ VITEST: "true" } as unknown as NodeJS.ProcessEnv)).toBe(true);
     expect(schedulerDisabled({ MVP_SCHEDULER: "off" } as unknown as NodeJS.ProcessEnv)).toBe(true);
+    expect(schedulerDisabled({ VERCEL:"1" } as unknown as NodeJS.ProcessEnv)).toBe(true);
     expect(schedulerDisabled({} as unknown as NodeJS.ProcessEnv)).toBe(false);
   });
 });

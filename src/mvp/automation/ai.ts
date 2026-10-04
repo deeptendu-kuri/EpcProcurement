@@ -28,8 +28,8 @@ export async function qualifyBuyer(o: Opportunity): Promise<{approved:boolean;re
   if (!quotes.length || o.is_sample) return {approved:false,reason:"No verified real-source evidence for this product opportunity."};
   const schema=z.object({approved:z.boolean(),confidence:z.number().min(0).max(1),reason:z.string().min(1).max(1500),
     companyEvidenceId:z.string(),companyQuote:z.string(),productEvidenceId:z.string(),productQuote:z.string()}).strict();
-  const answer=schema.parse(await ask(`Decide whether this company is a potential BUYER of the exact searched product following an awarded contract. Exclude project owners, open bids, supplier-only sellers and competitors. A potential need is not a confirmed order.
-    You must cite verbatim quotes from the supplied evidence connecting THIS company to awarded work and to a plausible use of THIS exact product (material/type matters).
+  const answer=schema.parse(await ask(`Decide whether this company is a potential BUYER of the exact searched product. Awarded/ongoing relevant work OR documented company services demonstrating compatible installation/construction/procurement can qualify. An award is not mandatory for company-level prospects. Exclude project owners, open bids, supplier-only sellers and competitors. A potential need is not a confirmed order.
+    You must cite verbatim quotes from the supplied evidence connecting THIS company to buying-compatible work and to a plausible use of THIS exact product (material/type matters). Do not borrow a different company's scope. Do not require a current purchase order, but do require concrete product-application evidence.
     If evidence is insufficient, approved=false. Return {approved,confidence,reason,companyEvidenceId,companyQuote,productEvidenceId,productQuote}.`,{company:o.name,product:o.product_name,keyword:o.keyword,reason:o.buying_reason,evidence:quotes}));
   const company=quotes.find(q=>q.id===answer.companyEvidenceId);const product=quotes.find(q=>q.id===answer.productEvidenceId);
   const cited=company && product && answer.companyQuote.length>=15 && answer.productQuote.length>=15

@@ -47,7 +47,9 @@ export function countersLine(counters: RunCounters): string {
   if (counters.itemsRead !== undefined) parts.push(`read ${counters.itemsRead} items`);
   if (counters.relevant !== undefined) parts.push(`${counters.relevant} relevant`);
   if (counters.scopedProspects !== undefined) parts.push(`${counters.scopedProspects} buyer prospects saved`);
-  if (counters.newLeads !== undefined) parts.push(`${counters.newLeads} new raw lead records`);
+  if (counters.scopedProspects === undefined && counters.newLeads !== undefined) parts.push(`${counters.newLeads} new raw lead records`);
+  if (counters.deferredPages) parts.push(`${counters.deferredPages} pages deferred by budget`);
+  if (counters.buyerAnalysisFailed) parts.push(`${counters.buyerAnalysisFailed} analysis failures`);
   if (counters.updatedLeads) parts.push(`${counters.updatedLeads} updated`);
   const line = parts.join(" · ");
   return line ? line.charAt(0).toUpperCase() + line.slice(1) : "";

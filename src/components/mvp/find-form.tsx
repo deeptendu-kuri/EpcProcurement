@@ -193,7 +193,7 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
             </select>
           </label>
         </details>
-        <p className="text-xs text-[#6b7280]">Buyer-only search: companies that won work and could buy the selected product. No open tenders or project owners. Country selection does not guarantee source coverage.</p>
+        <p className="text-xs text-[#6b7280]">Find contractors with relevant projects or documented buying-compatible work. Only the selected product is offered. No supplier-only sellers, open tenders or project owners. Research budgets can limit country coverage.</p>
         <p className="rounded-lg bg-[var(--accent-soft)] p-3 text-sm">Automatic demo outreach starts after product fit and named-contact validation pass, if enabled before this search. <Link href="/outreach" className="font-semibold text-[var(--accent-2)] underline">Set up email automation →</Link></p>
         <div className="flex flex-col gap-2 sm:flex-row" data-tour="find-query">
           <label htmlFor="find-query" className="sr-only">What do you offer?</label>
