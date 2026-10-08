@@ -11,6 +11,7 @@ import { processResearchTick, type ResearchDeps } from '@/mvp/research/engine';
 import { researchBudget } from '@/mvp/discovery/plan';
 import { awardTriggerSnapshots, budgetedAwardProviders, needsAwardAnalysis } from './hybrid';
 import fixtures from './fixtures/baseline-pages.json';
+import { LLMHttpError } from '@/mvp/llm/types';
 
 let db:Db;
 const input:RunInput={query:'line pipe',productId:'line-pipe',markets:['AE','IN'],leadKinds:['supply_subcontract'],researchMode:'batch'};
@@ -88,6 +89,27 @@ describe('WP1 hybrid durable run',()=>{
     expect((await awardTriggerSnapshots(db,doc.id)).length).toBeGreaterThan(0);
     await db.query("update source_documents set text='Example: no original award text remains.' where id=$1",[doc.id]);
     expect(await awardTriggerSnapshots(db,doc.id)).toEqual([]);
+  });
+  it('retries a JSON 400 once with a separately charged stricter request',async()=>{
+    const id=await createResearchRun(input,db);
+    const complete=vi.fn().mockRejectedValueOnce(new LLMHttpError('groq',400,'failed to generate JSON')).mockResolvedValueOnce({text:'{}',tokensIn:12,tokensOut:2});
+    const providers=budgetedAwardProviders(db,id,article.documentId,researchBudget(input),()=>({name:'groq',model:'fixture-mocked',complete}));
+    await expect(providers.provider('extract_a').complete({system:'Extract',user:article.text,json:true,purpose:'extract_P1',maxTokens:100})).resolves.toMatchObject({text:'{}'});
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(complete.mock.calls[1][0]).toMatchObject({purpose:'extract_P1:json-repair',singleAttempt:true});
+    expect(complete.mock.calls[1][0].system).toContain('ONE valid JSON object only');
+    expect((await db.query("select key from research_budget_reservations where run_id=$1 and kind='ai_pages'",[id])).rows).toHaveLength(2);
+  });
+  it('a second JSON 400 does not disable the model for another document',async()=>{
+    const id=await createResearchRun(input,db);
+    const complete=vi.fn().mockRejectedValueOnce(new LLMHttpError('groq',400,'failed to generate JSON')).mockRejectedValueOnce(new LLMHttpError('groq',400,'failed to generate JSON')).mockResolvedValueOnce({text:'{}',tokensIn:12,tokensOut:2});
+    const budget=researchBudget(input);
+    const make=()=>({name:'groq' as const,model:'fixture-mocked',complete});
+    const request={system:'Extract',user:article.text,json:true,purpose:'extract_P1',maxTokens:100};
+    await expect(budgetedAwardProviders(db,id,article.documentId,budget,make).provider('extract_a').complete(request)).rejects.toThrow('failed to generate JSON');
+    expect(complete).toHaveBeenCalledTimes(2);
+    await expect(budgetedAwardProviders(db,id,site.documentId,budget,make).provider('extract_a').complete(request)).resolves.toMatchObject({text:'{}'});
+    expect(complete).toHaveBeenCalledTimes(3);
   });
   it('routes awards, not a service-page search preview, to award extraction',()=>{
     expect(needsAwardAnalysis(raw(article),article.text,input)).toBe(true);

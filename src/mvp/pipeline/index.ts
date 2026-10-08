@@ -66,12 +66,13 @@ export async function startRun(input: RunInput): Promise<string> {
   if (input.contactRole) clean.contactRole = input.contactRole;
   if (input.researchMode) clean.researchMode = input.researchMode;
   if (input.targetCompanies) clean.targetCompanies = input.targetCompanies;
+  if (input.lanes) clean.lanes = [...new Set(input.lanes)];
   if (!clean.leadKinds.length) clean.leadKinds = ["bid", "supply_subcontract"];
   if (!clean.markets.length) clean.markets = [...getClientProfile().markets];
   if(clean.productId&&!clean.offline&&!mvpEnv.offline()){
     const material=resolveMaterial(clean.query,clean.productId);if(material.status!=='resolved')throw new Error(material.question??'Clarify the material before research.');
   }
-  if(clean.productId&&!clean.offline&&!mvpEnv.offline()&&process.env.MVP_DURABLE_RESEARCH!=='off'&&!process.env.VITEST){
+  if(clean.productId&&!clean.offline&&!mvpEnv.offline()&&!process.env.VITEST){
     const id=await createResearchRun(clean,db);startResearchWorker();return id;
   }
   const { rows } = await db.query<{ id: string }>(

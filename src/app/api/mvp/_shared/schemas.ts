@@ -9,6 +9,7 @@ export const runInputSchema = z.object({
   contactRole: z.enum(["buyer", "decision_maker", "technical_approver", "influencer", "approver", "vendor_registration"]).optional(),
   researchMode: z.enum(["preview", "batch", "deep"]).optional(),
   targetCompanies: z.number().int().min(1).max(100).optional(),
+  lanes: z.array(z.enum(['trigger','roundup','capability'])).min(1).max(3).transform(lanes=>[...new Set(lanes)]).optional(),
   markets: z
     .array(z.string().trim().toUpperCase().refine(code => COUNTRY_CODES.includes(code), "Choose a valid country."))
     .min(1, "Pick at least one market.")

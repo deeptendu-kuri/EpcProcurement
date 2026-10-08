@@ -1,18 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { getDb, type Db, type Queryable } from '@/mvp/db';
 import type { RunInput, RunCounters } from '@/mvp/types';
-import { buyerQueries, researchBudget } from '@/mvp/discovery/plan';
+import { researchBudget } from '@/mvp/discovery/plan';
 import type { RawDoc } from '@/mvp/pipeline/contracts';
 import { resolveMaterial } from '@/mvp/discovery/material';
 import { DISCOVERY_VERSION,discoverySchema } from '@/mvp/discovery';
 import { loadCompanyBundle } from '@/mvp/discovery/bundle';
 import { feedUrls } from '@/mvp/pipeline/sources/rss';
-import { buildBingQueries,BING_MKT } from '@/mvp/pipeline/sources/bing-news';
-import { queryTerms } from '@/mvp/pipeline/filter';
-import { sourceSeeds } from './registry';
 import { readLaneLimits } from './registry';
 import { queueRead } from './investigation';
 import { prioritiseDiscoveryDocs } from './routing';
+import { sourcePlan,tavilyTask } from '@/mvp/sourcing/plan';
+import { junkReason } from '@/mvp/sourcing/junk';
 
 export type ResearchBudget = ReturnType<typeof researchBudget>;
 export interface ResearchJob { id:string;run_id:string;stage:'collect'|'read'|'analyse'|'finish';key:string;payload:Record<string,unknown>;state:string;attempts:number;lease_token:string|null; }
@@ -30,16 +29,19 @@ export async function createResearchRun(input:RunInput,db:Db=getDb()):Promise<st
   return db.tx(async tx=>{
     const run=(await tx.query<{id:string}>(`insert into runs(adhoc_query,status,counters) values($1::jsonb,'queued','{}') returning id`,[JSON.stringify(input)])).rows[0];
     await tx.query('insert into research_sessions(run_id,budget) values($1,$2::jsonb)',[run.id,JSON.stringify(budget)]);
-    const queries=buyerQueries(input).slice(0,budget.searchQueries);
     const web=Boolean(process.env.TAVILY_API_KEY?.trim());
-    if(web)for(const [index,q] of queries.entries())await addJob(tx,run.id,'collect',`tavily:${q.key}`,{source:'tavily',query:q},100-index);
-    for(const raw of sourceSeeds(input))await addJob(tx,run.id,'collect',raw.sourceKey,{source:'directory-seed',raw},110);
-    // Separate original-source jobs. Product research never substitutes fictional fixture data.
+    const plan=sourcePlan({productId:input.productId!,keyword:input.query,markets:input.markets,mode:budget.mode,lanes:input.lanes});
+    for(const task of plan){
+      if(task.source==='tavily'&&!web)continue;
+      const payload=task.source==='registry'?{source:'directory-seed',sourcingLane:task.lane,raw:{sourceKey:`directory:${task.registryId}`,sourceName:'Official contractor listing',tier:'A',url:task.url,title:null,publishedAt:null,text:null,isSample:false,research:{lane:'directory',sourcingLane:task.lane,registryId:task.registryId}}}:
+        task.source==='tavily'?{source:'tavily',sourcingLane:task.lane,query:tavilyTask(task)}:
+        {source:task.source,sourcingLane:task.lane,market:task.market,query:task.query};
+      await addJob(tx,run.id,'collect',task.id,payload,task.priority);
+    }
+    // Optional public feeds add coverage, never replace the trigger-first plan.
     const news=process.env.MVP_RESEARCH_NEWS==='on';
-    if(news||!web)for(const market of input.markets)if(BING_MKT[market])for(const [n,query] of buildBingQueries(queryTerms(input.query),market).entries())
-      await addJob(tx,run.id,'collect',`bing:${market}:${n}`,{source:'bing-query',market,query},10);
     if(news)for(const feed of feedUrls())await addJob(tx,run.id,'collect',`rss:${feed}`,{source:'rss-feed',feed},5);
-    if(news||!web)await addJob(tx,run.id,'collect','gdelt',{source:'gdelt'},10);
+    if(news)await addJob(tx,run.id,'collect','gdelt',{source:'gdelt'},10);
     await tx.query(`insert into run_events(run_id,stage,message,counters) values($1,'collect',$2,'{}')`,[run.id,`Research saved durably (${budget.mode}). Sources and available contacts are independent of email validation.`]);
     return run.id;
   });
@@ -91,6 +93,8 @@ export async function claimJob(db:Db=getDb(),runId?:string,jobId?:string):Promis
       where s.state='active' and ($1::uuid is null or j.run_id=$1) and ($2::uuid is null or j.id=$2) and j.available_at<=now()
       and (j.state='queued' or j.state='running' and j.lease_until<now())
       and not exists(select 1 from research_jobs busy where busy.run_id=j.run_id and busy.state='running' and busy.lease_until>now())
+      and (coalesce(j.payload->>'sourcingLane','')<>'capability' or not exists(select 1 from research_jobs earlier
+        where earlier.run_id=j.run_id and earlier.id<>j.id and earlier.priority>j.priority and earlier.state in ('queued','running')))
       order by j.priority desc,j.created_at,j.id for update of j,s skip locked limit 1`,[runId??null,jobId??null])).rows[0];
     if(!job)return null;
     await tx.query(`update research_jobs set state='running',lease_token=$2,lease_until=now()+interval '5 minutes',attempts=attempts+1,updated_at=now() where id=$1`,[job.id,token]);
@@ -139,8 +143,12 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   counters.factsKept=facts.kept;counters.factsDropped=facts.dropped;
   counters.readFailures=Object.fromEntries(failures.map(f=>[f.reason??'unknown',f.count]));
   counters.researchUsage={search:units('search'),reads:units('read'),aiCalls:units('ai_pages'),estimatedAiTokens:units('ai_tokens'),pdfPages:units('pdf_pages')};
+  counters.researchUsage.bingSearches=units('bing_search');
   if(session)counters.researchLimits={search:session.budget.searchQueries,reads:session.budget.maxPages,aiCalls:session.budget.maxAiPages,estimatedAiTokens:session.budget.maxAiTokens};
-  counters.coverageIncomplete=Boolean(counters.coverageIncomplete||failures.length||deferredUrls||incompleteReads||candidates.count>candidates.investigated);
+  if(session)counters.researchLimits!.bingSearches=session.budget.bingQueries;
+  const skipped=(await db.query<{count:number}>("select coalesce(sum(coalesce((result->>'skippedCount')::int,0)),0)::int+count(*) filter(where stage='read' and result ? 'skipped')::int as count from research_jobs where run_id=$1",[runId])).rows[0].count;
+  counters.coverage={readsSkipped:limited+skipped+count('read','failed'),deferred:deferredUrls+count('analyse','paused'),reason:session?.stop_reason??null};
+  counters.coverageIncomplete=Boolean(counters.coverageIncomplete||session?.stop_reason||failures.length||deferredUrls||incompleteReads||candidates.count>candidates.investigated);
   await db.tx(async tx=>{
     await tx.query('update runs set counters=$2::jsonb where id=$1',[runId,JSON.stringify(counters)]);
     await tx.query('insert into run_events(run_id,stage,message,counters) values($1,$2,$3,$4::jsonb)',[runId,stage,message.slice(0,1000),JSON.stringify(counters)]);
@@ -214,15 +222,18 @@ export async function enqueueRawDocs(db:Db,job:ResearchJob,docs:RawDoc[],maxPage
     const availableQueries=(await tx.query<{count:number}>("select count(*)::int as count from research_jobs where run_id=$1 and stage='collect' and payload->>'source'='tavily' and state in ('queued','running','done')",[job.run_id])).rows[0].count;
     const fairCap=job.payload.source==='tavily'?Math.max(1,Math.ceil(readLaneLimits(maxPages).discovery/Math.max(1,Math.min(session.budget.searchQueries,availableQueries)))):maxPages;
     const input=(await tx.query<{adhoc_query:RunInput}>('select adhoc_query from runs where id=$1',[job.run_id])).rows[0].adhoc_query;
-    const ordered=job.payload.source==='tavily'?prioritiseDiscoveryDocs(docs,input):docs;
+    const clean=docs.filter(raw=>!junkReason(raw.url,raw.title,input.markets));
+    for(const raw of docs.filter(raw=>junkReason(raw.url,raw.title,input.markets)))await tx.query("insert into run_events(run_id,stage,message,counters) values($1,'info',$2,'{}')",[job.run_id,`skipped: ${junkReason(raw.url,raw.title,input.markets)}`]);
+    const ordered=job.payload.source==='tavily'?prioritiseDiscoveryDocs(clean,input):clean;
     const existing=new Set((await tx.query<{key:string}>("select key from research_jobs where run_id=$1 and stage='read'",[job.run_id])).rows.map(r=>r.key));
     for(const raw of ordered){
       // A duplicate must not use this query's fair share or appear as deferred.
       if(existing.has(raw.url))continue;
       if(admitted>=fairCap){deferred++;continue;}
-      if(await queueRead(tx,job.run_id,raw,{maxPages},raw.research?.lane==='directory'?48:35)){admitted++;existing.add(raw.url);}else deferred++;
+      const priority=raw.research?.sourcingLane==='trigger'?1600:raw.research?.sourcingLane==='roundup'?800:raw.research?.lane==='directory'?48:35;
+      if(await queueRead(tx,job.run_id,raw,{maxPages},priority)){admitted++;existing.add(raw.url);}else deferred++;
     }
-    await tx.query(`update research_jobs set state='done',result=$3::jsonb,lease_token=null,lease_until=null where id=$1 and lease_token=$2`,[job.id,job.lease_token,JSON.stringify({urls:docs.length,deferred,docs})]);
+    await tx.query(`update research_jobs set state='done',result=$3::jsonb,lease_token=null,lease_until=null where id=$1 and lease_token=$2`,[job.id,job.lease_token,JSON.stringify({urls:clean.length,deferred,docs:clean,skippedCount:docs.length-clean.length})]);
   });
 }
 
@@ -233,7 +244,7 @@ export async function admitDeferredDiscovery(db:Db,runId:string):Promise<number>
   return db.tx(async tx=>{
     const session=(await tx.query<ResearchSession>('select * from research_sessions where run_id=$1 for update',[runId])).rows[0];
     if(!session||session.state!=='active')return 0;
-    if((await tx.query("select id from research_jobs where run_id=$1 and stage='collect' and state in ('queued','running','paused') limit 1",[runId])).rows.length)return 0;
+    if((await tx.query("select id from research_jobs where run_id=$1 and stage='collect' and state in ('queued','running','paused') and coalesce(payload->>'sourcingLane','')<>'capability' limit 1",[runId])).rows.length)return 0;
     const input=(await tx.query<{adhoc_query:RunInput}>('select adhoc_query from runs where id=$1',[runId])).rows[0].adhoc_query;
     const sources=(await tx.query<{id:string;result:{docs?:RawDoc[];deferred?:number}}>("select id,result from research_jobs where run_id=$1 and stage='collect' and state='done' and payload->>'source'='tavily' order by priority desc,created_at,id",[runId])).rows;
     const existing=new Set((await tx.query<{key:string}>("select key from research_jobs where run_id=$1 and stage='read'",[runId])).rows.map(r=>r.key));

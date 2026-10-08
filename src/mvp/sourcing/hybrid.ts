@@ -6,7 +6,8 @@ import type { Trigger } from '@/mvp/buyers/types';
 import { getLLM, type LLMProvider, type LLMRole } from '@/mvp/llm';
 import { originalQuote } from '@/mvp/discovery/evidence';
 import { buyerPageCandidate } from '@/mvp/discovery/plan';
-import { reserveAnalysis, markBudget, type ResearchBudget } from '@/mvp/research/store';
+import { reserveAnalysis, reserveBudget, markBudget, type ResearchBudget } from '@/mvp/research/store';
+import { isJsonGenerationError,JSON_ONLY_INSTRUCTION } from '@/mvp/llm/groq';
 
 /** Initial routing, replaced by the richer deterministic classifier in WP2. */
 export function needsAwardAnalysis(raw: RawDoc, text: string, input: RunInput): boolean {
@@ -25,7 +26,7 @@ export function budgetedAwardProviders(db: Db, runId: string, documentId: string
     provider(role: LLMRole, model?: string): LLMProvider {
       const llm = make(role, model);
       if (llm.name === 'mock') return llm; // deterministic fixtures cost no provider quota
-      return { ...llm, async complete(request) {
+      const wrapped:LLMProvider = { ...llm, async complete(request) {
         const key = `award:${documentId}:${role}:${llm.model}:${request.purpose ?? 'extract'}`;
         const tokens = Math.ceil((request.system.length + request.user.length) / 3) + (request.maxTokens ?? 1500);
         const reservation = await reserveAnalysis(db, runId, key, tokens, budget);
@@ -41,9 +42,14 @@ export function budgetedAwardProviders(db: Db, runId: string, documentId: string
         } catch (error) {
           await markBudget(db, runId, 'ai_pages', key, 'unknown');
           await markBudget(db, runId, 'ai_tokens', key, 'unknown');
+          if(request.json&&!request.purpose?.endsWith(':json-repair')&&isJsonGenerationError(error)){
+            const repair=await reserveBudget(db,runId,'json_repairs',key,1,budget.maxRepairCalls);
+            if(repair==='reserved')return wrapped.complete({...request,system:`${request.system}\n\n${JSON_ONLY_INSTRUCTION}`,purpose:`${request.purpose??'extract'}:json-repair`});
+          }
           throw error;
         }
       }};
+      return wrapped;
     },
   };
 }

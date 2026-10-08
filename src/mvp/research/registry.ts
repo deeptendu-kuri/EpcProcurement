@@ -23,9 +23,10 @@ export function sourceSeeds(input: RunInput): RawDoc[] {
 export function readLaneLimits(maxPages: number) {
   if(maxPages<8)return {investigation:maxPages,directory:maxPages,news:maxPages,discovery:maxPages};
   const investigation = Math.max(1, Math.floor(maxPages * .5));
-  const directory = Math.max(1, Math.floor(maxPages * .1));
-  const news = Math.floor(maxPages * .1);
-  return { investigation, directory, news, discovery: Math.max(0, maxPages - investigation - directory - news) };
+  const directory = Math.max(1, Math.floor(maxPages * .2));
+  const news = Math.floor(maxPages * .4);
+  // These are maximum lane shares, not allocations; the global cap still owns every read.
+  return { investigation, directory, news, discovery: Math.max(1,Math.floor(maxPages*.3)) };
 }
 export function readLane(raw: RawDoc): "investigation" | "directory" | "news" | "discovery" {
   const lane = raw.research?.lane;

@@ -19,11 +19,12 @@ import type { P1Output, P2Output } from "../schemas";
 export const TED_SEARCH_URL = "https://api.ted.europa.eu/v3/notices/search";
 
 /** Slice markets covered by TED (ISO-2 → TED ISO-3). */
-export const TED_COUNTRIES: Record<string, string> = { NO: "NOR" };
+export const TED_COUNTRIES: Record<string, string> = { NO:'NOR',IS:'ISL',LI:'LIE',AT:'AUT',BE:'BEL',BG:'BGR',HR:'HRV',CY:'CYP',CZ:'CZE',DK:'DNK',EE:'EST',FI:'FIN',FR:'FRA',DE:'DEU',GR:'GRC',HU:'HUN',IE:'IRL',IT:'ITA',LV:'LVA',LT:'LTU',LU:'LUX',MT:'MLT',NL:'NLD',PL:'POL',PT:'PRT',RO:'ROU',SK:'SVK',SI:'SVN',ES:'ESP',SE:'SWE' };
 
 const ISO3_TO_2: Record<string, string> = {
   NOR: "NO", SWE: "SE", DNK: "DK", FIN: "FI", DEU: "DE", NLD: "NL", GBR: "GB", FRA: "FR", ITA: "IT", ESP: "ES", POL: "PL",
   BEL: "BE", AUT: "AT", IRL: "IE", ISL: "IS", EST: "EE", LVA: "LV", LTU: "LT", PRT: "PT", CZE: "CZ",
+  LIE:'LI',BGR:'BG',HRV:'HR',CYP:'CY',GRC:'GR',HUN:'HU',LUX:'LU',MLT:'MT',ROU:'RO',SVK:'SK',SVN:'SI',
 };
 
 const FIELDS = [

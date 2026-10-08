@@ -425,15 +425,17 @@ export class RobotsDisallowedError extends Error {
  * fetched (SSRF guard), and every redirect hop is re-checked against the guard, robots.txt and the
  * per-host politeness delay.
  */
-export async function fetchPageText(url: string, options: { fullPage?: boolean; maxPdfPages?:number } = {}): Promise<FetchOutcome> {
+export async function fetchPageText(url: string, options: { fullPage?: boolean; maxPdfPages?:number;allowUrl?:(url:string)=>boolean } = {}): Promise<FetchOutcome> {
   const host = hostOf(url);
   if (!host) return { ok: false, reason: "error", detail: "bad url" };
   try {
+    if(options.allowUrl&&!options.allowUrl(url))return {ok:false,reason:'error',detail:'Excluded source.'};
     await assertPublicHttpUrl(url);
     if (!(await robotsAllowed(url))) return { ok: false, reason: "robots", detail: "disallowed by robots.txt" };
     await politeWait(host);
     const res = await getText(url, undefined, FETCH_TIMEOUT_MS, {
       beforeHop: async (next) => {
+        if(options.allowUrl&&!options.allowUrl(next))throw new Error('Excluded redirect source.');
         if (!(await robotsAllowed(next))) throw new RobotsDisallowedError(next);
         const nextHost = hostOf(next);
         if (nextHost && nextHost !== host) await politeWait(nextHost);

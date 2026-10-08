@@ -41,6 +41,8 @@ export interface RawDoc {
     candidateId?: string;
     /** Provider preview, used only to prioritise reading. Never source/evidence text. */
     searchPreview?: string;
+    sourcingLane?: 'trigger'|'roundup'|'capability';
+    pageKind?: 'article'|'tender_notice'|'filing'|'company_site'|'directory'|'roundup'|'junk';
   };
 }
 

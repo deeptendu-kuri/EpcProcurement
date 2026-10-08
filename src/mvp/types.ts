@@ -21,6 +21,7 @@ export interface RunInput {
   researchMode?: "preview" | "batch" | "deep";
   /** Coverage goal, not a promise or permission to fabricate results. */
   targetCompanies?: number;
+  lanes?: ('trigger'|'roundup'|'capability')[];
   markets: string[];
   leadKinds: LeadKind[];
   /** Search the sample documents (fixtures) for this run only, whatever MVP_OFFLINE says ("Load sample leads"). */
@@ -167,8 +168,9 @@ export interface RunCounters {
   researchCandidates?: number;
   investigatedCompanies?: number;
   readFailures?: Record<string,number>;
-  researchUsage?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;pdfPages:number};
-  researchLimits?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number};
+  researchUsage?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;pdfPages:number;bingSearches?:number};
+  researchLimits?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;bingSearches?:number};
+  coverage?: {readsSkipped:number;deferred:number;reason:string|null};
   updatedLeads?: number;
 }
 

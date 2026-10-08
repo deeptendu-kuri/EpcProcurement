@@ -10,9 +10,9 @@ export function buyingActivities(productId: string): string[] { return [...(MATE
 export type ResearchMode = "preview" | "batch" | "deep";
 type BudgetInput = Pick<RunInput, "query" | "markets"> & {researchMode?:ResearchMode; targetCompanies?:number};
 const MODE_BUDGETS = {
-  preview:{searchQueries:3,maxPages:30,maxAiPages:12,maxAiTokens:30_000,maxPagesPerDomain:4,maxRepairCalls:1,targetCompanies:10},
-  batch:{searchQueries:6,maxPages:60,maxAiPages:12,maxAiTokens:30_000,maxPagesPerDomain:4,maxRepairCalls:2,targetCompanies:30},
-  deep:{searchQueries:24,maxPages:200,maxAiPages:40,maxAiTokens:100_000,maxPagesPerDomain:4,maxRepairCalls:2,targetCompanies:100},
+  preview:{searchQueries:4,bingQueries:6,maxPages:40,maxAiPages:20,maxAiTokens:60_000,maxPagesPerDomain:4,maxRepairCalls:1,targetCompanies:10},
+  batch:{searchQueries:8,bingQueries:12,maxPages:80,maxAiPages:40,maxAiTokens:120_000,maxPagesPerDomain:4,maxRepairCalls:2,targetCompanies:30},
+  deep:{searchQueries:24,bingQueries:30,maxPages:200,maxAiPages:80,maxAiTokens:250_000,maxPagesPerDomain:4,maxRepairCalls:2,targetCompanies:100},
 } as const;
 /** Explicit ceilings, not expected yield. Environment settings may reduce, never expand, a mode. */
 export function researchBudget(input?:BudgetInput) {
@@ -20,10 +20,10 @@ export function researchBudget(input?:BudgetInput) {
   const mode:ResearchMode=requested==="batch"||requested==="deep"?requested:"preview";
   const defaults=MODE_BUDGETS[mode];
   const bounded=(name:string,limit:number)=>{
-    const n=Number(process.env[name]);return Number.isInteger(n)&&n>=1?Math.min(n,limit):limit;
+    const value=process.env[name];const n=Number(value);return value!==undefined&&value.trim()!==''&&Number.isInteger(n)&&n>=0?Math.min(n,limit):limit;
   };
   const target=input?.targetCompanies;
-  return {mode,searchQueries:bounded("MVP_MAX_SEARCH_QUERIES",defaults.searchQueries),maxPages:bounded("MVP_MAX_RESEARCH_PAGES",defaults.maxPages),
+  return {mode,searchQueries:bounded("MVP_MAX_SEARCH_QUERIES",defaults.searchQueries),bingQueries:bounded("MVP_MAX_BING_QUERIES",defaults.bingQueries),maxPages:bounded("MVP_MAX_RESEARCH_PAGES",defaults.maxPages),
     maxAiPages:bounded("MVP_MAX_AI_DOCS",defaults.maxAiPages),maxAiTokens:bounded("MVP_MAX_RESEARCH_AI_TOKENS",defaults.maxAiTokens),
     maxPagesPerDomain:bounded("MVP_MAX_PAGES_PER_DOMAIN",defaults.maxPagesPerDomain),maxRepairCalls:bounded("MVP_MAX_REPAIR_CALLS",defaults.maxRepairCalls),
     targetCompanies:typeof target==="number"&&Number.isInteger(target)&&target>=1&&target<=100?target:defaults.targetCompanies};
@@ -31,7 +31,7 @@ export function researchBudget(input?:BudgetInput) {
 export function queryBudget(input?:BudgetInput): number {
   return researchBudget(input).searchQueries;
 }
-export interface PlannedBuyerQuery {key:string;market:string;lane:"company"|"project"|"activity"|"directory";activityIndex:number;query:string;includeDomains?:string[];timeRange?:"year"}
+export interface PlannedBuyerQuery {key:string;market:string;lane:"company"|"project"|"activity"|"directory"|"news";activityIndex:number;query:string;includeDomains?:string[];timeRange?:"year";topic?:'news'|'general';days?:number;sourcingLane?:'trigger'|'roundup'|'capability'}
 export function buyerQueries(input: RunInput) {
   const product = input.productId ? getCatalogueItem(input.productId) : undefined;
   const term = input.query.trim() || product?.shortName || '';

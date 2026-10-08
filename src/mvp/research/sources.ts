@@ -7,9 +7,8 @@ import {BING_MKT,BING_NEWS_URL,parseBingRss} from '@/mvp/pipeline/sources/bing-n
 import {parseFeed,RSS_MAX_PER_FEED} from '@/mvp/pipeline/sources/rss';
 const buying=(blurb:string,ctx:SourceContext)=>[...ACTION_TERMS.en,...ACTION_TERMS.ar,...ACTION_TERMS.ms].some(t=>hasTerm(blurb,t))&&Boolean(findScope(blurb,scopeTermsFor(ctx.profile,ctx.terms)));
 export async function collectBingQuery(ctx:SourceContext,market:string,query:string):Promise<RawDoc[]> {
-  if(!BING_MKT[market])return [];
   await politeWait('www.bing.com',2000);
-  const url=`${BING_NEWS_URL}?${new URLSearchParams({q:query,format:'rss',mkt:BING_MKT[market]})}`;
+  const url=`${BING_NEWS_URL}?${new URLSearchParams({q:query,format:'rss',mkt:BING_MKT[market]??'en-US'})}`;
   const res=await getText(url,'application/rss+xml, application/xml, text/xml',15000);
   if(!res.ok)throw new Error(`News source HTTP ${res.status}`);
   return parseBingRss(res.text).filter(item=>buying(`${item.title}\n${item.description}`,ctx)).slice(0,8).map(item=>({sourceKey:`bing:${hostOf(item.url)??'news'}`,sourceName:`News · ${item.source??hostOf(item.url)??'Bing'}`,tier:'B',publisherKey:publisherKeyFor(item.url),url:item.url,title:item.title,publishedAt:item.published,text:null,market:null,isSample:false}));

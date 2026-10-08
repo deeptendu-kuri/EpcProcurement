@@ -18,12 +18,15 @@ import { RESEARCH_SOURCES } from './registry';
 import { bundlePromptText,discoverCompanyBundle,loadCompanyBundle } from '@/mvp/discovery/bundle';
 import { z } from 'zod';
 import {groundedCompanyBuyer} from '@/mvp/discovery/grounded';
+import { classifyPage,EXTRACTOR_PRIORITY } from '@/mvp/sourcing/classify';
+import { junkReason } from '@/mvp/sourcing/junk';
 import { extractDocument } from '@/mvp/pipeline/extract';
 import { resolveDocument } from '@/mvp/pipeline/resolve';
 import { detectMarkets } from '@/mvp/pipeline/filter';
 import { buildSignalsAndScore } from '@/mvp/scoring';
 import { captureOpportunities } from '@/mvp/opportunities';
-import { awardTriggerSnapshots, budgetedAwardProviders, capabilityTriggerSnapshots, needsAwardAnalysis } from '@/mvp/sourcing/hybrid';
+import { awardTriggerSnapshots, budgetedAwardProviders, capabilityTriggerSnapshots } from '@/mvp/sourcing/hybrid';
+import { tedSource } from '@/mvp/pipeline/sources/ted';
 
 export interface ResearchDeps {
   collect(source:string,ctx:SourceContext,payload:Record<string,unknown>):Promise<RawDoc[]>;
@@ -38,6 +41,7 @@ export const productionResearchDeps:ResearchDeps={
     if(source==='tavily')return collectTavilyQuery(ctx,payload.query as Parameters<typeof collectTavilyQuery>[1]);
     if(source==='bing-query')return collectBingQuery(ctx,String(payload.market),String(payload.query));
     if(source==='rss-feed')return collectRssFeed(ctx,String(payload.feed));
+    if(source==='ted')return tedSource.collect({...ctx,input:{...ctx.input,markets:[String(payload.market)]}});
     const sources:Record<string,Source>={'bing-news':bingNewsSource,gdelt:gdeltSource,rss:rssSource};
     if(!sources[source])throw new Error('Unsupported research source.');
     return sources[source].collect(ctx);
@@ -53,40 +57,58 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
     if(job.stage==='collect'){
       const ctx:SourceContext={db,runId:job.run_id,input,profile:getClientProfile(),terms:queryTerms(input.query),log:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)};
       const source=String(job.payload.source);let docs:RawDoc[];
+      if(job.payload.sourcingLane==='capability'){
+        const saved=(await db.query<{count:number}>("select count(*)::int as count from search_opportunities where run_id=$1 and qualification<>'rejected'",[job.run_id])).rows[0].count;
+        if(saved>=session.budget.targetCompanies){await completeJob(db,job,{skipped:'capability fallback not needed'});return {processed:true};}
+      }
+      if(source==='bing-query'){
+        const reservation=await reserveBudget(db,job.run_id,'bing_search',job.key,1,session.budget.bingQueries);
+        if(reservation!=='reserved'){
+          await completeJob(db,job,{skipped:'Bing query budget',budgetLimited:true});
+          await researchProgress(db,job.run_id,'info','Bing coverage limit reached; remaining sources and saved pages continue.');return {processed:true};
+        }
+      }
       if(source==='tavily'){
         const q=job.payload.query as Parameters<typeof collectTavilyQuery>[1];
         const cached=await cachedTavilyQuery(ctx,q);
         if(cached!==null)docs=cached;
         else{
           const reservation=await reserveBudget(db,job.run_id,'search',job.key,1,session.budget.searchQueries);
-          if(reservation==='exhausted'){await parkJob(db,job,'Search query budget exhausted.');return {processed:true,paused:true};}
+          if(reservation==='exhausted'){
+            await completeJob(db,job,{skipped:'Tavily query budget',budgetLimited:true});
+            await researchProgress(db,job.run_id,'info','Tavily coverage limit reached; saved pages and free sources continue.');return {processed:true};
+          }
           if(reservation==='existing'){await parkJob(db,job,'A previous search request has no committed response; manual review is required before repeating a charged query.');return {processed:true,paused:true};}
           try{docs=await deps.collect(source,ctx,job.payload);await markBudget(db,job.run_id,'search',job.key,'completed');}
           catch(error){await markBudget(db,job.run_id,'search',job.key,'unknown');throw error;}
         }
       }else docs=await deps.collect(source,ctx,job.payload);
+      if(source==='bing-query')await markBudget(db,job.run_id,'bing_search',job.key,'completed');
+      if(job.payload.sourcingLane)docs=docs.map(raw=>({...raw,research:{lane:job.payload.sourcingLane==='trigger'?'news':job.payload.sourcingLane==='roundup'?'directory':'company',...raw.research,sourcingLane:job.payload.sourcingLane as 'trigger'|'roundup'|'capability'}}));
       await enqueueRawDocs(db,job,docs,session.budget.maxPages);
       await researchProgress(db,job.run_id,'collect',`${source}: ${docs.length} original-page candidates. Discovery is saved; contact validation is separate.`);
     }else if(job.stage==='read'){
       const raw=job.payload.raw as RawDoc;
+      const junk=junkReason(raw.url,raw.title,input.markets);
+      if(junk){await completeJob(db,job,{skipped:junk});await researchProgress(db,job.run_id,'info',`skipped: ${junk}`);return {processed:true};}
       const domain=await reserveBudget(db,job.run_id,`domain:${new URL(raw.url).hostname}`,job.key,1,session.budget.maxPagesPerDomain);
       if(domain==='exhausted'){
         await completeJob(db,job,{domainLimited:true});await researchProgress(db,job.run_id,'info','A page was not read because this domain reached its bounded coverage limit.');return {processed:true};
       }
       const reservation=await reserveBudget(db,job.run_id,'read',job.key,1,session.budget.maxPages);
-      if(reservation==='exhausted'){await parkJob(db,job,'Page-read budget exhausted.');return {processed:true,paused:true};}
+      if(reservation==='exhausted'){await completeJob(db,job,{budgetLimited:true,skipped:'Page-read budget exhausted.'});await finishIdleResearch(db,job.run_id);return {processed:true,budgetLimited:true};}
       let text=raw.text,title=raw.title,publishedAt=raw.publishedAt;
-      let links:{url:string;text:string}[]=[];let format='html';let truncated=false;let pdfPages=0;let finalUrl=raw.url;
+      let links:{url:string;text:string}[]=[];let tables:string[][][]=[];let format='html';let truncated=false;let pdfPages=0;let finalUrl=raw.url;
       if(!text){
         const used=(await db.query<{units:number}>("select coalesce(sum(units),0)::int as units from research_budget_reservations where run_id=$1 and kind='pdf_pages'",[job.run_id])).rows[0].units;
-        const page=await deps.read(raw.url,{fullPage:raw.research?.lane!=='news',maxPdfPages:Math.max(0,Math.min(10,20-used))});
+        const page=await deps.read(raw.url,{fullPage:true,maxPdfPages:Math.max(0,Math.min(10,20-used)),allowUrl:url=>!junkReason(url,null,input.markets)});
         if(!page.ok){
           await completeJob(db,job,{unreadable:true,failureReason:page.reason});await markBudget(db,job.run_id,'read',job.key,'completed');
           if(raw.research?.candidateId)await db.query("update research_candidates set state='unreadable',reason=$2 where id=$1 and run_id=$3",[raw.research.candidateId,`Website read failed (${page.reason}); company research retained.`,job.run_id]);
           await researchProgress(db,job.run_id,'read',`Source read failed (${page.reason}); no invented content substituted.`);return {processed:true};
         }
         text=page.title&&!page.text.includes(page.title)?`${page.title}\n${page.text}`:page.text;title=page.title??title;publishedAt=page.publishedAt??publishedAt;
-        links=page.links??[];format=page.format??'html';truncated=Boolean(page.truncated);pdfPages=page.pages?.length??0;finalUrl=page.finalUrl??raw.url;
+        links=page.links??[];tables=page.tables??[];format=page.format??'html';truncated=Boolean(page.truncated);pdfPages=page.pages?.length??0;finalUrl=page.finalUrl??raw.url;
         if(pdfPages){await reserveBudget(db,job.run_id,'pdf_pages',job.key,pdfPages,20);await markBudget(db,job.run_id,'pdf_pages',job.key,'completed');}
       }
       // storeDocument deduplicates content/URL; all later quotes retain the stored original's provenance.
@@ -94,10 +116,13 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       await db.query('insert into run_documents(run_id,document_id) values($1,$2) on conflict do nothing',[job.run_id,stored.id]);
       const original=(await db.query<{url:string;title:string|null;source_key:string;source_name:string;tier:RawDoc['tier'];published_at:string|null;is_sample:boolean}>('select url,title,source_key,source_name,tier,published_at,is_sample from source_documents where id=$1',[stored.id])).rows[0];
       const grounded:RawDoc={...raw,url:original.url,title:original.title,text:stored.text,publishedAt:original.published_at,sourceKey:original.source_key,sourceName:original.source_name,tier:original.tier,isSample:original.is_sample};
-      const candidate=buyerPageCandidate(stored.text,input.productId!)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
-      const award=needsAwardAnalysis(grounded,stored.text,input);
+      const pageKind=classifyPage({url:grounded.url,title:grounded.title,text:stored.text,tables,registryId:raw.research?.registryId,markets:input.markets});
+      grounded.research={...grounded.research,lane:grounded.research?.lane??'company',pageKind};
+      const list=pageKind==='roundup'||pageKind==='directory';
+      const candidate=pageKind!=='junk'&&!list&&buyerPageCandidate(stored.text,input.productId!)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
+      const award=Boolean(raw.structured)||candidate&&['article','tender_notice','filing'].includes(pageKind);
       let associated=award?null:await candidateForPage(db,job.run_id,grounded);
-      if(!award&&!associated){
+      if(pageKind!=='junk'&&!award&&!associated){
         const seeded=await seedInvestigations(db,job.run_id,input,stored.id,grounded,stored.text,title,session.budget);
         if(seeded.seeds)await researchProgress(db,job.run_id,'info',`${seeded.seeds} company research seeds; ${seeded.queued} website investigations. Seeds are not qualified buyers.`);
         if(seeded.ownName)associated=await candidateForPage(db,job.run_id,grounded);
@@ -119,9 +144,9 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       // The persisted stage stays 'analyse' for compatibility with migration 019;
       // the explicit subtype is analyse:award. WP5 adds the trigger table, not a second run.
       const next:Parameters<typeof completeJob>[3]=award?
-        [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:80}]:
+        [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY[pageKind]}]:
         candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:buyerResearchPriority(grounded,stored.text,input)}]:[];
-      await completeJob(db,job,{documentId:stored.id,candidate,award,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},next);
+      await completeJob(db,job,{documentId:stored.id,candidate,award,pageKind,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},next);
       await markBudget(db,job.run_id,'read',job.key,'completed');
       await researchProgress(db,job.run_id,'read',`Original page saved${candidate?' for company/material analysis':''}.`);
     }else if(job.stage==='analyse'){
@@ -160,7 +185,7 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         if(!cached&&!grounded){
           const estimate=Math.ceil(JSON.stringify(bundlePromptText(bundle,input.productId!)).length/4)+1600;
           const reserve=await reserveAnalysis(db,job.run_id,key,estimate,session.budget);
-          if(reserve==='exhausted'){await parkJob(db,job,'AI analysis budget exhausted; original company research is retained.');return {processed:true,paused:true};}
+          if(reserve==='exhausted'){await completeJob(db,job,{budgetLimited:true,skipped:'AI analysis budget exhausted; original company research is retained.'});await finishIdleResearch(db,job.run_id);return {processed:true,budgetLimited:true};}
           if(reserve==='existing'&&job.attempts>1){await parkJob(db,job,'Prior bundle AI acceptance is uncertain; review before another charged request.');return {processed:true,paused:true};}
         }
         const result=grounded?{buyers:[grounded],invalid:0,cached:false,rejections:[]}:deps.discoverBundle
@@ -184,7 +209,7 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       const cached=(await db.query('select document_id from buyer_discovery_cache where document_id=$1 and product_id=$2 and content_hash=$3 and version=$4',[id,input.productId,doc.content_hash,DISCOVERY_VERSION])).rows.length>0;
       if(!cached){
         const pages=await reserveAnalysis(db,job.run_id,id,Math.ceil(Math.min(doc.text.length,22000)/4)+2000,session.budget);
-        if(pages==='exhausted'){await parkJob(db,job,'AI analysis budget exhausted; saved pages and companies are retained.');return {processed:true,paused:true};}
+        if(pages==='exhausted'){await completeJob(db,job,{budgetLimited:true,skipped:'AI analysis budget exhausted; saved pages and companies are retained.'});await finishIdleResearch(db,job.run_id);return {processed:true,budgetLimited:true};}
         // Do not silently pay again after a worker died during an uncached AI call.
         if(pages==='existing'&&job.attempts>1){await parkJob(db,job,'A prior AI request has no committed response; needs review before repeating paid analysis.');return {processed:true,paused:true};}
       }
@@ -235,14 +260,16 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
     // A settled optional source/read failure is a coverage warning, not a permanent funnel barrier.
     // A supervised review may resume one bundle while other jobs remain parked.
     // Once runnable work settles, those jobs mean partial, not running forever.
-    const partial=jobs.some(j=>j.state==='paused'||j.stage==='analyse'&&j.state==='failed')||jobs.some(j=>(j.result?.deferred??0)>0||j.result?.budgetLimited);
+    const budgetStop=(j:typeof jobs[number])=>j.state==='paused'&&/budget exhausted/i.test(j.error??'');
+    const partial=jobs.some(j=>j.state==='paused'&&!budgetStop(j)||j.stage==='analyse'&&j.state==='failed');
+    const coverageLimited=jobs.some(j=>budgetStop(j)||(j.result?.deferred??0)>0||j.result?.budgetLimited);
     const state=allSourcesFailed?'failed':partial?'partial':'done';
-    const stopReason=partial?(jobs.find(j=>j.state==='paused')?.error||'Some sources/pages could not be processed within the budget.'):null;
+    const stopReason=partial||coverageLimited?(jobs.find(j=>j.state==='paused')?.error||'Some sources/pages could not be processed within the budget.'):null;
     await db.tx(async tx=>{
       await tx.query(`update research_sessions set state=$2,stop_reason=$3,updated_at=now() where run_id=$1 and state='active'`,[s.run_id,state,stopReason]);
       await tx.query(`update runs set status=$2,finished_at=now(),error=$3 where id=$1 and status<>'cancelled'`,[s.run_id,allSourcesFailed?'failed':'done',allSourcesFailed?'All live sources failed. No sample data was substituted.':null]);
     });
-    const counters=await researchProgress(db,s.run_id,allSourcesFailed?'error':'done',allSourcesFailed?'All live sources failed. No sample data was substituted.':`${partial?'Partial research; saved companies retained. ':'Research complete. '}No sample data was substituted.`);
+    const counters=await researchProgress(db,s.run_id,allSourcesFailed?'error':'done',allSourcesFailed?'All live sources failed. No sample data was substituted.':`${partial?'Partial research; saved companies retained. ':coverageLimited?'Research complete with bounded coverage; saved companies retained. ':'Research complete. '}No sample data was substituted.`);
     await researchProgress(db,s.run_id,'info',`${counters.scopedProspects??0} buyer prospects saved; contact discovery/validation is separate.${failed?' Some sources/pages failed; coverage is incomplete.':''}`);
   }
 }

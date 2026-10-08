@@ -10,6 +10,7 @@ const query=buyerQueries(input)[0];
 beforeAll(async()=>{db=await createTestDb();},120_000);
 afterAll(async()=>{await db.close();});
 beforeEach(async()=>{
+  await db.exec('truncate research_query_cache');
   const run=(await db.query<{id:string}>("insert into runs(status) values('running') returning id")).rows[0];
   ctx={runId:run.id,input,profile:{} as SourceContext["profile"],terms:[],log:vi.fn(async()=>{}),db};
   vi.stubEnv("TAVILY_API_KEY","unit-secret");vi.stubGlobal("fetch",fetchMock);fetchMock.mockReset();
@@ -39,12 +40,13 @@ describe("successful query replay without repeating search credits",()=>{
     expect(await collectTavilyQuery(ctx,query)).toEqual(original);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
-  it("keeps changed wording or different run provenance separate",async()=>{
+  it("keeps changed wording separate but reuses a recent identical query with new run provenance",async()=>{
     fetchMock.mockImplementation(async()=>new Response(JSON.stringify({results:[]}),{status:200}));
     await collectTavilyQuery(ctx,query);
     await collectTavilyQuery(ctx,{...query,query:query.query+" industrial"});
     const otherRun=(await db.query<{id:string}>("insert into runs(status) values('running') returning id")).rows[0].id;
-    await collectTavilyQuery({...ctx,runId:otherRun},query);expect(fetchMock).toHaveBeenCalledTimes(3);
+    await collectTavilyQuery({...ctx,runId:otherRun},query);expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((await db.query('select query_key from research_query_cache where run_id=$1',[otherRun])).rows).toHaveLength(1);
   });
   it("does not cache quota/auth/network responses, but blocks automatic repetition of accepted unreadable responses",async()=>{
     fetchMock.mockResolvedValueOnce(new Response("unit-secret",{status:429}));
@@ -70,5 +72,23 @@ describe("successful query replay without repeating search credits",()=>{
     const result=await collectTavilyQuery(ctx,query);
     expect(result[0].research?.searchPreview).toHaveLength(1200);
     expect(result[0].text).toBeNull();expect(result[0].fallbackText).toBeNull();
+  });
+  it('expires cross-run reuse after seven days without extending the original timestamp on copy',async()=>{
+    fetchMock.mockImplementation(async()=>new Response(JSON.stringify({results:[]}),{status:200}));
+    await collectTavilyQuery(ctx,query);
+    await db.query("update research_query_cache set completed_at=now()-interval '6 days' where run_id=$1",[ctx.runId]);
+    const other=(await db.query<{id:string}>("insert into runs(status) values('running') returning id")).rows[0].id;
+    await collectTavilyQuery({...ctx,runId:other},{...query,query:`  ${query.query.toUpperCase()}  `});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await db.query("select run_id from research_query_cache where run_id=$1 and completed_at<now()-interval '5 days'",[other])).rows).toHaveLength(1);
+    await db.exec("update research_query_cache set completed_at=now()-interval '8 days'");
+    const third=(await db.query<{id:string}>("insert into runs(status) values('running') returning id")).rows[0].id;
+    await collectTavilyQuery({...ctx,runId:third},query);expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it('requests trigger news for 365 days and preserves reported credit usage',async()=>{
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({results:[],usage:{credits:1}}),{status:200}));
+    await collectTavilyQuery(ctx,{...query,topic:'news',days:365,sourcingLane:'trigger'});
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({topic:'news',days:365,include_usage:true,include_raw_content:false});
+    expect((await db.query<{result:{usage:{credits:number}}}>('select result from research_query_cache where run_id=$1',[ctx.runId])).rows[0].result.usage.credits).toBe(1);
   });
 });

@@ -26,7 +26,7 @@ describe('durable research checkpoints',()=>{
   it('creates persisted run, tasks and outbox without a provider request',async()=>{
     const id=await createResearchRun(input,db);
     const jobs=(await db.query('select id from research_jobs where run_id=$1',[id])).rows;
-    expect(jobs.length).toBeGreaterThan(3);
+    expect(jobs).toHaveLength(2); // two planned Bing headlines; Tavily is unconfigured
     expect((await db.query('select id from research_outbox where run_id=$1',[id])).rows).toHaveLength(jobs.length);
     expect((await sessionFor(db,id))?.state).toBe('active');
   });
@@ -48,16 +48,17 @@ describe('durable research checkpoints',()=>{
   it('reclaims unused query shares from saved URLs without new search requests or crossing reading caps',async()=>{
     vi.stubEnv('TAVILY_API_KEY','unit-key');
     const id=await createResearchRun({...input,researchMode:'batch'},db);
-    const job=(await claimJob(db,id))!;
+    const search=(await db.query<{id:string}>("select id from research_jobs where run_id=$1 and payload->>'source'='tavily' order by priority desc limit 1",[id])).rows[0];
+    const job=(await claimJob(db,id,search.id))!;
     const rows=Array.from({length:20},(_,i)=>({...doc(i),url:`https://company${i}.example/services`,research:{lane:'company' as const}}));
-    await enqueueRawDocs(db,job,rows,60);
-    expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(3);
+    await enqueueRawDocs(db,job,rows,80);
+    expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(6);
     expect(await admitDeferredDiscovery(db,id)).toBe(0); // other searches are unfinished
     await db.query("update research_jobs set state='done',result='{}',lease_token=null,lease_until=null where run_id=$1 and stage='collect' and id<>$2",[id,job.id]);
-    expect(await admitDeferredDiscovery(db,id)).toBe(15);
-    expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(18);
+    expect(await admitDeferredDiscovery(db,id)).toBe(14);
+    expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(20);
     expect(await admitDeferredDiscovery(db,id)).toBe(0);
-    expect((await db.query<{result:{deferred:number}}>("select result from research_jobs where id=$1",[job.id])).rows[0].result.deferred).toBe(2);
+    expect((await db.query<{result:{deferred:number}}>("select result from research_jobs where id=$1",[job.id])).rows[0].result.deferred).toBe(0);
     expect((await db.query("select key from research_budget_reservations where run_id=$1 and kind='search'",[id])).rows).toHaveLength(0);
   });
   it('token refusal does not consume an analysis page',async()=>{
@@ -153,13 +154,14 @@ describe('durable research checkpoints',()=>{
     expect((await sessionFor(db,id))?.state).toBe('active');
     await db.query("update research_jobs set state='done' where id=$1",[first.id]);
     await finishIdleResearch(db,id);
-    expect((await sessionFor(db,id))?.state).toBe('partial');
+    expect((await sessionFor(db,id))?.state).toBe('done');
     expect((await sessionFor(db,id))?.stop_reason).toBe(reason);
     const run=(await db.query<{status:string;counters:{researchState:string;coverageIncomplete:boolean}}>('select status,counters from runs where id=$1',[id])).rows[0];
-    expect(run.status).toBe('done');expect(run.counters.researchState).toBe('partial');expect(run.counters.coverageIncomplete).toBe(true);
+    expect(run.status).toBe('done');expect(run.counters.researchState).toBe('done');expect(run.counters.coverageIncomplete).toBe(true);
     expect((await db.query('select key from research_budget_reservations where run_id=$1',[id])).rows).toHaveLength(0);
   });
   it('a settled GDELT rate limit is a coverage warning, not a partial-search barrier',async()=>{
+    vi.stubEnv('MVP_RESEARCH_NEWS','on');
     const id=await createResearchRun(input,db);
     const deps:ResearchDeps={collect:vi.fn(async(source:string)=>{if(source==='gdelt')throw new Error('GDELT rate limit');return [];}),read:vi.fn(),discover:vi.fn(),save:vi.fn()};
     for(let i=0;i<100&&(await sessionFor(db,id))?.state==='active';i++)await processResearchTick(db,deps,id);
