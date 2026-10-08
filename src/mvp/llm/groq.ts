@@ -58,7 +58,7 @@ export async function completeWithJsonRetry(call: (request: LLMRequest, extraBod
   try {
     return await call(request);
   } catch (error) {
-    if (!request.json || !isJsonGenerationError(error)) throw error;
+    if (request.singleAttempt || !request.json || !isJsonGenerationError(error)) throw error;
   }
   const strict: LLMRequest = { ...request, system: `${request.system}\n\n${JSON_ONLY_INSTRUCTION}` };
   try {

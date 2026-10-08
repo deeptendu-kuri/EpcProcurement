@@ -67,7 +67,8 @@ export function savedSearchJob(search: Pick<SavedSearchRow, "id" | "query" | "ma
 export async function recoverInterruptedRuns(db: Queryable = getDb(), startedBefore: Date = new Date()): Promise<string[]> {
   const { rows } = await db.query<{ id: string }>(
     `update runs set status = 'failed', finished_at = now(), error = $1
-      where status in ('queued', 'running') and created_at < $2::timestamptz returning id`,
+      where status in ('queued', 'running') and created_at < $2::timestamptz
+      and not exists(select 1 from research_sessions s where s.run_id=runs.id) returning id`,
     [INTERRUPTED_MESSAGE, startedBefore.toISOString()],
   );
   for (const row of rows) {

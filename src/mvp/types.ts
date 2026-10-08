@@ -18,6 +18,9 @@ export interface RunInput {
   query: string;
   productId?: string;
   contactRole?: string;
+  researchMode?: "preview" | "batch" | "deep";
+  /** Coverage goal, not a promise or permission to fabricate results. */
+  targetCompanies?: number;
   markets: string[];
   leadKinds: LeadKind[];
   /** Search the sample documents (fixtures) for this run only, whatever MVP_OFFLINE says ("Load sample leads"). */
@@ -156,6 +159,16 @@ export interface RunCounters {
   buyerPagesChecked?: number;
   deferredPages?: number;
   buyerAnalysisFailed?: number;
+  researchState?: 'active'|'partial'|'done'|'cancelled'|'failed';
+  researchStopReason?: string|null;
+  coverageIncomplete?: boolean;
+  unreadablePages?: number;
+  deferredUrls?: number;
+  researchCandidates?: number;
+  investigatedCompanies?: number;
+  readFailures?: Record<string,number>;
+  researchUsage?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;pdfPages:number};
+  researchLimits?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number};
   updatedLeads?: number;
 }
 

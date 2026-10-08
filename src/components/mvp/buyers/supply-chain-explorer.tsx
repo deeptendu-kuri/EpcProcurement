@@ -24,12 +24,16 @@ function withSet<T>(set: ReadonlySet<T>, value: T, on: boolean): Set<T> {
  * The supply-chain tree and "All contacts in this supply chain" for one buyer (docs/mvp/15 §B, §E).
  * Loads GET /api/mvp/chain/[leadId] (+ /contacts); tier-3 suppliers load on "Expand".
  */
-export function SupplyChainExplorer({ leadId, rootShortName, demoEmail }: { leadId: string; rootShortName: string; demoEmail?: DemoEmailInfo }) {
+export function SupplyChainExplorer({ leadId, rootShortName, demoEmail, productScope, contactsOnly = false }: {
+  leadId: string; rootShortName: string; demoEmail?: DemoEmailInfo;
+  productScope?: { id: string; name: string; projectLinked: boolean }; contactsOnly?: boolean;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [chain, setChain] = useState<SupplyChain | null>(null);
   const [contacts, setContacts] = useState<ChainContactRow[]>([]);
   const [contactsLoading, setContactsLoading] = useState(true);
+  const [contactsError, setContactsError] = useState(false);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -67,6 +71,7 @@ export function SupplyChainExplorer({ leadId, rootShortName, demoEmail }: { lead
       }
       setChain(nextChain);
       if (nextContacts) setContacts(nextContacts);
+      setContactsError(nextContacts === null);
       setContactsLoading(false);
       setError(null);
     },
@@ -177,7 +182,7 @@ export function SupplyChainExplorer({ leadId, rootShortName, demoEmail }: { lead
 
   return (
     <>
-      <section id="supply-chain" aria-label="Supply chain" data-tour="buyer-chain" className="scroll-mt-20 rounded-[14px] border border-[var(--line)] bg-white px-[18px] py-4">
+      {!contactsOnly ? <section id="supply-chain" aria-label="Supply chain" data-tour="buyer-chain" className="scroll-mt-20 rounded-[14px] border border-[var(--line)] bg-white px-[18px] py-4">
         {error ? (
           <div className="flex flex-col items-start gap-2">
             <h2 className="text-base font-bold text-[#111827]">Supply chain from this deal</h2>
@@ -188,7 +193,8 @@ export function SupplyChainExplorer({ leadId, rootShortName, demoEmail }: { lead
           </div>
         ) : chain ? (
           <SupplyChainTree
-            chain={chain}
+            chain={productScope ? {...chain,nodes:chain.nodes.map(n=>({...n,wouldBuy:n.wouldBuy.filter(i=>i.itemId===productScope.id),competitorFor:n.competitorFor.filter(name=>name.toLowerCase()===productScope.name.toLowerCase())}))} : chain}
+            productScope={productScope}
             rootShortName={rootShortName}
             expanded={expanded}
             busy={busy}
@@ -208,11 +214,14 @@ export function SupplyChainExplorer({ leadId, rootShortName, demoEmail }: { lead
             </div>
           </div>
         )}
-      </section>
+      </section> : null}
+
+      {contactsOnly && error ? <section className="card p-4"><p role="status" className="text-sm text-red-700">{error.message}</p><button className="btn btn-secondary btn-sm mt-2" onClick={()=>setRetry(value=>value+1)}>Try again</button></section> : null}
 
       {!error ? (
         <section id="chain-contacts" aria-label="Contacts in this supply chain" className="scroll-mt-20 rounded-[14px] border border-[var(--line)] bg-white px-[18px] py-3.5">
-          <ChainContactsTable rows={contacts} loading={contactsLoading} busy={busyRows} onAdd={setAdding} onConfirm={(row) => void confirm(row)} onFindCandidates={findCandidates} onEmail={(row) => void openEmail(row)} demoEmail={demoEmail?.enabled} />
+          {contactsError ? <div role="status"><p className="text-sm text-red-700">Contact records could not load. This does not mean there are no contacts.</p><button className="btn btn-secondary btn-sm mt-2" onClick={()=>setRetry(value=>value+1)}>Retry contact records</button></div> : <ChainContactsTable key={contactsLoading ? "loading" : "loaded"} initialCompanyNode={productScope && !contactsOnly ? chain?.nodes.find(node=>node.tier===1)?.nodeId : undefined} rows={contactsOnly ? contacts.filter(row=>row.tier===1) : contacts} companyOnly={contactsOnly} loading={contactsLoading} busy={busyRows} onAdd={setAdding} onConfirm={(row) => void confirm(row)} onFindCandidates={findCandidates} onEmail={productScope ? undefined : (row) => void openEmail(row)} demoEmail={productScope ? false : demoEmail?.enabled} />}
+          {productScope ? <p className="mt-3 text-xs text-[var(--text-2)]">Contact-role confirmation is not email validation. Provider checks are in Contacts; automated delivery and replies are in Email & meetings. No supply-chain contact is enrolled from this table.</p> : null}
         </section>
       ) : null}
 

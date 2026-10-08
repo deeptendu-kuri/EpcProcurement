@@ -1,0 +1,52 @@
+/** Read-only browser proof: no research/enrichment submissions, no email or Calendar actions. */
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {mkdirSync,writeFileSync} from 'node:fs';
+import path from 'node:path';
+const require=createRequire(import.meta.url);
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const output=path.resolve('tmp/restored-workspace-proof');mkdirSync(output,{recursive:true});
+const base='http://localhost:3007';const opportunityId='c9cb4722-d73a-4718-8cba-a6222d46835f';
+const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_EXECUTABLE_PATH?{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH}:{})});
+const screens=[];const errors=[];const writes=[];
+try{
+  const context=await browser.newContext({viewport:{width:1536,height:1024}});
+  await context.addInitScript(()=>localStorage.setItem('mvp.tour.seen','1'));
+  const page=await context.newPage();page.setDefaultTimeout(30_000);page.on('pageerror',e=>errors.push(e.message));
+  page.on('request',req=>{if(!['GET','HEAD'].includes(req.method())&&!req.url().endsWith('/api/mvp/login'))writes.push({method:req.method(),url:req.url()});});
+  await page.goto(base+'/find');await page.getByLabel('Password',{exact:true}).fill('showcase-demo');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.waitForURL('**/find');
+  await page.goto(base+'/opportunities/'+opportunityId);
+  await page.getByRole('heading',{name:'Kalpataru Projects International Limited (KPIL)',exact:true}).waitFor();
+  const get=async endpoint=>{const response=await context.request.get(base+endpoint);assert.equal(response.status(),200);return response.json();};
+  const before=await get('/api/mvp/automation/conversation/'+opportunityId);
+  async function capture(name){await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});screens.push(name);console.log(JSON.stringify({screenshot:name}));}
+  assert.equal(await page.getByRole('complementary',{name:'Lead context and actions'}).count(),1);
+  await capture('01-desktop-overview');
+  await page.getByRole('tab',{name:'Contacts',exact:true}).click();
+  await page.getByRole('table',{name:'Company contact roles & details'}).waitFor();
+  await page.getByTestId('chain-contact-row').first().waitFor();
+  await capture('02-desktop-contacts');
+  await page.getByRole('tab',{name:'Subcontractors & supply chain',exact:true}).click();
+  await page.getByRole('heading',{name:'Company network & supply-chain research',exact:true}).waitFor();
+  await page.getByRole('table',{name:'All contacts in this supply chain'}).waitFor();
+  await page.getByTestId('chain-contact-row').first().waitFor();
+  await capture('03-desktop-chain');
+  const companies=await page.getByLabel('Contact company',{exact:true}).locator('option').evaluateAll(options=>options.map(o=>({value:o.value,label:o.textContent})).filter(o=>!['all','t1'].includes(o.value)));
+  assert.ok(companies.length,'Related-company filters should remain available');
+  await page.getByLabel('Contact company',{exact:true}).selectOption(companies[0].value);
+  await capture('08-related-company-contacts');
+  await page.getByRole('tab',{name:'Email & meetings',exact:true}).click();
+  await page.getByText('Sales agent email · [Demo] Procurement support for line pipe',{exact:true}).waitFor();
+  await capture('04-desktop-email-meetings');
+  await page.getByRole('tab',{name:'Activity',exact:true}).click();await capture('05-desktop-activity');
+  await page.setViewportSize({width:390,height:844});await page.getByRole('tab',{name:'Overview',exact:true}).click();await capture('06-mobile-overview');
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'Mobile overview overflows the viewport');
+  await page.getByRole('tab',{name:'Contacts',exact:true}).click();await page.getByRole('table',{name:'Company contact roles & details'}).waitFor();await page.getByTestId('chain-contact-row').first().waitFor();await capture('07-mobile-contacts');
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),'Mobile contacts overflow the viewport');
+  const after=await get('/api/mvp/automation/conversation/'+opportunityId);
+  assert.deepEqual(after.messages.filter(m=>m.direction==='out').map(m=>m.id),before.messages.filter(m=>m.direction==='out').map(m=>m.id),'Viewing UI must not create outgoing mail');
+  assert.deepEqual(errors,[]);assert.deepEqual(writes,[]);
+  writeFileSync(path.join(output,'proof.json'),JSON.stringify({screens,browserErrors:errors,mutationRequests:writes,outgoingMessages:after.messages.filter(m=>m.direction==='out').length},null,2));
+  writeFileSync(path.join(output,'index.html'),`<!doctype html><meta charset="utf-8"><title>Restored lead workspace — real UI proof</title><style>body{font:16px system-ui;max-width:1400px;margin:32px auto;background:#f5f7fb;color:#17243b;padding:20px}section{margin:28px 0}img{max-width:100%;border:1px solid #ddd;border-radius:12px}</style><h1>Restored lead workspace</h1><p>Actual local KPIL lead. ${screens.length} desktop/mobile captures; read-only navigation, no research/enrichment submissions, no new outgoing mail. Empty contacts and unconfirmed company relationships remain labelled honestly.</p>${screens.map(name=>`<section><h2>${name}</h2><a href="${name}.png"><img src="${name}.png" alt="${name}"></a></section>`).join('')}`);
+  console.log(JSON.stringify({passed:true,screenshots:screens.length,browserErrors:errors,mutationRequests:writes,report:path.join(output,'index.html')}));
+}finally{await browser.close();}

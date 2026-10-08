@@ -61,7 +61,7 @@ export async function setFunnelEnabled(enabled: boolean) {
     if ((await getDb().query("select recipient from funnel_suppressions where recipient=$1",[AUTOMATION_RECIPIENT])).rows.length)
       throw new Error("This demo recipient opted out and remains suppressed. Enabling automation cannot undo an opt-out.");
   }
-  await getDb().query(`update funnel_control set enabled=$1, enabled_at=case when $1::boolean then coalesce(enabled_at,now()) else enabled_at end,
+  await getDb().query(`update funnel_control set enabled=$1, enabled_at=case when $1::boolean and not enabled then now() else enabled_at end,
     last_error=null where id=1`, [enabled]);
   return funnelStatus();
 }

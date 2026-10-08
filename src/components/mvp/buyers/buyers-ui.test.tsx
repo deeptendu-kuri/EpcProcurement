@@ -190,7 +190,7 @@ describe("All contacts in this supply chain (docs/mvp/15 §E)", () => {
     const onConfirm = vi.fn();
     const onFind = vi.fn();
     render(<ChainContactsTable rows={rows} onAdd={onAdd} onConfirm={onConfirm} onFindCandidates={onFind} />);
-    expect(screen.getByText("3 people to approach · 1 found")).toBeTruthy();
+    expect(screen.getByText("3 contact role slots · 1 found")).toBeTruthy();
     expect(screen.getAllByTestId("chain-contact-row")).toHaveLength(3);
 
     fireEvent.click(screen.getByRole("button", { name: /\+ Add|Add contact/ }));

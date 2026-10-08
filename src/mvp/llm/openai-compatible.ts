@@ -55,7 +55,7 @@ export async function chatCompletion(options: {
     if (!response.ok) {
       settle?.(estimateIn, 0);
       const detail = typeof payload.error === "string" ? payload.error : payload.error?.message;
-      if (response.status === 429 && attempt < RATE_LIMIT_RETRIES) {
+      if (!request.singleAttempt && response.status === 429 && attempt < RATE_LIMIT_RETRIES) {
         const headers = response.headers;
         // Per-minute token resets are short; a long wait means a daily limit, so give up instead.
         const wait = parseResetMs(headers?.get?.("retry-after")) ?? parseResetMs(headers?.get?.("x-ratelimit-reset-tokens"));

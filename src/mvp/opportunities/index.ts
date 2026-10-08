@@ -3,7 +3,8 @@ import { getCatalogue } from "@/mvp/config/buyers-config";
 import { loadBuyerRecords } from "@/mvp/buyers/load";
 import type { BuyerRecord } from "@/mvp/buyers/view";
 import type { RunInput, RunRow } from "@/mvp/types";
-import { journey, verifiedProspect } from "./workflow";
+import { journey, uniquePublishedContacts, verifiedProspect } from "./workflow";
+import { searchedProductLabel } from '@/mvp/config/product-label';
 
 export interface Opportunity {
   id: string; run_id: string; lead_id: string; keyword: string; product_id: string; product_name: string;
@@ -13,6 +14,15 @@ export interface Opportunity {
   project_id?: string | null; project_name?: string | null; project_country?: string | null;
   discovery_kind?: "project" | "company"; fit_score?: number;
   source_urls?: string[];
+  material_fit_kind?: "explicit" | "potential";
+  activity_status?: "recent" | "ongoing" | "capability_only" | "historic" | "unknown";
+  activity_date?: string | null;
+  activity_quote?: string | null;
+  priority_components?: Record<string, number>;
+  discovery_version?: number;
+  named_contact_count?: number;
+  available_contact_roles?: string[];
+  public_contacts?: { kind: "email" | "phone"; value: string; source_url: string; quote: string }[];
 }
 /** Conservative product-specific eligibility. Inference remains a prospect, never a confirmed order. */
 export function eligibleForProduct(record: BuyerRecord, productId: string): boolean {
@@ -49,7 +59,7 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
       const result = await tx.query(`insert into search_opportunities
         (run_id, lead_id, keyword, product_id, product_name, contact_role, buying_reason, evidence_ids, company_id)
         values ($1,$2,$3,$4,$5,$6,$7,$8::uuid[],$9) on conflict (run_id, company_id, product_id) do nothing returning id`,
-        [runId, record.view.leadId, input.query, product.id, product.shortName || product.name,
+        [runId, record.view.leadId, input.query, product.id, searchedProductLabel(product.id,input.query),
           input.contactRole ?? "buyer", `${record.view.buyingReason} Potential need: ${item.why}`, proof.map(p => p.evidenceId), record.view.companyId]);
       count += result.rows.length;
     }
@@ -57,6 +67,9 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
   return count;
 }
 const OPPORTUNITY_SQL = `select o.*, c.canonical_name as name, c.country, l.is_sample, l.project_id, pj.name as project_name, pj.country as project_country,
+  (select count(*)::int from people p where p.current_company_id=c.id) as named_contact_count,
+  array(select distinct pr.buying_role from person_roles pr join people p on p.id=pr.person_id where p.current_company_id=c.id and (pr.company_id=c.id or pr.company_id is null) and pr.end_date is null) as available_contact_roles,
+  coalesce((select jsonb_agg(jsonb_build_object('kind',pc.kind,'value',pc.value,'source_url',pc.source_url,'quote',pc.quote) order by pc.kind,pc.value) from public_company_contacts pc where pc.company_id=c.id and (c.domain is null or pc.domain=c.domain)), '[]'::jsonb) as public_contacts,
   array(select distinct e.url from evidence e where e.id=any(o.evidence_ids) and e.quote_verified=true order by e.url limit 3) as source_urls,
   (select count(distinct cp.id)::int from contact_points cp join people p on p.id = cp.person_id
     where p.current_company_id = l.buyer_company_id and p.confirmed_at > now() - interval '90 days'
@@ -75,15 +88,19 @@ const OPPORTUNITY_SQL = `select o.*, c.canonical_name as name, c.country, l.is_s
     or exists(select 1 from funnel_threads ft join funnel_messages fm on fm.thread_id=ft.id where ft.opportunity_id=o.id and fm.direction='out' and fm.state='accepted')) as sent
   from search_opportunities o join leads l on l.id = o.lead_id join companies c on c.id = l.buyer_company_id left join projects pj on pj.id=l.project_id`;
 export async function listOpportunities(runId?: string): Promise<Opportunity[]> {
-  return (await getDb().query<Opportunity>(`${OPPORTUNITY_SQL} ${runId ? "where o.run_id = $1" : ""} order by o.fit_score desc,o.created_at desc, o.id limit 2000`, runId ? [runId] : [])).rows;
+  return (await getDb().query<Opportunity>(`${OPPORTUNITY_SQL} ${runId ? "where o.run_id = $1" : ""} order by case when o.activity_status in ('recent','ongoing') then 0 when o.activity_status='historic' then 2 else 1 end,o.fit_score desc,o.created_at desc, o.id limit 2000`, runId ? [runId] : [])).rows.map(presentOpportunity);
 }
 export async function getOpportunity(id: string): Promise<Opportunity | null> {
-  return (await getDb().query<Opportunity>(`${OPPORTUNITY_SQL} where o.id = $1`, [id])).rows[0] ?? null;
+  const row=(await getDb().query<Opportunity>(`${OPPORTUNITY_SQL} where o.id = $1`, [id])).rows[0];
+  return row?presentOpportunity(row):null;
+}
+function presentOpportunity(row:Opportunity):Opportunity {
+  return {...row,product_name:searchedProductLabel(row.product_id,row.keyword,row.product_name),public_contacts:uniquePublishedContacts(row.public_contacts??[])};
 }
 export function isVerified(o: Opportunity): boolean { return verifiedProspect(o.qualification, o.validated_emails, o.is_sample); }
 export function opportunityJourney(o: Opportunity) { return journey(o.qualification, o.validated_emails, o.sent, o.is_sample); }
 export async function recentSearches(): Promise<(RunRow & { result_count: number })[]> {
-  return (await getDb().query<RunRow & { result_count: number }>(`select r.*, (select count(*)::int from search_opportunities o where o.run_id = r.id) as result_count
+  return (await getDb().query<RunRow & { result_count: number }>(`select r.*, (select count(*)::int from search_opportunities o where o.run_id = r.id and o.qualification<>'rejected') as result_count
     from runs r order by r.created_at desc limit 50`)).rows;
 }
 export async function updateOpportunity(id: string, patch: { qualification?: string; summary?: string; ownerName?: string; nextAction?: string; followUpAt?: string | null }): Promise<Opportunity | null> {
@@ -98,6 +115,6 @@ export async function updateOpportunity(id: string, patch: { qualification?: str
     await tx.query("insert into opportunity_events (opportunity_id, body) values ($1,$2)", [id,
       patch.qualification ? `Buyer fit reviewed: ${patch.qualification}` : "CRM notes / next action updated"]);
     // Query through the same transaction to avoid a second-connection deadlock.
-    return (await tx.query<Opportunity>(`${OPPORTUNITY_SQL} where o.id = $1`, [id])).rows[0];
+    return presentOpportunity((await tx.query<Opportunity>(`${OPPORTUNITY_SQL} where o.id = $1`, [id])).rows[0]);
   });
 }

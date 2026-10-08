@@ -2,6 +2,7 @@ import { getDb } from "@/mvp/db";
 import type { OutreachDraftRow } from "@/mvp/types";
 import { demoEmailSettings, AUTOMATION_RECIPIENT } from "./config";
 import { paceResend } from "./pacing";
+import { DEMO_DAILY_LIMIT,demoAttemptsToday } from "./budget";
 
 export class DemoSendError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -51,10 +52,7 @@ export async function sendDemoEmail(id: string, text: { subject: string; body: s
     }
     if (current.delivery_state === "sending" && current.delivery_attempted_at && Date.now() - Date.parse(current.delivery_attempted_at) < 60_000)
       throw new DemoSendError(409, "This email is already being sent. Wait a moment before retrying.");
-    const quota = (await tx.query<{ count: number | string }>(
-      "select count(*) as count from outreach_drafts where delivery_first_attempt_at >= date_trunc('day', now())",
-    )).rows[0];
-    if (!current.delivery_first_attempt_at && Number(quota.count) >= 50) throw new DemoSendError(429, "The demo limit of 50 email deliveries per day has been reached.");
+    if (!current.delivery_first_attempt_at && await demoAttemptsToday(tx) >= DEMO_DAILY_LIMIT) throw new DemoSendError(429, `The combined demo limit of ${DEMO_DAILY_LIMIT} first delivery attempts per day has been reached.`);
     return (await tx.query<OutreachDraftRow>(
       `update outreach_drafts set subject = $2, body = $3, delivery_state = 'sending',
        delivery_recipient = $4, delivery_from = $5, delivery_error = null,

@@ -11,7 +11,10 @@ describe("targeted real web discovery",()=>{
     fetchMock.mockImplementation(async()=>new Response(JSON.stringify({results:[{url:"https://official.example/award",title:"Carbon steel pipe award",content:"Search snippet is not verified"}]}),{status:200}));
     const rows=await tavilySource.collect(ctx);expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({text:null,fallbackText:null,isSample:false});
     const request=fetchMock.mock.calls[0][1];expect(request.headers.authorization).toBe("Bearer unit-secret");
-    expect(JSON.parse(request.body).query).toContain("services projects");expect(JSON.parse(request.body).query).toContain("India");
+    expect(JSON.parse(request.body).query).toContain("contractors");expect(JSON.parse(request.body).query).toContain("India");
+    expect(JSON.parse(request.body)).toMatchObject({max_results:20,search_depth:'basic',country:'india',auto_parameters:false});
+    expect(JSON.parse(request.body).exclude_domains).toContain('facebook.com');
+    expect(rows[0].research?.searchPreview).toBe('Search snippet is not verified');
     expect(fetchMock).toHaveBeenCalledTimes(2);expect(JSON.parse(fetchMock.mock.calls[1][1].body).query).toContain("contract awarded");
     expect(JSON.parse(request.body).include_answer).toBe(false);expect(request.redirect).toBe("error");
   });

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { marketName } from "@/mvp/config/markets";
 import type { RunRow, RunStatus } from "@/mvp/types";
 import { formatDateTime } from "./labels";
+import { runStatusText } from "./run-steps";
 
 const STATUS_TEXT: Record<RunStatus, { label: string; className: string }> = {
   queued: { label: "Starting", className: "text-[#475467]" },
@@ -28,7 +29,7 @@ export function RecentRuns({ runs }: { runs: RunRow[] }) {
                 <span className="font-semibold text-[#101828]">{input?.query ?? "Search"}</span>
                 <span className="text-[#475467]">{input?.markets.map((code) => marketName(code)).join(", ")}</span>
                 <span className="text-[#667085]">{formatDateTime(run.started_at ?? run.created_at)}</span>
-                <span className={`font-semibold ${status.className}`}>{status.label}</span>
+                <span className={`font-semibold ${run.counters?.researchState==='partial' ? 'text-[#b54708]' : status.className}`}>{runStatusText(run.status,run.counters)}</span>
                 {newLeads !== undefined ? (
                   <span className="tabular-nums text-[#344054]">{prospects !== undefined ? `${prospects} potential buyers saved` : input?.productId ? "Buyer count unavailable for this older search" : `${newLeads} raw research records`}</span>
                 ) : null}

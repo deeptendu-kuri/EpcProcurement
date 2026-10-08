@@ -3,6 +3,7 @@
  */
 import type { ClientProfile, RunInput, SourceTier } from "@/mvp/types";
 import type { P1Output, P2Output, P3Output } from "./schemas";
+import type { Db } from "@/mvp/db";
 
 /** Facts a structured source already gives (e.g. TED winners and values). Quotes must be substrings of `text`. */
 export interface StructuredFacts {
@@ -33,9 +34,19 @@ export interface RawDoc {
   language?: string | null;
   isSample: boolean;
   structured?: StructuredFacts;
+  /** Research routing only; hints never establish company/product facts. */
+  research?: {
+    lane: "company" | "project" | "activity" | "directory" | "investigation" | "news";
+    registryId?: string;
+    candidateId?: string;
+    /** Provider preview, used only to prioritise reading. Never source/evidence text. */
+    searchPreview?: string;
+  };
 }
 
 export interface SourceContext {
+  /** Explicit persistence for successful query caching; no hidden database fallback in adapters. */
+  db?: Db;
   runId: string;
   input: RunInput;
   profile: ClientProfile;

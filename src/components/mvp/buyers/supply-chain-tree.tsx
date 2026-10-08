@@ -8,6 +8,7 @@ import { LINK_LABELS, LINK_LEGEND, LINK_ORDER, LINK_STYLES, LINK_SWATCH } from "
 
 export interface SupplyChainTreeProps {
   chain: SupplyChain;
+  productScope?: { id: string; name: string; projectLinked: boolean };
   /** Short name of the tier-1 buyer, for "Tier 2 · supplies KPIL". */
   rootShortName: string;
   /** Tier-2 node ids whose tier-3 suppliers are shown. */
@@ -171,9 +172,9 @@ function NodeCard({ node, isRoot, props }: { node: ChainNode; isRoot: boolean; p
       </div>
       {whatLine ? <p className="text-xs text-[#6b7280]">{whatLine}</p> : null}
       <p className="mt-1.5 text-[12.5px] text-[#1f2937]">
-        {identified || isRoot ? "Buys from you: " : "Would buy: "}
+        {props.productScope ? isRoot ? "Product in this search: " : "Potential product fit: " : identified || isRoot ? "Buys from you: " : "Would buy: "}
         <span className="font-semibold text-[#047857]" title={buys.length > shortBuys.shown.length ? buys.join(" · ") : undefined}>
-          {buys.length ? shortBuys.shown.join(", ") : "— (not in your catalogue)"}
+          {props.productScope && isRoot ? props.productScope.name : buys.length ? shortBuys.shown.join(", ") : props.productScope ? "Not established for this product" : "— (not in your catalogue)"}
         </span>
         {shortBuys.more ? <span className="text-[#6b7280]"> +{shortBuys.more} more</span> : null}
       </p>
@@ -235,11 +236,11 @@ export function SupplyChainTree(props: SupplyChainTreeProps) {
   return (
     <div data-testid="supply-chain-tree">
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h2 className="text-base font-bold text-[#111827]">Supply chain from this deal — every company here can buy from you</h2>
+        <h2 className="text-base font-bold text-[#111827]">{props.productScope ? "Company network & supply-chain research" : "Supply chain from this deal — every company here can buy from you"}</h2>
         <div className="ml-auto"><Legend /></div>
       </div>
 
-      <TierHeading>Tier 1 · won the work</TierHeading>
+      <TierHeading>{props.productScope ? `Tier 1 · ${props.productScope.projectLinked ? "project-linked" : "primary"} company` : "Tier 1 · won the work"}</TierHeading>
       {root ? (
         <div className="max-w-[420px]"><NodeCard node={root} isRoot props={props} /></div>
       ) : null}
@@ -247,7 +248,7 @@ export function SupplyChainTree(props: SupplyChainTreeProps) {
       {tier2.length ? (
         <>
           <p className="my-1 flex justify-center text-xs text-[#94a3b8]">▼ buys materials and services from</p>
-          <TierHeading>Tier 2 · supplies {rootShortName} (also buyers for you)</TierHeading>
+          <TierHeading>Tier 2 · {props.productScope ? `related companies & supplier types for ${rootShortName}` : `supplies ${rootShortName} (also buyers for you)`}</TierHeading>
           <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
             {tier2.map((node) => <NodeCard key={node.nodeId} node={node} isRoot={false} props={props} />)}
           </div>

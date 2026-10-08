@@ -8,6 +8,8 @@ export async function register() {
   try {
     const { startScheduler } = await import("./mvp/scheduler");
     startScheduler();
+    const { startResearchWorker } = await import("./mvp/research/worker");
+    startResearchWorker();
     const { startOutreachWorker } = await import("./mvp/email/worker");
     startOutreachWorker();
     const { startFunnelWorker } = await import("./mvp/automation/worker");

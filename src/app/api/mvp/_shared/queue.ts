@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { getRunQueue, type QueueJob, type Ticket } from "@/mvp/scheduler";
 import { NO_STORE } from "./http";
 import { serverlessRuntime,SERVERLESS_SETUP_MESSAGE } from "@/mvp/runtime";
+import { createResearchRun } from "@/mvp/research/store";
+import { startResearchWorker } from "@/mvp/research/worker";
+import { mvpEnv } from "@/mvp/config/env";
+import { resolveMaterial } from "@/mvp/discovery/material";
 
 /** How long a POST waits for its job to start before answering "waiting in line". */
 const START_WAIT_MS = 4000;
@@ -28,7 +32,15 @@ export function ticketBody(ticket: Ticket): TicketBody {
 
 /** Put a job in the run queue (one run at a time) and answer 202 with its ticket. */
 export async function enqueueResponse(job: QueueJob): Promise<NextResponse> {
+  if(job.input.productId&&!job.sample&&!job.input.offline&&!mvpEnv.offline()){
+    const material=resolveMaterial(job.input.query,job.input.productId);
+    if(material.status!=='resolved')return NextResponse.json({error:material.question,materialStatus:material.status,candidateIds:material.candidateIds},{status:422,headers:NO_STORE});
+  }
   if(serverlessRuntime())return NextResponse.json({error:SERVERLESS_SETUP_MESSAGE},{status:503,headers:NO_STORE});
+  if(job.input.productId&&!job.sample&&!job.input.offline&&!mvpEnv.offline()&&process.env.MVP_DURABLE_RESEARCH!=='off'){
+    const runId=await createResearchRun(job.input);startResearchWorker();
+    return NextResponse.json({ticketId:`durable-${runId}`,runId,state:'running',position:0,error:null},{status:202,headers:NO_STORE});
+  }
   const queue = getRunQueue();
   const ticket = queue.enqueue(job);
   const started = (await queue.whenStarted(ticket.id, START_WAIT_MS)) ?? ticket;

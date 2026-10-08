@@ -3,6 +3,8 @@ import { getDb } from "@/mvp/db";
 import { AUTOMATION_RECIPIENT, calendarPreferences, seller } from "./config";
 import { businessTime } from "./policy";
 
+export class MeetingSlotUnavailableError extends Error {}
+
 function encryptionKey() {
   const secret = process.env.SESSION_SECRET?.trim() ?? "";
   if (secret.length < 32) throw new Error("A 32-character SESSION_SECRET is required to protect calendar credentials.");
@@ -27,6 +29,11 @@ function oauthConfig() {
   return { clientId,clientSecret,redirectUri: `${url.origin}/api/mvp/automation/calendar/callback` };
 }
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+/** OAuth may return only to our automation page or an exact lead conversation. */
+export function calendarReturnPath(value:unknown):string {
+  if(value==='/settings?tab=automation')return value;
+  return typeof value==='string' && /^\/opportunities\/[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}\?tab=conversation$/i.test(value)?value:'/outreach';
+}
 export async function beginCalendarConnection() {
   const c = oauthConfig(); const state = randomBytes(32).toString("base64url");
   await getDb().query("delete from funnel_oauth_states where expires_at <= now()");
@@ -108,8 +115,8 @@ export async function bookDemoMeeting(threadId: string,start: string,product: st
   }
   if (lookup.status!==404) throw new Error("Could not verify whether this meeting already exists.");
   if (Date.parse(start)<=Date.now() || !businessTime(new Date(start),p.timeZone,p.startHour,p.endHour)
-    || !businessTime(new Date(Date.parse(end)-1),p.timeZone,p.startHour,p.endHour)) throw new Error("Meeting slot expired or is outside working hours.");
-  if ((await busy(token,start,end)).length) throw new Error("That slot is no longer free. Ask the buyer to select another time.");
+    || !businessTime(new Date(Date.parse(end)-1),p.timeZone,p.startHour,p.endHour)) throw new MeetingSlotUnavailableError("Meeting slot expired or is outside working hours.");
+  if ((await busy(token,start,end)).length) throw new MeetingSlotUnavailableError("That slot is no longer free. New available times will be offered.");
   const data=await google("calendars/primary/events?conferenceDataVersion=1&sendUpdates=all",token,{method:"POST",body:JSON.stringify({
     id,summary:`[Demo] ${product} discussion — ${seller().name}`,description:"EPC procurement MVP demo. No real buyer was invited.",
     start:{dateTime:start,timeZone:p.timeZone},end:{dateTime:end,timeZone:p.timeZone},attendees:[{email:AUTOMATION_RECIPIENT}],

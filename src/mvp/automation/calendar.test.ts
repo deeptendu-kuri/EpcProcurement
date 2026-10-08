@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {afterAll,afterEach,beforeAll,beforeEach,describe,it,expect,vi} from "vitest";
 import {createTestDb,setDbForTests,type Db} from "@/mvp/db";
-import {beginCalendarConnection,finishCalendarConnection,bookDemoMeeting,encryptToken,eventId} from "./calendar";
+import {beginCalendarConnection,finishCalendarConnection,bookDemoMeeting,encryptToken,eventId,calendarReturnPath} from "./calendar";
 const fetchMock=vi.fn();let db:Db;
 beforeAll(async()=>{db=await createTestDb();setDbForTests(db);},120_000);
 afterAll(async()=>{setDbForTests(undefined);await db?.close();});
@@ -15,6 +15,10 @@ afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();vi.useRealTimers();});
 const response=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status});
 async function connected(){await db.query("insert into funnel_integrations(provider,account,encrypted_refresh_token) values('google','deeptendukuri@gmail.com',$1)",[encryptToken("unit-refresh-token")]);}
 describe("real Calendar adapter contract, mocked HTTP",()=>{
+  it('returns only to an exact local company conversation, never an external or injected path',()=>{
+    const path='/opportunities/00000000-0000-0000-0000-000000000007?tab=conversation';expect(calendarReturnPath(path)).toBe(path);
+    for(const value of ['//evil.example','https://evil.example',path+'&next=https://evil.example','/api/mvp/automation',undefined])expect(calendarReturnPath(value)).toBe('/outreach');
+  });
   it("creates a browser-bound expiring state and exact local redirect URI",async()=>{
     const c=await beginCalendarConnection();const url=new URL(c.url);
     expect(url.origin).toBe("https://accounts.google.com");expect(url.searchParams.get("state")).toBe(c.state);

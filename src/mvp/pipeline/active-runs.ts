@@ -28,6 +28,7 @@ export async function failStaleRuns(db: Queryable, staleMs = STALE_RUN_MS): Prom
       `update runs
           set status = 'failed', finished_at = now(), error = $1
         where status in ('queued', 'running')
+          and not exists(select 1 from research_sessions s where s.run_id=runs.id)
           and coalesce((select max(e.ts) from run_events e where e.run_id = runs.id), started_at, created_at)
               < now() - ($2::bigint * interval '1 millisecond')
           and not (id::text = any($3::text[]))

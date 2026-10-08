@@ -64,6 +64,12 @@ export async function migrate(db: Db, dir = MIGRATIONS_DIR): Promise<string[]> {
   return applied;
 }
 
+/** A serverless cold start never races other instances applying DDL. Deploy migrations explicitly. */
+export async function assertSchemaReady(db:Queryable,expected=listMigrations().map(m=>m.name)):Promise<void> {
+  const applied=new Set((await db.query<{name:string}>('select name from schema_migrations')).rows.map(r=>r.name));
+  if(expected.some(name=>!applied.has(name)))throw new Error('Cloud schema is not ready. Run the controlled database migration before serving this deployment.');
+}
+
 // ───────────────────────── type parsing ─────────────────────────
 // Both backends return the same JS shapes:
 //   timestamptz/timestamp -> ISO string ("2026-09-27T10:00:00.000Z"), date -> "YYYY-MM-DD",
@@ -186,7 +192,7 @@ function initDb(): Promise<Db> {
       const url = process.env.DATABASE_URL?.trim();
       if ((process.env.RENDER === "true" || process.env.VERCEL === "1") && !url) throw new Error("DATABASE_URL is required on cloud hosts; a local database is not persistent.");
       const db = url ? await createPgDb(url) : await createPgliteDb(process.env.MVP_DATA_DIR || path.join(process.cwd(), ".data", "pglite"));
-      await migrate(db);
+      if(process.env.VERCEL==='1')await assertSchemaReady(db);else await migrate(db);
       return db;
     })();
     globalForDb.__mvpDb = pending;

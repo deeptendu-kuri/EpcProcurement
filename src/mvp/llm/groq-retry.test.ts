@@ -20,6 +20,13 @@ function recorder(responses: (() => Response)[]) {
 }
 
 describe("Groq JSON retry", () => {
+  it("never hides extra billable repair or rate-limit retries inside durable single-attempt calls",async()=>{
+    for(const response of [jsonFailed,()=>new Response(JSON.stringify({error:{message:"rate limit"}}),{status:429,headers:{"retry-after":"0.01"}})]){
+      const {bodies,fetchImpl}=recorder([response]);
+      await expect(createGroqProvider("gsk_x","m",fetchImpl).complete({system:"s",user:"u",json:true,singleAttempt:true})).rejects.toBeInstanceOf(LLMHttpError);
+      expect(bodies).toHaveLength(1);
+    }
+  });
   it("retries once with a stricter JSON-only instruction", async () => {
     const { bodies, fetchImpl } = recorder([jsonFailed, () => ok('{"companies":[]}')]);
     const groq = createGroqProvider("gsk_x", "openai/gpt-oss-20b", fetchImpl);

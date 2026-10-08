@@ -1,6 +1,12 @@
-import { NextResponse } from "next/server";
+import { after,NextResponse } from "next/server";
+import { z } from "zod";
 import { getRun } from "@/mvp/repo";
-import { NO_STORE, jsonError, serverError, uuidSchema } from "../../_shared/http";
+import { continueBuyerRun,waitForRun } from "@/mvp/pipeline";
+import { replayCachedCompanyAnalyses } from '@/mvp/research/store';
+import { startResearchWorker } from '@/mvp/research/worker';
+import { serverlessRuntime } from '@/mvp/runtime';
+import { rejectCrossOrigin } from "../../outreach/_origin";
+import { NO_STORE, jsonError,readJson,serverError, uuidSchema } from "../../_shared/http";
 
 /**
  * GET /api/mvp/runs/[id]?after=<eventId> — { run } with status, counters and progress events.
@@ -17,4 +23,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   } catch (error) {
     return serverError("get run", error);
   }
+}
+/** Explicit bounded analysis of saved pages. No new source/search requests. Auth is enforced by proxy. */
+export async function POST(request:Request,{params}:{params:Promise<{id:string}>}){
+  const rejected=rejectCrossOrigin(request);if(rejected)return rejected;
+  const {id}=await params;if(!uuidSchema.safeParse(id).success)return jsonError(404,"Search not found.");
+  const parsed=await readJson(request,z.object({action:z.enum(["continue_analysis","replay_cached"])}).strict());if(parsed.response)return parsed.response;
+  try{
+    if(parsed.data.action==='replay_cached'){
+      if(serverlessRuntime())return jsonError(409,'Run cached-response repair on the persistent local worker.');
+      const queued=await replayCachedCompanyAnalyses(id);startResearchWorker();after(()=>waitForRun(id));
+      return NextResponse.json({runId:id,state:'running',cachedAnalyses:queued},{status:202,headers:NO_STORE});
+    }
+    await continueBuyerRun(id);after(()=>waitForRun(id));return NextResponse.json({runId:id,state:"running"},{status:202,headers:NO_STORE});
+  }
+  catch(error){return jsonError(409,error instanceof Error?error.message:"Saved-page analysis could not start.");}
 }

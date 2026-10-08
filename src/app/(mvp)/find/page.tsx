@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PackageSearch } from "lucide-react";
 import { getActiveProducts, getClientProfile } from "@/mvp/config/profile";
 import { marketName } from "@/mvp/config/markets";
-import { isUuid, listRecentRuns } from "@/mvp/repo";
+import { getRun, isUuid, listRecentRuns } from "@/mvp/repo";
 import { listSavedSearches } from "@/mvp/saved-searches";
 import { EmptyState } from "@/components/mvp/empty-state";
 import { FindForm } from "@/components/mvp/find-form";
@@ -34,18 +34,19 @@ export default async function FindPage({ searchParams }: FindPageProps) {
     );
   }
 
-  const [runs, saved] = await Promise.all([listRecentRuns(10), listSavedSearches()]);
+  const [runs, saved, selectedRun] = await Promise.all([listRecentRuns(10), listSavedSearches(), runParam ? getRun(runParam) : Promise.resolve(null)]);
   const suggestions = catalogueOptions().slice(0, 8).map(product => product.name);
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Find buyers" subtitle="Choose what you sell, where to search, and who you want to contact." />
+      <PageHeader title="Find buyers" subtitle="Choose the material and countries. Explore companies and available contacts; contact role is optional." />
       <FindForm
         products={catalogueOptions()}
         markets={profile.markets.map((code) => ({ code, name: marketName(code) }))}
         suggestions={suggestions}
         initialRunId={runParam}
         initialTicketId={ticketParam}
+        initialInput={selectedRun?.adhoc_query ?? null}
       />
       <SavedSearchesList searches={saved} />
       <RecentRuns runs={runs} />

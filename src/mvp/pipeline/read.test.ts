@@ -78,6 +78,10 @@ describe("timedFetch / getText", () => {
   });
 });
 describe("article-only HTML extraction",()=>{
+  it("keeps original footer telephone/inbox details in full-page contact mode but excludes scripts",async()=>{
+    const page=await htmlToText('<html><head><title>Buyer contacts</title></head><body><main><p>Original business content</p></main><footer><p>Phone +91 22 3064 2100</p><p>info@buyer.co</p></footer><script>const email="fake@buyer.co";</script></body></html>',"https://buyer.co/contact",true);
+    expect(page.text).toContain("+91 22 3064 2100");expect(page.text).toContain("info@buyer.co");expect(page.text).not.toContain("fake@buyer.co");
+  },30_000);
   it("keeps real article text and publication metadata while excluding large styles and script-only fake contacts",async()=>{
     const css='@supports (display:grid){.nested{color:red}}'.repeat(1000);
     const page=await htmlToText(`<html><head><title>Contract award</title><style>${css}</style><script type="application/ld+json">{"datePublished":"2026-10-01"}</script></head><body><article><h1>Contract award</h1><p>Unit EPC won a pipeline construction contract, including line pipe procurement.</p></article><script>const fabricatedContact="Fake Person, CEO, fake@buyer.co";</script><noscript>Tracking text</noscript></body></html>`,"https://buyer.co/award");

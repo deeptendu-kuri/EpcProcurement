@@ -25,6 +25,7 @@ const PROTECTED_APIS = [
   "/api/discovery/crm",
   "/api/discovery/contact-search",
   "/api/mvp/runs",
+  "/api/mvp/runs/00000000-0000-4000-8000-000000000001",
   "/api/mvp/leads",
   "/api/mvp/logout",
   "/api/mvp/outreach/campaigns",
@@ -84,6 +85,10 @@ describe("proxy session gate", () => {
   it("delegates only the exact machine endpoint to its own bearer authentication", async () => {
     expect(passedThrough(await proxy(request("/api/mvp/outreach/worker")))).toBe(true);
     expect((await proxy(request("/api/mvp/outreach/worker/extra"))).status).toBe(401);
+    for(const path of ['/api/mvp/research/worker','/api/mvp/webhooks/resend']){
+      expect(passedThrough(await proxy(request(path)))).toBe(true);
+      expect((await proxy(request(`${path}/extra`))).status).toBe(401);
+    }
   });
 
   const EXTENSION_PAGES = ["/legacy/lead-lists/x.png", "/leads/x.css", "/legacy/companies/a.svg", "/find/x.woff2"];

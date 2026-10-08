@@ -16,7 +16,7 @@ let events: Record<string, unknown>[];
 let decisions: unknown[];
 let receivingFails: boolean;
 const fetchMock = vi.fn();
-const quote = "Unit EPC won the awarded pipeline construction contract; the scope includes procurement and installation of line pipe.";
+const quote = "Unit EPC won the awarded pipeline construction contract on 2026-10-01; the scope includes procurement and installation of line pipe.";
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
 
 beforeAll(async () => { db = await createTestDb(); setDbForTests(db); }, 120_000);
@@ -81,6 +81,7 @@ async function seedCompletedSearch() {
   const run = (await db.query<{ id: string }>("insert into runs(status) values('done') returning id")).rows[0].id;
   evidenceId = (await db.query<{ id: string }>("insert into evidence(url,quote,quote_verified,extracted_by,tier,publisher_key) values('https://buyer.co/award',$1,true,'integration-test','A','buyer.co') returning id", [quote])).rows[0].id;
   const opportunity = (await db.query<{ id: string }>("insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,buying_reason,evidence_ids) values($1,$2,$3,'line pipe','line-pipe','Line pipe',$4,$5::uuid[]) returning id", [run, lead, company, quote, [evidenceId]])).rows[0].id;
+  await db.query("update search_opportunities set activity_status='recent',activity_date='2026-10-01',activity_quote=$2 where id=$1",[opportunity,quote]);
   decisions.push({ approved: true, confidence: 0.96, reason: "Awarded pipeline scope includes line pipe", companyEvidenceId: evidenceId,
     companyQuote: quote, productEvidenceId: evidenceId, productQuote: quote });
   return opportunity;
@@ -102,6 +103,31 @@ async function incoming(opportunity: string, text: string) {
 }
 
 describe("joined local funnel with real adapters and mocked provider HTTP", () => {
+  it('automatically takes a fresh source-backed partial search through real adapters to a meeting without manual approval or fake contacts',async()=>{
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');vi.stubEnv('MVP_FUNNEL_WORKER','on');
+    const o=await seedCompletedSearch();const prospect=(await getOpportunity(o))!;
+    const doc=(await db.query<{id:string}>("insert into source_documents(source_key,publisher_key,url,canonical_url,content_hash,text) values('unit','buyer.co','https://buyer.co/award','https://buyer.co/award','reviewed-flow',$1) returning id",[quote])).rows[0].id;
+    await db.query('update evidence set document_id=$2 where id=$1',[evidenceId,doc]);await db.query('insert into run_documents(run_id,document_id) values($1,$2)',[prospect.run_id,doc]);
+    await db.query("insert into research_sessions(run_id,state,budget) values($1,'partial','{}')",[prospect.run_id]);
+    await processFunnelTick();
+    expect(sent).toHaveLength(1);expect(String(sent[0].text)).toContain('Hi Unit EPC procurement team');expect(String(sent[0].text)).not.toContain('Hi Deeptendu Kuri');
+    expect(isVerified((await getOpportunity(o))!)).toBe(false);expect((await thread(o)).person_id).toBeNull();
+    decisions.push({intent:'question',confidence:0.96,summary:'Requested line pipe procurement support',body:'Could you share the required grade and delivery location?'});
+    await incoming(o,'We need 100 metres of pipe. What details should we send?');await processFunnelTick();expect(sent).toHaveLength(2);
+    decisions.push({intent:'meeting_request',confidence:0.98,summary:'Requested a procurement meeting',body:''});
+    await incoming(o,'Yes can you schedule a meet\n\nOn Wed, 7 Oct, 2026, 5:24\u202fpm Sales Demo, <\nonboarding@resend.dev> wrote:\n\n> Do you need line pipe?');await processFunnelTick();expect((await thread(o)).state).toBe('awaiting_calendar');
+    expect(sent).toHaveLength(2);expect((await getOpportunity(o))!.summary).toBe('Requested a procurement meeting');
+    const request=JSON.parse(String(fetchMock.mock.calls.filter(([url])=>String(url).startsWith('https://api.groq.com')).at(-1)![1].body));
+    expect(JSON.parse(request.messages.at(-1).content).latest).toBe('Yes can you schedule a meet');
+    await db.query("insert into funnel_integrations(provider,account,encrypted_refresh_token) values('google','deeptendukuri@gmail.com',$1)",[encryptToken('test-refresh')]);
+    await db.query('update funnel_threads set next_action_at=now() where opportunity_id=$1',[o]);await processFunnelTick();expect((await thread(o)).state).toBe('awaiting_time');expect(sent).toHaveLength(3);
+    await incoming(o,'The second one works, thank you');await processFunnelTick();await processFunnelTick();
+    expect(events).toHaveLength(1);expect(sent).toHaveLength(4);expect((await thread(o)).state).toBe('meeting_booked');expect((await getOpportunity(o))!.summary).toContain('https://meet.google.com/abc-defg-hij');
+    expect((await db.query('select state from research_sessions where run_id=$1',[prospect.run_id])).rows[0].state).toBe('partial');
+    expect(fetchMock.mock.calls.filter(([url])=>/api\.(hunter\.io|emailable\.com)/.test(String(url)))).toHaveLength(0);
+    expect((await db.query('select id from people')).rows).toHaveLength(0);expect(decisions).toHaveLength(0);
+    await processFunnelTick();expect(sent).toHaveLength(4);expect(events).toHaveLength(1);
+  });
   it("automatically sends a seller email using Emailable once a searched buyer's published current contact is reviewed",async()=>{
     vi.stubEnv("HUNTER_API_KEY","");vi.stubEnv("EMAILABLE_API_KEY","live_integration_private");
     const o=await seedCompletedSearch();await processFunnelTick();expect((await thread(o)).state).toBe("needs_contact");
@@ -142,7 +168,6 @@ describe("joined local funnel with real adapters and mocked provider HTTP", () =
     const offered = await thread(o); expect(offered.state).toBe("awaiting_time"); expect(offered.offered_slots).toHaveLength(3);
     expect(events).toHaveLength(0); expect(sent[2].text).toContain("Slot 2:");
 
-    decisions.push({ intent: "meeting_request", confidence: 0.99, summary: "Selected the second offered meeting slot", body: "Thank you." });
     await incoming(o, "Please book slot 2"); await processFunnelTick();
     expect((await thread(o)).state).toBe("meeting_pending"); await processFunnelTick();
     expect(events).toHaveLength(1); expect(events[0].start).toMatchObject({ dateTime: offered.offered_slots[1] });
@@ -151,7 +176,7 @@ describe("joined local funnel with real adapters and mocked provider HTTP", () =
     expect((await getOpportunity(o))!.summary).toContain("Meeting:");
     expect((await listThreadMessages(o)).filter(m => m.direction === "in")).toHaveLength(3);
     await processFunnelTick(); expect(sent).toHaveLength(4); expect(events).toHaveLength(1);
-    expect((await db.query("select id from llm_usage where provider='groq' and purpose='sales_funnel' and ok=true")).rows).toHaveLength(4);
+    expect((await db.query("select id from llm_usage where provider='groq' and purpose='sales_funnel' and ok=true")).rows).toHaveLength(3);
   });
 
   it("blocks the joined flow when receiving permissions fail, and resumes safely after restoration", async () => {

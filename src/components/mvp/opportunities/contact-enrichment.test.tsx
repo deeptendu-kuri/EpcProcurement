@@ -8,6 +8,10 @@ vi.mock("../api-client", () => ({ apiJson: api }));
 afterEach(() => { cleanup(); api.mockReset(); });
 const ready: EnrichmentView = { configured: true, domain: "buyer.co", domainConfirmed: false, contacts: [] };
 describe("contact lookup guidance", () => {
+  it("shows published company phone and inbox with source without promoting them to personal validation",()=>{
+    render(<ContactEnrichment opportunityId="opp" sample={false} initial={{...ready,companyContacts:[{kind:"phone",value:"+91 22 3064 2100",source_url:"https://buyer.co/contact",quote:"Phone +91 22 3064 2100"},{kind:"email",value:"info@buyer.co",source_url:"https://buyer.co/contact",quote:"info@buyer.co"}]}} />);
+    expect(screen.getByText("+91 22 3064 2100")).toBeTruthy();expect(screen.getByText("info@buyer.co")).toBeTruthy();expect(screen.getAllByRole("link",{name:/Official source/})).toHaveLength(2);expect(screen.getByText(/Not a named employee/)).toBeTruthy();expect(api).not.toHaveBeenCalled();
+  });
   it("requires an explicit domain review before lookup and shows named contacts without pretending verification", async () => {
     render(<ContactEnrichment opportunityId="opp" sample={false} initial={ready} />);
     const button = screen.getByRole("button", { name: "Find contacts with Hunter" });

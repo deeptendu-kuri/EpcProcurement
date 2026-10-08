@@ -32,6 +32,7 @@ export function supplierTypeKeyFor(role: BuyerRole, situation: Situation, facts:
   const text = `${facts.name} ${facts.text ?? ""}`.toLowerCase();
   switch (role) {
     case "epc_contractor": {
+      if(/\b(?:power cables?|electrical installation|electrical contracting|substation|electrical distribution)\b/.test(text))return 'electrical_contractor';
       if (situation === "water") return "water_contractor";
       if (situation === "plant") return "plant_builder";
       if (situation === "drilling") return "crossing_contractor";

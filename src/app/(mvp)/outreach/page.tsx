@@ -5,9 +5,10 @@ import { funnelStatus } from "@/mvp/automation/config";
 import { listFunnelThreads } from "@/mvp/automation/engine";
 import { FunnelWorkbench } from "@/components/mvp/outreach/funnel-workbench";
 
-export default async function OutreachPage() {
+export default async function OutreachPage({searchParams}:{searchParams:Promise<{calendar?:string}>}) {
+  const query=await searchParams;
   return <div className="flex flex-col gap-5"><PageHeader title="Email automation" subtitle="Set up once. Follow each real lead from research to a sales conversation and meeting." />
-    <FunnelWorkbench initial={{settings:await funnelStatus(),threads:await listFunnelThreads()}} />
+    <FunnelWorkbench initial={{settings:await funnelStatus(),threads:await listFunnelThreads()}} calendarResult={query.calendar} />
     <details className="card p-4"><summary className="cursor-pointer font-semibold">Earlier manually approved emails (advanced)</summary><div className="mt-4"><CampaignList campaigns={await listCampaigns()} workerEnabled={process.env.MVP_OUTREACH_WORKER === "on"} /></div></details>
   </div>;
 }

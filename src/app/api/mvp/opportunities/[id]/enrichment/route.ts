@@ -7,7 +7,7 @@ import { rejectCrossOrigin } from "../../../outreach/_origin";
 
 export const runtime = "nodejs";
 const schema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("search"), domain: z.string().trim().min(3).max(253), domainConfirmed: z.literal(true) }).strict(),
+  z.object({ action: z.literal("search"), domain: z.string().trim().min(3).max(253), domainConfirmed: z.literal(true), websiteOnly:z.boolean().optional() }).strict(),
   z.object({ action: z.literal("find"), personId: uuidSchema }).strict(),
   z.object({ action: z.literal("verify"), personId: uuidSchema, pointId: uuidSchema }).strict(),
   z.object({ action: z.literal("confirm_role"), personId: uuidSchema }).strict(),

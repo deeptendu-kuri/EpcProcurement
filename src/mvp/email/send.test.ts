@@ -101,4 +101,12 @@ describe("single-inbox demo email delivery", () => {
     await expect(sendDemoEmail(id, text)).rejects.toMatchObject({ status: 409 });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  it("shares the daily cap with automatic funnel attempts rather than a separate manual allowance",async()=>{
+    const thread=(await db.query<{id:string}>("insert into funnel_threads(mode,recipient,product_id,test_product,reply_token) values('email_test','our-demo-inbox@example.com','line-pipe','Line pipe',$1) returning id",[crypto.randomUUID()])).rows[0].id;
+    try {
+      for(let i=0;i<10;i++)await db.query("insert into funnel_messages(thread_id,direction,kind,dedup_key,subject,body,state,first_attempt_at) values($1,'out','initial',$2,'Test','Test','accepted',now())",[thread,crypto.randomUUID()]);
+      await expect(sendDemoEmail(await seed(),text)).rejects.toMatchObject({status:429});
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {await db.query("delete from funnel_threads where id=$1",[thread]);}
+  });
 });

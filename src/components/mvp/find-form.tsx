@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { Bookmark, Check, Loader2, Search } from "lucide-react";
-import type { LeadKind } from "@/mvp/types";
+import type { LeadKind, RunInput } from "@/mvp/types";
 import { apiJson } from "./api-client";
 import { RunProgress } from "./run-progress";
 import { EVENTS, emit } from "./shell/events";
@@ -29,18 +29,22 @@ export interface FindFormProps {
   initialRunId?: string | null;
   /** A queued search to follow on load (e.g. /find?ticket=…). */
   initialTicketId?: string | null;
+  /** Preserve the selected search's material/countries when opening its progress. */
+  initialInput?: RunInput | null;
 }
 
 /** Find (09 §4.1, 13 §7): what you offer + markets + lead type → Search now (queued) → live progress; Save this search. */
-export function FindForm({ markets, products, suggestions, initialRunId = null, initialTicketId = null }: FindFormProps) {
+export function FindForm({ markets, products, suggestions, initialRunId = null, initialTicketId = null, initialInput = null }: FindFormProps) {
   const router = useRouter();
   const pathname = usePathname();
   const toast = useToast();
   const [, startTransition] = useTransition();
-  const [query, setQuery] = useState(products[0]?.name ?? "");
-  const [selected, setSelected] = useState<string[]>(markets.map((market) => market.code));
-  const [productId, setProductId] = useState(products[0]?.id ?? "");
-  const [contactRole, setContactRole] = useState("buyer");
+  const [query, setQuery] = useState(initialInput?.query ?? products[0]?.name ?? "");
+  const [selected, setSelected] = useState<string[]>(initialInput?.markets ?? markets.map((market) => market.code));
+  const [productId, setProductId] = useState(initialInput?.productId ?? products[0]?.id ?? "");
+  const [contactRole, setContactRole] = useState(initialInput?.contactRole ?? "buyer");
+  const [researchMode, setResearchMode] = useState<"preview" | "batch" | "deep">(initialInput?.researchMode ?? "preview");
+  const [targetCompanies, setTargetCompanies] = useState(initialInput?.targetCompanies ?? (initialInput?.researchMode === "deep" ? 50 : 20));
   const [runId, setRunId] = useState<string | null>(initialRunId);
   const [ticketId, setTicketId] = useState<string | null>(initialRunId ? null : initialTicketId);
   const [position, setPosition] = useState(0);
@@ -53,7 +57,10 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
   const [seenInitial, setSeenInitial] = useState(initialRunId);
   if (initialRunId !== seenInitial) {
     setSeenInitial(initialRunId);
-    if (initialRunId) setRunId(initialRunId);
+    if (initialRunId) {
+      setRunId(initialRunId);
+      if(initialInput){setQuery(initialInput.query);setSelected(initialInput.markets);setProductId(initialInput.productId??products[0]?.id??"");setContactRole(initialInput.contactRole??"buyer");setResearchMode(initialInput.researchMode??"preview");setTargetCompanies(initialInput.targetCompanies??(initialInput.researchMode==="deep"?50:20));}
+    }
   }
 
   // Waiting in line: poll the queue until the search has a run id.
@@ -103,6 +110,9 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
       return false;
     }
     if (!productId) { setError("Select the product you want to sell."); return false; }
+    if (!Number.isInteger(targetCompanies) || targetCompanies < (researchMode === "deep" ? 50 : 1) || targetCompanies > 100) {
+      setError(researchMode === "deep" ? "Choose a deep-research target between 50 and 100 companies." : "Choose a research target between 1 and 100 companies.");return false;
+    }
     if (!selected.length || selected.length > 20) {
       setError("Pick between 1 and 20 countries.");
       return false;
@@ -116,7 +126,7 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
     if (!validate()) return;
     setSubmitting(true);
     try {
-      const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), productId, contactRole, markets: selected, leadKinds: leadKinds() } });
+      const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), productId, contactRole, researchMode, targetCompanies, markets: selected, leadKinds: leadKinds() } });
       emit(EVENTS.refreshStatus);
       if (ticket.runId) {
         setRunId(ticket.runId);
@@ -193,8 +203,9 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
             </select>
           </label>
         </details>
+        <details className="text-sm"><summary className="cursor-pointer font-semibold text-[var(--text-2)]">Research depth & target · bounded provider usage</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex flex-col gap-1 font-semibold">Research mode<select aria-label="Research mode" className="control h-11 px-2" value={researchMode} onChange={e=>{const mode=e.target.value as "preview" | "batch" | "deep";setResearchMode(mode);setTargetCompanies(mode==="deep"?50:20);}}><option value="preview">Preview · smallest research budget</option><option value="batch">Batch · broader bounded research</option><option value="deep">Deep · work toward 50–100 companies</option></select></label><label className="flex flex-col gap-1 font-semibold">Target companies<input aria-label="Target companies" type="number" min={researchMode === "deep" ? 50 : 1} max={100} value={targetCompanies} onChange={e=>setTargetCompanies(Number(e.target.value))} className="input h-11 px-3" /></label></div><p className="mt-2 text-xs text-[var(--text-2)]">A research target, not a guaranteed number of leads. Provider budgets and source coverage may stop a batch early. Missing contacts stay blank; they never remove a relevant company. Larger modes may use more search and AI credits.</p></details>
         <p className="text-xs text-[#6b7280]">Find contractors with relevant projects or documented buying-compatible work. Only the selected product is offered. No supplier-only sellers, open tenders or project owners. Research budgets can limit country coverage.</p>
-        <p className="rounded-lg bg-[var(--accent-soft)] p-3 text-sm">Automatic demo outreach starts after product fit and named-contact validation pass, if enabled before this search. <Link href="/outreach" className="font-semibold text-[var(--accent-2)] underline">Set up email automation →</Link></p>
+        <p className="rounded-lg bg-[var(--accent-soft)] p-3 text-sm">Research priority is not a purchase probability or sending gate. Companies appear even without contacts. If enabled before this search, bounded demo emails start after evidence-supported product fit and go only to the approved inbox—not to buyers. <Link href="/outreach" className="font-semibold text-[var(--accent-2)] underline">See automation mode →</Link></p>
         <div className="flex flex-col gap-2 sm:flex-row" data-tour="find-query">
           <label htmlFor="find-query" className="sr-only">What do you offer?</label>
           <input

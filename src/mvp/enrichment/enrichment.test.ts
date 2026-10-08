@@ -4,6 +4,9 @@ import { createTestDb, setDbForTests, type Db } from "@/mvp/db";
 import { getOpportunity, isVerified } from "@/mvp/opportunities";
 import { enrichOpportunity, enrichmentView } from "./index";
 import { POST } from "@/app/api/mvp/opportunities/[id]/enrichment/route";
+const publicResearch=vi.hoisted(()=>vi.fn());
+const publicConfigured=vi.hoisted(()=>vi.fn());
+vi.mock("./public-contacts",()=>({publicContactsConfigured:publicConfigured,researchPublishedContacts:publicResearch,researchCompanyWebsite:publicResearch,searchPublishedContacts:vi.fn()}));
 vi.mock("@/mvp/buyers", () => ({ getBuyerView: vi.fn(async () => ({ role: "epc_contractor" })) }));
 let db: Db;
 let s: { company: string; lead: string; opportunity: string };
@@ -16,6 +19,7 @@ const search = () => enrichOpportunity(s.opportunity, { action: "search", domain
 beforeAll(async () => { db = await createTestDb(); setDbForTests(db); }, 120_000);
 afterAll(async () => { setDbForTests(undefined); await db?.close(); });
 beforeEach(async () => {
+  publicResearch.mockReset();publicConfigured.mockReturnValue(true);
   vi.stubEnv("HUNTER_API_KEY", "unit-test-only-key"); vi.stubEnv("HUNTER_DAILY_REQUEST_LIMIT", "5"); vi.stubEnv("APP_URL", "");
   fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock);
   await db.exec("delete from enrichment_requests");
@@ -28,6 +32,13 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 describe("scoped contact enrichment", () => {
+  it("stores company switchboards separately and named roles without email cannot become verified",async()=>{
+    vi.stubEnv("HUNTER_API_KEY","");
+    publicResearch.mockResolvedValue({contacts:[{name:"Jane Doe",title:"Procurement Manager",email:null,sources:["https://buyer.co/team"]}],companyContacts:[{kind:"phone",value:"+91 22 3064 2100",source_url:"https://buyer.co/contact",quote:"Phone +91 22 3064 2100"},{kind:"email",value:"info@buyer.co",source_url:"https://buyer.co/contact",quote:"Business enquiries info@buyer.co"}]});
+    const result=await search();expect(result.view.contacts[0]).toMatchObject({name:"Jane Doe",email:null,verified_at:null});expect(result.view.companyContacts).toHaveLength(2);expect((await getOpportunity(s.opportunity))!.validated_emails).toBe(0);
+    expect((await db.query("select id from contact_points where person_id=$1",[result.view.contacts[0].id])).rows).toHaveLength(0);
+    await search();expect(publicResearch).toHaveBeenCalledTimes(1);
+  });
   it("does not merge a provider candidate into a reviewed same-name employee with a different title", async () => {
     const existing = (await db.query<{ id: string }>("insert into people (full_name,normalized_name,current_company_id,title,confirmed_at) values ('Jane Doe','jane doe',$1,'Marketing Manager',now()) returning id", [s.company])).rows[0].id;
     fetchMock.mockResolvedValue(response({ domain: "buyer.co", emails: [candidate] }));
@@ -36,16 +47,31 @@ describe("scoped contact enrichment", () => {
     expect(newContact.id).not.toBe(existing); expect(newContact.confirmed_at).toBeNull();
     expect(result.view.contacts.find(c => c.id === existing)?.title).toBe("Marketing Manager");
   });
-  it("imports only named buying-team candidates, never fake contacts, and uses a cache across repeated clicks", async () => {
+  it("keeps supported named contacts with optional buying-team role tags and caches repeated clicks", async () => {
     fetchMock.mockResolvedValue(response({ domain: "buyer.co", emails: [candidate, { ...candidate, first_name: "Bob", value: "bob@buyer.co", position: "Marketing Designer" }] }));
     const result = await search();
-    expect(result.view.contacts).toHaveLength(1); expect(result.view.domainConfirmed).toBe(true);
-    expect(result.view.contacts[0]).toMatchObject({ name: "Jane Doe", confirmed_at: null, verified_at: null, validation_status: "not_checked" });
+    expect(result.view.contacts).toHaveLength(2); expect(result.view.domainConfirmed).toBe(true);
+    expect(result.view.contacts.find(c=>c.name==="Jane Doe")).toMatchObject({ name: "Jane Doe", confirmed_at: null, verified_at: null, validation_status: "not_checked" });
+    const other=result.view.contacts.find(c=>c.name==="Bob Doe")!;
+    expect((await db.query("select id from person_roles where person_id=$1",[other.id])).rows).toHaveLength(0);
     expect(isVerified((await getOpportunity(s.opportunity))!)).toBe(false);
     await search(); expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect((await enrichmentView(s.opportunity)).contacts).toHaveLength(1);
+    expect((await enrichmentView(s.opportunity)).contacts).toHaveLength(2);
     const events = (await db.query<{ body: string }>("select body from opportunity_events where opportunity_id=$1", [s.opportunity])).rows;
     expect(events[0].body).toContain("not validated");
+  });
+  it("reads company pages without API configuration or credits and durably caches empty or populated results",async()=>{
+    publicConfigured.mockReturnValue(false);
+    vi.stubEnv("HUNTER_API_KEY","");vi.stubEnv("TAVILY_API_KEY","");vi.stubEnv("GROQ_API_KEY","");vi.stubEnv("HUNTER_DAILY_REQUEST_LIMIT","1");
+    publicResearch.mockReset();publicResearch.mockResolvedValue({contacts:[],companyContacts:[{kind:"phone",value:"+91 22 3064 2100",source_url:"https://buyer.co/contact",quote:"Phone +91 22 3064 2100"}]});
+    const input={action:"search" as const,domain:"buyer.co",domainConfirmed:true as const,websiteOnly:true};
+    await enrichOpportunity(s.opportunity,input);await enrichOpportunity(s.opportunity,input);
+    expect(publicResearch).toHaveBeenCalledTimes(1);
+    expect((await db.query("select id from enrichment_requests where input_hash not like 'website:%'")).rows).toHaveLength(0);
+    const result=await enrichmentView(s.opportunity);expect(result.companyContacts).toHaveLength(1);
+    expect((await getOpportunity(s.opportunity))!.validated_emails).toBe(0);
+    vi.stubEnv("HUNTER_API_KEY","unit-test-only-key");fetchMock.mockResolvedValue(response({domain:"buyer.co",emails:[]}));
+    await search();expect(fetchMock).toHaveBeenCalledTimes(1);
   });
   it("requires independent fit review, current role review and actual deliverability before Verified CRM", async () => {
     fetchMock.mockResolvedValueOnce(response({ domain: "buyer.co", emails: [candidate] })).mockResolvedValueOnce(response(verified));

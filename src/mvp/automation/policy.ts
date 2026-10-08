@@ -7,9 +7,26 @@ export const replySchema = z.object({
   confidence: z.number().min(0).max(1), summary: z.string().min(1).max(2000), body: z.string().max(4000),
 }).strict();
 export type ReplyDecision = z.infer<typeof replySchema>;
+/** Gmail wraps attribution headers across lines, including inside <addresses>.
+ * Never treat the quoted sent timestamp as the buyer's proposed meeting time. */
+function replyAttribution(lines:string[],start:number):boolean {
+  if(!/^[ \t]*On\s+/i.test(lines[start]))return false;
+  let header='';
+  for(let i=start;i<Math.min(lines.length,start+6);i++){
+    const line=lines[i];
+    if(i>start&&(!line.trim()||/^[ \t]*>/.test(line)))return false;
+    header+=(header?' ':'')+line.trim();
+    if(header.length>1200)return false;
+    if(/\bwrote:[ \t]*$/i.test(header))return true;
+  }
+  return false;
+}
 export function freshReply(text: string): string {
-  return text.split(/\n(?:On .{1,200}wrote:|_{5,}|-{2,}\s*Original Message\s*-{2,}|From:\s)/i)[0]
-    .split("\n").filter(line => !/^\s*>/.test(line)).join("\n").trim().slice(0, 8000);
+  const lines=text.replace(/\r\n?/g,'\n').split('\n');
+  const boundary=lines.findIndex((line,index)=>replyAttribution(lines,index)
+    || index>0&&/^[ \t]*(?:_{5,}|-{2,}\s*Original Message\s*-{2,}|From:\s)/i.test(line));
+  return (boundary<0?lines:lines.slice(0,boundary))
+    .filter(line => !/^\s*>/.test(line)).join("\n").trim().slice(0, 8000);
 }
 /** Mandatory deterministic stops precede any AI call. Never let a model override opt-out. */
 export function hardStop(text: string, headers: Record<string,string> = {}): "opt_out" | "rejected" | "auto_reply" | null {
@@ -24,10 +41,11 @@ export function hardStop(text: string, headers: Record<string,string> = {}): "op
 /** Only an explicit selection of a previously offered slot authorizes a booking. */
 export function selectedSlot(text: string, slots: string[]): string | null {
   const body = freshReply(text);
-  if (/\b(not|no|can't|cannot|unavailable|reschedule|maybe)\b/i.test(body)) return null;
+  if (/\b(not|no|can't|cannot|unavailable|reschedule|maybe|tentative|unsure|or)\b/i.test(body)) return null;
   const choices = [...body.matchAll(/\b(?:slot|option)\s*([1-3])\b/gi)];
   const unique = [...new Set(choices.map(m => Number(m[1]) - 1))];
-  if (unique.length !== 1 || !/\b(confirm|book|yes|works|fine|agree|choose|please|schedule|available)\b/i.test(body)) return null;
+  const bareChoice=/^(?:slot|option)\s*[1-3][.!]?$/i.test(body);
+  if (unique.length !== 1 || !bareChoice && !/\b(confirm|book|yes|works|fine|agree|choose|please|schedule|available)\b/i.test(body)) return null;
   return slots[unique[0]] ?? null;
 }
 export function messageIdSafe(value: unknown): string | null {

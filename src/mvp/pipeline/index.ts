@@ -3,7 +3,7 @@ import { getClientProfile } from "@/mvp/config/profile";
 import { getCatalogueItem } from "@/mvp/config/buyers-config";
 import { getDb, type Db } from "@/mvp/db";
 import { buildSignalsAndScore } from "@/mvp/scoring";
-import type { RunCounters, RunInput, RunStage } from "@/mvp/types";
+import type { RunCounters, RunInput, RunStage,RunRow } from "@/mvp/types";
 import { activeRuns, failStaleRuns } from "./active-runs";
 import type { RawDoc, Source, SourceContext } from "./contracts";
 import { ensureMockExtractor, extractDocument, triage } from "./extract";
@@ -18,9 +18,12 @@ import { tedSource } from "./sources/ted";
 import { tavilySource } from "./sources/tavily";
 import { publisherKeyFor } from "./text";
 import { captureOpportunities } from "@/mvp/opportunities";
-import { buyerPageCandidate } from "@/mvp/discovery/plan";
-import { discoverBuyers, saveBuyer } from "@/mvp/discovery";
+import { buyerPageCandidate,buyerResearchPriority } from "@/mvp/discovery/plan";
+import { discoverBuyers, saveBuyer,DISCOVERY_VERSION } from "@/mvp/discovery";
 import { requirePersistentWorker } from "@/mvp/runtime";
+import { createResearchRun,sessionFor,resumeResearchRun } from "@/mvp/research/store";
+import { startResearchWorker,waitForResearchRun } from "@/mvp/research/worker";
+import { resolveMaterial } from "@/mvp/discovery/material";
 
 export { fixtureDocs } from "./sources/fixtures";
 export { failStaleRuns } from "./active-runs";
@@ -28,6 +31,7 @@ export { failStaleRuns } from "./active-runs";
 /** Documents read per run at most (keeps a "Search now" run to a few minutes on free quotas). */
 export const MAX_DOCS_PER_RUN = 60;
 const READ_CONCURRENCY = 3;
+type BuyerPage={stored:StoredDoc;raw:RawDoc};
 
 /** Live sources for a run. Fixtures are available only through explicit sample/offline mode. */
 export function liveSources(): Source[] {
@@ -61,8 +65,16 @@ export async function startRun(input: RunInput): Promise<string> {
   if (input.offline === true) clean.offline = true;
   if (input.productId) clean.productId = input.productId;
   if (input.contactRole) clean.contactRole = input.contactRole;
+  if (input.researchMode) clean.researchMode = input.researchMode;
+  if (input.targetCompanies) clean.targetCompanies = input.targetCompanies;
   if (!clean.leadKinds.length) clean.leadKinds = ["bid", "supply_subcontract"];
   if (!clean.markets.length) clean.markets = [...getClientProfile().markets];
+  if(clean.productId&&!clean.offline&&!mvpEnv.offline()){
+    const material=resolveMaterial(clean.query,clean.productId);if(material.status!=='resolved')throw new Error(material.question??'Clarify the material before research.');
+  }
+  if(clean.productId&&!clean.offline&&!mvpEnv.offline()&&process.env.MVP_DURABLE_RESEARCH!=='off'&&!process.env.VITEST){
+    const id=await createResearchRun(clean,db);startResearchWorker();return id;
+  }
   const { rows } = await db.query<{ id: string }>(
     "insert into runs (adhoc_query, status, counters) values ($1::jsonb, 'queued', '{}'::jsonb) returning id",
     [JSON.stringify(clean)],
@@ -76,7 +88,32 @@ export async function startRun(input: RunInput): Promise<string> {
 
 /** Resolves when the run started in this process finishes (immediately if unknown). */
 export async function waitForRun(runId: string): Promise<void> {
+  if(await sessionFor(getDb(),runId)){await waitForResearchRun(runId);return;}
   await activeRuns().get(runId);
+}
+
+/** Reuse original pages and cached extraction; never collect sources again. Atomic run claim prevents duplicates. */
+export async function continueBuyerRun(runId:string):Promise<string> {
+  requirePersistentWorker();const db=getDb();
+  if(await sessionFor(db,runId)){await resumeResearchRun(runId,db);startResearchWorker();return runId;}
+  const run=await db.tx(async tx=>{
+    await tx.query("select pg_advisory_xact_lock(78240324)");
+    const row=(await tx.query<RunRow>("select * from runs where id=$1 for update",[runId])).rows[0];
+    if(!row||!row.adhoc_query?.productId||row.adhoc_query.offline)throw new Error("Only a real product search with original pages can continue.");
+    if(!["done","failed"].includes(row.status))throw new Error("This search is already processing or cannot continue.");
+    if((await tx.query("select id from runs where status in ('queued','running') limit 1")).rows.length)throw new Error("Wait for the current research to finish before continuing saved pages.");
+    if(!(await tx.query("select d.id from source_documents d join run_documents rd on rd.document_id=d.id where rd.run_id=$1 and not d.is_sample and d.text is not null limit 1",[runId])).rows.length)throw new Error("No original live pages are available for this search.");
+    await tx.query("update runs set status='running',finished_at=null,error=null where id=$1",[runId]);return row;
+  });
+  const pending=(async()=>{
+    const progress=new Progress(db,runId);Object.assign(progress.counters,run.counters);
+    try{
+      await progress.emit("read","Continuing saved original pages. No new web-search requests. Cached analyses are rechecked; fresh AI analysis remains budget-limited.");
+      const docs=(await db.query<{id:string;text:string;source_key:string;source_name:string;tier:RawDoc['tier'];url:string;title:string|null;published_at:string|null}>(`select d.* from source_documents d join run_documents rd on rd.document_id=d.id where rd.run_id=$1 and not d.is_sample and d.text is not null`,[runId])).rows;
+      await analyseBuyerPages(runId,run.adhoc_query!,docs.map(d=>({stored:{id:d.id,text:d.text,state:"known",status:"extracted"},raw:{sourceKey:d.source_key,sourceName:d.source_name,tier:d.tier,url:d.url,title:d.title,publishedAt:d.published_at,text:d.text,isSample:false}})),db,progress);
+    }catch(error){await db.query("update runs set status='failed',finished_at=now(),error=$2 where id=$1",[runId,safeBuyerAnalysisError(error)]);await progress.emit("error",safeBuyerAnalysisError(error));}
+  })();
+  activeRuns().set(runId,pending);void pending.finally(()=>activeRuns().delete(runId));return runId;
 }
 
 // ───────────────────────── progress ─────────────────────────
@@ -189,6 +226,43 @@ export function aiPriority(item: { raw: RawDoc; stored: { text: string } }, prof
   return score;
 }
 
+/** Never expose provider bodies/credentials through the progress API. */
+function safeBuyerAnalysisError(error:unknown):string {
+  if(error instanceof Error && /Invalid buyer response field:/.test(error.message))return error.message.slice(0,300);
+  if(error instanceof Error && /Buyer analysis failed/.test(error.message))return error.message;
+  if(error instanceof SyntaxError)return "Buyer analysis returned malformed JSON. No invented result was saved.";
+  if(error instanceof Error && error.name==="ZodError")return "Buyer analysis returned an invalid response structure. No invented result was saved.";
+  if(error instanceof Error && /quota|rate.?limit|429/i.test(error.message))return "AI quota/rate limit prevented buyer analysis.";
+  return "Buyer analysis could not complete; no unsupported result was saved. Check the provider/database setup.";
+}
+async function analyseBuyerPages(runId:string,input:RunInput,readable:BuyerPage[],db:Db,progress:Progress) {
+  const candidates=readable.filter(item=>buyerPageCandidate(item.stored.text,input.productId!));
+  progress.counters.relevant=candidates.length;
+  const cachedIds=new Set((await db.query<{document_id:string}>(`select distinct cache.document_id from buyer_discovery_cache cache join source_documents d on d.id=cache.document_id and d.content_hash=cache.content_hash
+    where cache.document_id=any($1::uuid[]) and cache.product_id=$2 and cache.version=$3`,[candidates.map(c=>c.stored.id),input.productId,DISCOVERY_VERSION])).rows.map(row=>row.document_id));
+  const ranked=[...candidates].sort((a,b)=>buyerResearchPriority(b.raw,b.stored.text,input)-buyerResearchPriority(a.raw,a.stored.text,input));
+  const selected=[...ranked.filter(item=>cachedIds.has(item.stored.id)),...ranked.filter(item=>!cachedIds.has(item.stored.id)).slice(0,maxAiDocsPerRun())];
+  progress.counters.buyerPagesChecked=selected.length;progress.counters.deferredPages=candidates.length-selected.length;
+  await progress.emit("extract",`Checking ${selected.length} buying-work pages; ${candidates.length-selected.length} deferred by the AI budget. Scores rank results only; original product and company evidence is required.`);
+  let failed=0;
+  for(const item of selected){
+    if(await isCancelled(db,runId))return;
+    try{
+      const result=await discoverBuyers(db,runId,input,item.stored,item.raw);
+      progress.counters.factsDropped+=result.invalid;
+      for(const buyer of result.buyers){if(await saveBuyer(db,runId,input,item.stored.id,item.raw,buyer))progress.counters.factsKept++;}
+      await progress.emit("check",`${result.buyers.length} evidence-supported potential buyers in ${item.raw.title??'page'}${result.cached?' (cached; no extra AI call)':''}`);
+      for(const reason of result.rejections.slice(0,5))await progress.emit("info",`Not saved: ${reason}`);
+    }catch(error){failed++;await progress.emit("error",safeBuyerAnalysisError(error));}
+  }
+  progress.counters.buyerAnalysisFailed=failed;
+  progress.counters.scopedProspects=(await db.query<{count:number}>("select count(*)::int as count from search_opportunities where run_id=$1",[runId])).rows[0].count;
+  if(selected.length&&failed===selected.length)throw new Error("Buyer analysis failed for every selected page. This is not a completed zero-buyer search.");
+  await progress.emit("score","Reference scores assigned for sorting only. Email eligibility uses evidence and contact validation, not a minimum score.");
+  await progress.emit("done",`${progress.counters.scopedProspects} buyer prospects saved. ${failed?'Some analysis failed; coverage is incomplete.':progress.counters.scopedProspects?'Open results to see evidence and demo outreach.':'No companies met the evidence checks within this research budget; continue saved pages to check more.'}`);
+  await db.query("update runs set status='done',finished_at=now(),counters=$2::jsonb where id=$1 and status<>'cancelled'",[runId,JSON.stringify(progress.counters)]);
+}
+
 // ───────────────────────── the run ─────────────────────────
 
 interface Relevant {
@@ -210,7 +284,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     const terms = queryTerms(input.query);
     // Fixtures only when MVP_OFFLINE=1 or when this run asks for sample data (RunInput.offline).
     const offline = input.offline === true || mvpEnv.offline();
-    const ctx: SourceContext = { runId, input, profile, terms, log: (message) => progress.emit("info", message) };
+    const ctx: SourceContext = { db,runId, input, profile, terms, log: (message) => progress.emit("info", message) };
 
     // ── collect ──
     const sources = offline ? [fixturesSource] : liveSources();
@@ -259,8 +333,9 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
       if (!text) {
         const fetched = await fetchPageText(raw.url);
         if (fetched.ok) {
-          text = fetched.text;
-          title = title ?? fetched.title;
+          // Keep the original page's own headline: Readability can otherwise remove its company identity.
+          text = fetched.title && !fetched.text.includes(fetched.title) ? `${fetched.title}\n${fetched.text}` : fetched.text;
+          title = fetched.title ?? title;
           publishedAt = fetched.publishedAt ?? publishedAt;
         } else if (raw.fallbackText) {
           text = raw.fallbackText;
@@ -272,10 +347,13 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
       try {
         const doc = await storeDocument(db, runId, { ...raw, title, text, publishedAt, publisherKey: raw.publisherKey ?? publisherKeyFor(raw.url) });
         await db.query("insert into run_documents (run_id, document_id) values ($1,$2) on conflict do nothing", [runId, doc.id]);
+        // Hash/URL dedup can select a previously stored original. Keep THAT source's provenance,
+        // instead of attaching its quotes to a different discovered mirror URL.
+        const original=(await db.query<{url:string;title:string|null;source_key:string;source_name:string;tier:RawDoc['tier'];publisher_key:string;published_at:string|null;is_sample:boolean}>("select url,title,source_key,source_name,tier,publisher_key,published_at,is_sample from source_documents where id=$1",[doc.id])).rows[0];
         progress.counters.itemsRead++;
         if (doc.state === "known") known++;
         if (progress.counters.itemsRead % 5 === 0) await progress.emit("read", `Read ${progress.counters.itemsRead} items`);
-        return { stored: doc, raw: { ...raw, title, text, publishedAt } };
+        return { stored: doc, raw: { ...raw,url:original.url,title:original.title,text:doc.text,publishedAt:original.published_at,sourceKey:original.source_key,sourceName:original.source_name,tier:original.tier,publisherKey:original.publisher_key,isSample:original.is_sample } };
       } catch (error) {
         unreadable++;
         console.error("[pipeline] store failed", raw.url, error);
@@ -292,36 +370,7 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     // Product-scoped live research is company-first, not the legacy award/news lead builder.
     // One extraction per selected page; known documents use a product/version/content-aware cache.
     if(!offline && input.productId && readable.length) {
-      const candidates=readable.filter(item=>buyerPageCandidate(item.stored.text,input.productId!));
-      progress.counters.relevant=candidates.length;
-      const cachedIds=new Set((await db.query<{document_id:string}>(`select cache.document_id from buyer_discovery_cache cache join source_documents d on d.id=cache.document_id and d.content_hash=cache.content_hash
-        where cache.document_id=any($1::uuid[]) and cache.product_id=$2 and cache.version=1`,[candidates.map(c=>c.stored.id),input.productId])).rows.map(row=>row.document_id));
-      const ranked=[...candidates].sort((a,b)=>aiPriority(b,profile,input.productId)-aiPriority(a,profile,input.productId));
-      const selected=[...ranked.filter(item=>cachedIds.has(item.stored.id)),...ranked.filter(item=>!cachedIds.has(item.stored.id)).slice(0,maxAiDocsPerRun())];
-      progress.counters.buyerPagesChecked=selected.length;
-      progress.counters.deferredPages=candidates.length-selected.length;
-      await progress.emit("extract",`Checking ${selected.length} buying-activity pages; ${candidates.length-selected.length} deferred by the AI budget. No award is required for company-level potential buyers.`);
-      let saved=0,failed=0;
-      for(const item of selected) {
-        if(await isCancelled(db,runId))return;
-        try {
-          const result=await discoverBuyers(db,runId,input,item.stored,item.raw);
-          progress.counters.factsDropped+=result.invalid;
-          for(const buyer of result.buyers) {
-            if(await saveBuyer(db,runId,input,item.stored.id,item.raw,buyer))saved++;
-            progress.counters.factsKept++;
-          }
-          await progress.emit("check",`${result.buyers.length} evidence-backed potential buyers in ${item.raw.title??'page'}${result.cached?' (cached; no extra AI call)':''}`);
-        } catch {
-          failed++;
-          await progress.emit("error","A buyer-analysis step failed. Its results were not fabricated or approved; check AI configuration/quota.");
-        }
-      }
-      if(selected.length && failed===selected.length)throw new Error("Buyer analysis failed for every selected page. This is not a completed zero-buyer search.");
-      progress.counters.scopedProspects=saved;
-      progress.counters.buyerAnalysisFailed=failed;
-      await progress.emit("done",`${saved} buyer prospects saved. ${failed?'Some analysis failed; coverage is incomplete.':saved?'Open results to see evidence and demo outreach.':'No companies met product and buying-activity checks within this research budget.'}`);
-      await db.query("update runs set status='done',finished_at=now(),counters=$2::jsonb where id=$1 and status<>'cancelled'",[runId,JSON.stringify(progress.counters)]);
+      await analyseBuyerPages(runId,input,readable,db,progress);
       return;
     }
 

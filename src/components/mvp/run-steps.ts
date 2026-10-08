@@ -4,6 +4,13 @@ import type { RunCounters, RunStage, RunStatus } from "@/mvp/types";
 export const RUN_STEPS = ["collecting", "reading", "checking", "scoring"] as const;
 export type RunStep = (typeof RUN_STEPS)[number];
 
+/** A settled compatibility status must not hide paused/incomplete research. */
+export function runStatusText(status:RunStatus,counters:RunCounters={}):string {
+  if(status==='done'&&counters.researchState==='partial')return 'Research paused';
+  if(status==='done'&&counters.coverageIncomplete)return 'Finished · partial coverage';
+  return {queued:'Starting',running:'Running',done:'Finished',failed:'Stopped',cancelled:'Cancelled'}[status];
+}
+
 const STAGE_TO_STEP: Partial<Record<RunStage, number>> = {
   collect: 0,
   read: 1,
@@ -42,13 +49,15 @@ export function countersLine(counters: RunCounters): string {
   const parts: string[] = [];
   if (counters.sourcesTotal) {
     const searched = (counters.sourcesDone ?? 0) + (counters.sourcesFailed ?? 0);
-    parts.push(`Searched ${searched} of ${counters.sourcesTotal} sources`);
+    parts.push(`Completed ${searched} of ${counters.sourcesTotal} source checks`);
   }
   if (counters.itemsRead !== undefined) parts.push(`read ${counters.itemsRead} items`);
-  if (counters.relevant !== undefined) parts.push(`${counters.relevant} relevant`);
+  if (counters.relevant !== undefined) parts.push(`${counters.relevant} candidate pages`);
   if (counters.scopedProspects !== undefined) parts.push(`${counters.scopedProspects} buyer prospects saved`);
   if (counters.scopedProspects === undefined && counters.newLeads !== undefined) parts.push(`${counters.newLeads} new raw lead records`);
   if (counters.deferredPages) parts.push(`${counters.deferredPages} pages deferred by budget`);
+  if (counters.deferredUrls) parts.push(`${counters.deferredUrls} URLs awaiting reads`);
+  if (counters.unreadablePages) parts.push(`${counters.unreadablePages} unreadable pages`);
   if (counters.buyerAnalysisFailed) parts.push(`${counters.buyerAnalysisFailed} analysis failures`);
   if (counters.updatedLeads) parts.push(`${counters.updatedLeads} updated`);
   const line = parts.join(" · ");
@@ -63,7 +72,7 @@ export function mergeCounters(runCounters: RunCounters | null | undefined, event
   const merged: RunCounters = {};
   for (const counters of eventCounters) if (counters) Object.assign(merged, counters);
   for (const [key, value] of Object.entries(runCounters ?? {})) {
-    if (value !== undefined && value !== null) (merged as Record<string, number>)[key] = value as number;
+    if (value !== undefined) (merged as Record<string, unknown>)[key] = value;
   }
   return merged;
 }

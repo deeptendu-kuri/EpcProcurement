@@ -5,7 +5,7 @@
  * - Fetch: 20 s timeout, custom User-Agent (CRAWL_USER_AGENT, default "BoroTechLeadBot/0.1"),
  *   at least 5 s between requests to the same host, robots.txt Disallow rules respected (cached).
  * - HTML main text: @mozilla/readability on jsdom; falls back to stripped body text.
- * - PDFs are skipped in the slice (the full MVP uses pdfplumber + OCR).
+ * - Text PDFs are parsed in a bounded worker; scanned documents need separate OCR.
  * - Dedupe: same canonical URL + same hash → known (not re-processed); same URL + new hash → changed
  *   (re-processed); same hash under another URL → known.
  */
@@ -48,31 +48,36 @@ export interface SimpleResponse {
   url: string;
   contentType: string;
   text: string;
+  bytes?: Uint8Array;
   /** True when the body was cut at maxBytes. */
   truncated?: boolean;
 }
 
 /** Read a fetch body with a byte cap; stops (and cancels the stream) once the cap is passed. */
-async function readCapped(res: Response, maxBytes: number): Promise<{ text: string; truncated: boolean }> {
+async function readCapped(res: Response, maxBytes: number): Promise<{ text: string; bytes?:Uint8Array; truncated: boolean }> {
   if (!res.body) return { text: "", truncated: false };
   const reader = res.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let size = 0;
   let text = "";
+  const chunks: Uint8Array[]=[];
+  const bytes=()=>Buffer.concat(chunks);
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       const remaining = maxBytes - size;
       if (value.byteLength > remaining) {
+        chunks.push(value.subarray(0,Math.max(0,remaining)));
         text += decoder.decode(value.subarray(0, Math.max(0, remaining)));
         await reader.cancel().catch(() => undefined);
-        return { text, truncated: true };
+        return { text, bytes:bytes(), truncated: true };
       }
       size += value.byteLength;
+      chunks.push(value);
       text += decoder.decode(value, { stream: true });
     }
-    return { text: text + decoder.decode(), truncated: false };
+    return { text: text + decoder.decode(), bytes:bytes(), truncated: false };
   } finally {
     reader.releaseLock();
   }
@@ -190,7 +195,7 @@ async function nodeGet(
         let truncated = false;
         const done = () =>
           finish(() =>
-            resolve({ status, ok: status >= 200 && status < 300, url, contentType: String(res.headers["content-type"] ?? ""), text: Buffer.concat(chunks).toString("utf8"), truncated }),
+            resolve({ status, ok: status >= 200 && status < 300, url, contentType: String(res.headers["content-type"] ?? ""), text: Buffer.concat(chunks).toString("utf8"), bytes:Buffer.concat(chunks), truncated }),
           );
         res.on("data", (chunk: Buffer) => {
           if (truncated) return;
@@ -350,7 +355,7 @@ export function pagePublishedAt(doc: Document): string | null {
 }
 
 /** Main text of an HTML page (Readability, then plain body text as fallback) and its publication date. */
-export async function htmlToText(html: string, url: string): Promise<{ title: string | null; text: string; publishedAt: string | null }> {
+export async function htmlToText(html: string, url: string, fullPage = false): Promise<{ title: string | null; text: string; publishedAt: string | null; links:{url:string;text:string}[]; tables:string[][][] }> {
   const [{ JSDOM }, { Readability }] = await Promise.all([import("jsdom"), import("@mozilla/readability")]);
   // Scraping needs article text, not layout. Removing style blocks before DOM construction
   // avoids costly stylesheet parsing (and repeated CSS errors) on large news websites.
@@ -360,12 +365,27 @@ export async function htmlToText(html: string, url: string): Promise<{ title: st
     const doc = dom.window.document;
     const pageTitle = doc.title || null;
     const publishedAt = pagePublishedAt(doc);
+    const links=[...doc.querySelectorAll('a[href]')].flatMap(a=>{
+      try{const target=new URL(a.getAttribute('href')!,url);target.hash='';
+        return /^https?:$/.test(target.protocol)?[{url:target.href,text:cleanText(a.textContent??'').slice(0,160)}]:[];
+      }catch{return [];}
+    }).slice(0,300);
+    const tables=[...doc.querySelectorAll('table')].map(table=>[...table.querySelectorAll('tr')]
+      .map(row=>[...row.querySelectorAll('th,td')].map(cell=>cleanText(cell.textContent??'')))).slice(0,20);
     // Keep JSON-LD long enough to read publication dates, then prevent code from becoming
     // fallback article/contact "evidence" on pages that Readability cannot identify.
     doc.querySelectorAll("script,style,noscript,template").forEach(node=>node.remove());
+    // Contact details are often in the footer, outside Readability's article. This
+    // mode retains original visible body text, never scripts or guessed values.
+    if(fullPage) {
+      // Rows stay atomic; adjacent company contacts can never bleed into another row.
+      doc.querySelectorAll('tr').forEach(row=>row.replaceWith(doc.createTextNode('\n'+[...row.querySelectorAll('th,td')].map(c=>cleanText(c.textContent??'')).join(' | ')+'\n')));
+      doc.querySelectorAll("br,p,div,li,section,h1,h2,h3,h4").forEach(node=>node.before(doc.createTextNode("\n")));
+      return {title:pageTitle,text:cleanText(doc.body?.textContent??""),publishedAt,links,tables};
+    }
     const article = new Readability(doc.cloneNode(true) as Document).parse();
     const text = article?.textContent?.trim() ? article.textContent : (doc.body?.textContent ?? "");
-    return { title: article?.title || pageTitle, text: cleanText(text), publishedAt };
+    return { title: article?.title || pageTitle, text: cleanText(text), publishedAt,links,tables };
   } finally {
     dom.window.close();
   }
@@ -388,8 +408,9 @@ export function stripHtml(html: string): string {
 }
 
 export type FetchOutcome =
-  | { ok: true; title: string | null; text: string; /** The page's own publication date, when it states one. */ publishedAt?: string | null }
-  | { ok: false; reason: "robots" | "pdf" | "http" | "timeout" | "empty" | "error"; detail?: string };
+  | { ok: true; title: string | null; text: string; finalUrl?:string; publishedAt?: string | null;
+      links?:{url:string;text:string}[]; tables?:string[][][]; pages?:{page:number;text:string}[]; truncated?:boolean; format?:"html"|"pdf" }
+  | { ok: false; reason: "robots" | "pdf" | "http" | "timeout" | "empty" | "error" | "resource" | "pdf_parse" | "ocr_needed"; detail?: string };
 
 /** Thrown by fetchPageText's redirect hook when robots.txt disallows a redirect target. */
 export class RobotsDisallowedError extends Error {
@@ -404,8 +425,7 @@ export class RobotsDisallowedError extends Error {
  * fetched (SSRF guard), and every redirect hop is re-checked against the guard, robots.txt and the
  * per-host politeness delay.
  */
-export async function fetchPageText(url: string): Promise<FetchOutcome> {
-  if (/\.pdf(?:$|\?)/i.test(url)) return { ok: false, reason: "pdf", detail: "PDFs are skipped in the slice" };
+export async function fetchPageText(url: string, options: { fullPage?: boolean; maxPdfPages?:number } = {}): Promise<FetchOutcome> {
   const host = hostOf(url);
   if (!host) return { ok: false, reason: "error", detail: "bad url" };
   try {
@@ -421,11 +441,16 @@ export async function fetchPageText(url: string): Promise<FetchOutcome> {
     });
     if (!res.ok) return { ok: false, reason: "http", detail: `HTTP ${res.status}` };
     const type = res.contentType;
-    if (/pdf/i.test(type)) return { ok: false, reason: "pdf", detail: "PDFs are skipped in the slice" };
+    if (/pdf/i.test(type)||/\.pdf(?:$|\?)/i.test(url)||res.text.startsWith('%PDF-')) {
+      if(res.truncated||!res.bytes)return {ok:false,reason:'resource',detail:'PDF byte ceiling exceeded.'};
+      const {parsePdf}=await import('./pdf');const parsed=await parsePdf(res.bytes,options.maxPdfPages??10);
+      if(!parsed.ok)return parsed;
+      return {...parsed,title:null,finalUrl:res.url||url,publishedAt:null,format:'pdf'};
+    }
     if (type && !/html|xml|text/i.test(type)) return { ok: false, reason: "error", detail: `unsupported content-type ${type}` };
-    const { title, text, publishedAt } = await htmlToText(res.text.slice(0, 2_000_000), res.url || url);
+    const { title, text, publishedAt,links,tables } = await htmlToText(res.text.slice(0, 2_000_000), res.url || url, options.fullPage);
     if (text.length < 200) return { ok: false, reason: "empty", detail: "too little text" };
-    return { ok: true, title, text: text.slice(0, MAX_TEXT_CHARS), publishedAt };
+    return { ok: true, title, text: text.slice(0, MAX_TEXT_CHARS), publishedAt, finalUrl:res.url||url,links,tables,format:'html',truncated:Boolean(res.truncated)||res.text.length>2_000_000||text.length>MAX_TEXT_CHARS };
   } catch (error) {
     if (error instanceof RobotsDisallowedError) return { ok: false, reason: "robots", detail: error.message };
     if (error instanceof BlockedUrlError) return { ok: false, reason: "error", detail: error.message };
@@ -474,8 +499,8 @@ export async function storeDocument(db: Queryable, runId: string, raw: RawDoc & 
     return { id: existing.id, state: "changed", text, status: "new" };
   }
   const byHash = await db.query<{ id: string; status: string; text: string | null }>(
-    "select id, status, text from source_documents where content_hash = $1 limit 1",
-    [hash],
+    "select id, status, text from source_documents where content_hash = $1 and is_sample = $2 limit 1",
+    [hash,raw.isSample],
   );
   if (byHash.rows[0]) {
     const dup = byHash.rows[0];

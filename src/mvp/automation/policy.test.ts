@@ -8,6 +8,19 @@ describe("bounded sales automation policy",()=>{
     expect(freshReply('Yes, please send specs.\n\nOn Tue, Seller wrote:\nReply unsubscribe to stop')).toBe("Yes, please send specs.");
     expect(hardStop('Yes, please send specs.\n> Reply unsubscribe to stop')).toBeNull();
   });
+  it.each(['\n','\r\n'])('strips wrapped Gmail attribution and its historical timestamp with %j line endings',newline=>{
+    const quoted=['','On Wed, 7 Oct, 2026, 5:24\u202fpm Sales Demo, <','onboarding@resend.dev> wrote:','','> Please book slot 2. Reply unsubscribe to stop.'].join(newline);
+    const text='Yes can you schedule a meet'+newline+quoted;
+    expect(freshReply(text)).toBe('Yes can you schedule a meet');
+    expect(hardStop(text)).toBeNull();expect(selectedSlot(text,['old-slot','wrong-slot'])).toBeNull();
+    expect(freshReply(quoted.trimStart())).toBe('');
+  });
+  it('keeps actual buyer dates and opt-outs, without treating ordinary On statements as attribution',()=>{
+    const body='On Friday, can we meet at 3 PM?\nPlease confirm the date.';
+    expect(freshReply(body)).toBe(body);
+    expect(hardStop('Please unsubscribe me\n\nOn Wed, 7 Oct, 2026, Sales Demo, <\nsales@example.com> wrote:\n> Hi buyer')).toBe('opt_out');
+    expect(freshReply('Book Friday at 3 PM\n\nOn Wednesday the project manager\nwrote:')).toBe('Book Friday at 3 PM');
+  });
   it("stops opt-out, rejection and automatic-response loops before AI",()=>{
     expect(hardStop("Please unsubscribe me")).toBe("opt_out");
     expect(hardStop("Not interested, thank you")).toBe("rejected");
@@ -17,6 +30,9 @@ describe("bounded sales automation policy",()=>{
   it("requires an unambiguous explicit selection of a previously offered slot",()=>{
     const slots=["2026-10-05T04:30:00.000Z","2026-10-06T04:30:00.000Z"];
     expect(selectedSlot("Please book slot 2",slots)).toBe(slots[1]);
+    expect(selectedSlot("Slot 1",slots)).toBe(slots[0]);
+    expect(selectedSlot("Option 2.",slots)).toBe(slots[1]);
+    for(const text of ['Please book slot 1 or 2','Please book slot 1, tentative','What is slot 1?'])expect(selectedSlot(text,slots)).toBeNull();
     for(const text of ["Share a meeting link","Tomorrow at ten","Slot 1 is not available","Maybe option 1","Please book slot 1 or slot 2","Please book slot 3"])
       expect(selectedSlot(text,slots)).toBeNull();
   });

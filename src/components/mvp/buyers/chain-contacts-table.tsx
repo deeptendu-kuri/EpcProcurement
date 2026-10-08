@@ -72,6 +72,8 @@ type TierFilter = "all" | ChainTier;
 
 export interface ChainContactsTableProps {
   rows: ChainContactRow[];
+  companyOnly?: boolean;
+  initialCompanyNode?: string;
   loading?: boolean;
   /** Row keys being confirmed. */
   busy?: ReadonlySet<string>;
@@ -90,14 +92,15 @@ export function rowKey(row: Pick<ChainContactRow, "nodeId" | "slotId">): string 
  * All contacts in this supply chain (docs/mvp/15 §E): every node × buying-team slot across the tiers.
  * Tier · Company · Person / role · Why them · Status · Action (Find · + Add / Confirm / Find candidates).
  */
-export function ChainContactsTable({ rows, loading = false, busy, onAdd, onConfirm, onFindCandidates, onEmail, demoEmail }: ChainContactsTableProps) {
+export function ChainContactsTable({ rows, companyOnly = false, initialCompanyNode, loading = false, busy, onAdd, onConfirm, onFindCandidates, onEmail, demoEmail }: ChainContactsTableProps) {
   const [tier, setTier] = useState<TierFilter>("all");
+  const [companyNode, setCompanyNode] = useState(initialCompanyNode ?? "all");
   const [deciders, setDeciders] = useState(false);
   const [missingOnly, setMissingOnly] = useState(false);
 
   const found = rows.filter((row) => row.person).length;
   const shown = rows.filter(
-    (row) => (tier === "all" || row.tier === tier) && (!deciders || row.role === "decision_maker") && (!missingOnly || !row.person),
+    (row) => (companyNode === "all" || row.nodeId === companyNode) && (tier === "all" || row.tier === tier) && (!deciders || row.role === "decision_maker") && (!missingOnly || !row.person),
   );
   const pill = (on: boolean) =>
     `rounded-full border px-2.5 py-1 text-xs ${on ? "border-[#111827] bg-[#111827] text-white" : "border-[var(--line)] bg-white text-[#334155] hover:bg-[var(--subtle)]"}`;
@@ -105,16 +108,17 @@ export function ChainContactsTable({ rows, loading = false, busy, onAdd, onConfi
   return (
     <div data-testid="chain-contacts">
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h2 className="text-base font-bold text-[#111827]">All contacts in this supply chain</h2>
+        <h2 className="text-base font-bold text-[#111827]">{companyOnly ? "Company contact roles & details" : "All contacts in this supply chain"}</h2>
         <span className="text-xs text-[var(--muted)]" aria-live="polite">
-          {rows.length} people to approach · {found} found
+          {rows.length} contact role slots · {found} found
         </span>
         <div role="group" aria-label="Filter contacts" className="ml-auto flex flex-wrap items-center gap-1.5">
-          {(["all", 1, 2, 3] as const).map((value) => (
+          {!companyOnly ? <label className="text-xs text-[var(--text-2)]">Company<select className="input ml-1 max-w-52 px-2 text-xs" aria-label="Contact company" value={companyNode} onChange={e=>setCompanyNode(e.target.value)}><option value="all">All companies</option>{[...new Map(rows.map(row=>[row.nodeId,row])).values()].map(row=><option key={row.nodeId} value={row.nodeId}>{row.companyName}{row.companyIdentified ? "" : " (not identified)"}</option>)}</select></label> : null}
+          {!companyOnly ? (["all", 1, 2, 3] as const).map((value) => (
             <button key={value} type="button" aria-pressed={tier === value} onClick={() => setTier(value)} className={pill(tier === value)}>
               {value === "all" ? "All tiers" : `Tier ${value}`}
             </button>
-          ))}
+          )) : null}
           <button type="button" aria-pressed={deciders} onClick={() => setDeciders((value) => !value)} className={pill(deciders)}>
             Decision makers
           </button>
@@ -131,7 +135,7 @@ export function ChainContactsTable({ rows, loading = false, busy, onAdd, onConfi
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[820px] border-collapse text-[13.5px]" aria-label="All contacts in this supply chain">
+        <table className="w-full min-w-[820px] border-collapse text-[13.5px]" aria-label={companyOnly ? "Company contact roles & details" : "All contacts in this supply chain"}>
           <thead>
             <tr className="border-b border-[var(--line)] text-left text-xs uppercase tracking-[.03em] text-[#6b7280]">
               <th scope="col" className="w-12 px-2.5 py-2.5 font-medium">Tier</th>

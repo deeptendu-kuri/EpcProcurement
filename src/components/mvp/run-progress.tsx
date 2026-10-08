@@ -25,6 +25,8 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
   const [run, setRun] = useState<RunRow | null>(null);
   const [events, setEvents] = useState<RunEventRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [revision,setRevision]=useState(0);
+  const [continuing,setContinuing]=useState(false);
   const lastEventId = useRef(0);
   const onFinishedRef = useRef(onFinished);
   useEffect(() => {
@@ -67,10 +69,21 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [runId]);
+  }, [runId,revision]);
+
+  const continueAnalysis=async()=>{
+    setContinuing(true);setError(null);
+    try{
+      await apiJson(`/api/mvp/runs/${runId}`,{method:"POST",body:{action:"continue_analysis"}});
+      setEvents([]);setRun(previous=>previous?{...previous,status:"running"}:previous);setRevision(value=>value+1);
+    }catch(error){setError(error instanceof Error?error.message:"Could not continue saved pages.");}
+    finally{setContinuing(false);}
+  };
 
   const status = run?.status ?? "queued";
   const finished = status === "done";
+  const partialCoverage = Boolean(countersCoverage(run?.counters));
+  const pausedResearch = run?.counters.researchState === "partial";
   const failed = status === "failed" || status === "cancelled";
   const step = stepIndex(events.map((event) => event.stage), status);
   const counters = mergeCounters(run?.counters, events.map((event) => event.counters));
@@ -88,7 +101,7 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
         ) : (
           <Loader2 size={17} className="animate-spin text-[#2563eb]" aria-hidden />
         )}
-        {finished ? "Finished" : failed ? "Stopped" : status === "queued" ? "Starting" : "Running"}: “{runTitle(run)}”
+        {finished ? pausedResearch ? "Research paused · saved results available" : partialCoverage ? "Finished · partial coverage" : "Finished" : failed ? "Stopped" : status === "queued" ? "Starting" : "Running"}: “{runTitle(run)}”
       </p>
 
       <div aria-live="polite" className="mt-2 space-y-1 text-sm">
@@ -98,6 +111,14 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
           <p role="alert" className="font-semibold text-[#b42318]">{run?.error || "The search stopped before it finished."}</p>
         ) : null}
         {error ? <p role="alert" className="text-[#b54708]">{error}</p> : null}
+        {run?.adhoc_query?.productId ? <p className="text-xs text-[#667085]">Candidate pages are research inputs, not buyers. Saved companies are shown separately; contacts and emails may remain blank.</p> : null}
+        {counters.researchCandidates !== undefined ? <p className="text-xs text-[#667085]">{counters.researchCandidates} company research candidates · {counters.investigatedCompanies ?? 0} investigated · {counters.scopedProspects ?? 0} saved prospects</p> : null}
+        {counters.researchUsage && counters.researchLimits ? <p className="text-xs text-[#667085]">Usage: {counters.researchUsage.search}/{counters.researchLimits.search} search requests · {counters.researchUsage.reads}/{counters.researchLimits.reads} reads · {counters.researchUsage.aiCalls}/{counters.researchLimits.aiCalls} AI calls. Research stops at its budget.</p> : null}
+        {counters.readFailures && Object.keys(counters.readFailures).length ? <details className="text-xs text-[#b54708]"><summary>Why some sources were unreadable</summary><ul className="mt-1 space-y-1">{Object.entries(counters.readFailures).map(([reason,count])=><li key={reason}>{reason.replace(/_/g,' ')}: {count}</li>)}</ul></details> : null}
+        {finished && partialCoverage ? <p className="text-xs text-[#b54708]">Some sources or pages remain unchecked. This result does not represent the whole market.</p> : null}
+        {counters.researchStopReason ? <p className="text-xs text-[#b54708]">Research pause: {counters.researchStopReason}</p> : null}
+        {run?.adhoc_query?.targetCompanies ? <p className="text-xs text-[#667085]">Research target: {run.adhoc_query.targetCompanies} companies · not a guaranteed yield. Saved results remain available while research is paused.</p> : null}
+        {finished && counters.scopedProspects === 0 ? <p className="text-sm text-[#475467]">No source-backed companies saved in this batch. This does not mean no buyers exist; check coverage and research outcomes.</p> : null}
       </div>
 
       <div className="mt-3">
@@ -107,6 +128,7 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
+          aria-valuetext={finished && partialCoverage ? "Batch saved; research coverage incomplete" : undefined}
           className="h-2 overflow-hidden rounded-full bg-[#eaecf0]"
         >
           <div
@@ -129,17 +151,23 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
         </ol>
       </div>
 
-      {finished ? (
+      {(finished||failed)&&run?.adhoc_query?.productId&&!run.adhoc_query.offline&&(pausedResearch||counters.deferredPages||counters.deferredUrls||counters.buyerAnalysisFailed)?<div className="mt-3 flex flex-wrap items-center gap-3"><button className="btn btn-secondary" disabled={continuing} onClick={()=>void continueAnalysis()}>{continuing?"Resuming…":"Resume saved research"}</button><p className="text-xs text-[#667085]">Same search and saved results. No repeat web search; resumes bounded page reads and AI checks, which may use additional AI credits. Provider limits still apply.</p></div>:null}
+
+      {finished || run?.adhoc_query?.productId && status !== "queued" ? (
         <div className="mt-3 flex justify-end">
           <Link
             href={run?.adhoc_query?.productId ? `/crm?search=${runId}` : "/search"}
             className="btn-primary focus-ring inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold"
           >
-            See the buyers
+            {finished ? "See the buyers" : failed ? "View saved results" : "View saved companies so far"}
             <ArrowRight size={15} aria-hidden />
           </Link>
         </div>
       ) : null}
     </section>
   );
+}
+
+function countersCoverage(counters: RunRow["counters"] | null | undefined): boolean {
+  return Boolean(counters?.coverageIncomplete || counters?.researchState === "partial" || counters?.deferredPages || counters?.deferredUrls || counters?.buyerAnalysisFailed || counters?.sourcesFailed);
 }

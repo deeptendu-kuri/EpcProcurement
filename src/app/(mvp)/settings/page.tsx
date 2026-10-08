@@ -5,7 +5,8 @@ import { getClientProfile } from "@/mvp/config/profile";
 import { marketName } from "@/mvp/config/markets";
 import { disciplineLabel, formatDate, formatMoney } from "@/components/mvp/labels";
 import { PageHeader } from "@/components/mvp/page-header";
-import { seller } from "@/mvp/automation/config";
+import { seller,funnelStatus } from "@/mvp/automation/config";
+import { AutomationSettings } from '@/components/mvp/outreach/automation-settings';
 
 /** Human names for the portal registration keys in client-profile.json. */
 const REGISTRATION_NAMES: Record<string, string> = {
@@ -40,6 +41,7 @@ function List({ items, empty = "None" }: { items: string[]; empty?: string }) {
 }
 
 const TABS = [
+  { id: "automation", label: "Email & Calendar setup" },
   { id: "profile", label: "Company profile" },
   { id: "catalogue", label: "Catalogue" },
   { id: "strengths", label: "Strengths" },
@@ -166,7 +168,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         </nav>
       </PageHeader>
 
-      {tab === "catalogue" ? <CatalogueTab /> : tab === "strengths" ? <StrengthsTab /> : <ProfileTab profile={profile} />}
+      {tab === 'automation' ? <AutomationSettings initial={await funnelStatus()} calendarResult={typeof params.calendar==='string'?params.calendar:undefined}/> : tab === "catalogue" ? <CatalogueTab /> : tab === "strengths" ? <StrengthsTab /> : <ProfileTab profile={profile} />}
     </div>
   );
 }

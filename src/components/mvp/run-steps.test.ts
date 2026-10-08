@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { countersLine, mergeCounters, progressPercent, stepIndex } from "./run-steps";
+import { countersLine, mergeCounters, progressPercent, runStatusText, stepIndex } from "./run-steps";
 
 describe("run progress helpers", () => {
+  it("never describes paused research as a fully finished search",()=>{
+    expect(runStatusText('done',{researchState:'partial'})).toBe('Research paused');
+    expect(runStatusText('done',{coverageIncomplete:true})).toBe('Finished · partial coverage');
+    expect(runStatusText('done')).toBe('Finished');
+    expect(runStatusText('running',{coverageIncomplete:true})).toBe('Running');
+    expect(runStatusText('failed',{researchState:'partial'})).toBe('Stopped');
+  });
   it("maps pipeline stages onto collecting → reading → checking → scoring", () => {
     expect(stepIndex([], "queued")).toBe(0);
     expect(stepIndex(["collect", "read", "filter"], "running")).toBe(1);
@@ -14,7 +21,7 @@ describe("run progress helpers", () => {
 
   it("builds the counters line from what is known", () => {
     expect(countersLine({ sourcesTotal: 5, sourcesDone: 2, sourcesFailed: 1, itemsRead: 24, relevant: 6, newLeads: 3 })).toBe(
-      "Searched 3 of 5 sources · read 24 items · 6 relevant · 3 new raw lead records",
+      "Completed 3 of 5 source checks · read 24 items · 6 candidate pages · 3 new raw lead records",
     );
     expect(countersLine({ itemsRead: 1, newLeads: 1 })).toBe("Read 1 items · 1 new raw lead records");
     expect(countersLine({ newLeads: 15, scopedProspects: 0 })).toBe("0 buyer prospects saved");
@@ -24,5 +31,6 @@ describe("run progress helpers", () => {
 
   it("lets the run row's counters win over older event counters", () => {
     expect(mergeCounters({ newLeads: 3 }, [{ itemsRead: 5, newLeads: 1 }, null])).toEqual({ itemsRead: 5, newLeads: 3 });
+    expect(mergeCounters({coverageIncomplete:false,researchState:"done",researchStopReason:null},[{coverageIncomplete:true,researchState:"partial",researchStopReason:"budget"}])).toMatchObject({coverageIncomplete:false,researchState:"done",researchStopReason:null});
   });
 });

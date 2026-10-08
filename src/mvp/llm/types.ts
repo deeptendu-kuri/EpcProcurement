@@ -14,6 +14,8 @@ export interface LLMRequest {
   purpose?: string;
   /** Recorded in llm_usage.run_id. */
   runId?: string;
+  /** Durable jobs own retries/budgets; forbid hidden provider retry/repair calls. */
+  singleAttempt?: boolean;
 }
 
 export interface LLMResponse {
