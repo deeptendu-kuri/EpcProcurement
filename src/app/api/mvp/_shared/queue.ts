@@ -37,8 +37,11 @@ export async function enqueueResponse(job: QueueJob): Promise<NextResponse> {
     if(material.status!=='resolved')return NextResponse.json({error:material.question,materialStatus:material.status,candidateIds:material.candidateIds},{status:422,headers:NO_STORE});
   }
   if(serverlessRuntime())return NextResponse.json({error:SERVERLESS_SETUP_MESSAGE},{status:503,headers:NO_STORE});
-  if(job.input.productId&&!job.sample&&!job.input.offline&&!mvpEnv.offline()&&process.env.MVP_DURABLE_RESEARCH!=='off'){
-    const runId=await createResearchRun(job.input);startResearchWorker();
+  // Isolated benchmark driver drains authenticated durable jobs itself, with all timers off.
+  // This opt-in cannot change execution on Render or Vercel.
+  const manual=process.env.MVP_RESEARCH_MANUAL_DRIVER==='1'&&!process.env.RENDER&&!process.env.VERCEL;
+  if(job.input.productId&&!job.sample&&!job.input.offline&&!mvpEnv.offline()&&(process.env.MVP_DURABLE_RESEARCH!=='off'||manual)){
+    const runId=await createResearchRun(job.input);if(!manual)startResearchWorker();
     return NextResponse.json({ticketId:`durable-${runId}`,runId,state:'running',position:0,error:null},{status:202,headers:NO_STORE});
   }
   const queue = getRunQueue();
