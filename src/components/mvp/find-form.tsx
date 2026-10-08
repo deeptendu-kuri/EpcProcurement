@@ -231,6 +231,7 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
             ))}
           </div>
         ) : null}
+        <p className="text-xs text-[var(--muted)]">We look for companies that recently won work or orders for {products.find(p=>p.id===productId)?.name??query} in {selected.map(m=>COUNTRIES.find(c=>c.code===m)?.name??m).join(', ')}, then for companies that do this work, then for who they buy from. Every saved fact needs original-page evidence.</p>
 
         <div className="flex flex-col gap-4" data-tour="find-markets">
           <fieldset className="flex flex-wrap items-center gap-2">

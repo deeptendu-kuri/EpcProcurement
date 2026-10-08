@@ -25,7 +25,7 @@ import type { BuyerRecord } from "./view";
 export const DEFAULT_PAGE_SIZE = 25;
 export const MAX_PAGE_SIZE = 200;
 
-type Dimension = "location" | "roles" | "sell" | "signals" | "contacts" | "industry" | "value" | "lookalike" | "companyList" | "reach" | "stage" | "minFit" | "howSure" | "q" | "tiers" | "linkStatus";
+type Dimension = "location" | "roles" | "sell" | "signals" | "contacts" | "industry" | "value" | "lookalike" | "companyList" | "reach" | "stage" | "minFit" | "howSure" | "q" | "tiers" | "linkStatus" | "triggers";
 
 const TIER_LABELS: Record<string, string> = { "1": "Tier 1 · won the work", "2": "Tier 2", "3": "Tier 3" };
 const LINK_LABELS: Record<string, string> = { confirmed: "Confirmed", likely: "Likely", possible: "Possible" };
@@ -79,6 +79,13 @@ export function lookalikeScore(record: BuyerRecord, reference: BuyerRecord): num
 export function matches(record: BuyerRecord, search: BuyerSearch, now: Date, all: readonly BuyerRecord[] = [], omit: ReadonlySet<Dimension> = new Set()): boolean {
   const view = record.view;
   const on = (dim: Dimension) => !omit.has(dim);
+  if(on('triggers')&&search.triggers){
+    const t=record.row.trigger,filter=search.triggers;
+    if(filter.kinds?.length&&(!t||!filter.kinds.includes(t.kind)))return false;
+    if(filter.undated&&t?.date)return false;
+    const age=daysAgo(t?.date??null,now);
+    if(filter.withinDays&&(age===null||age<0||age>filter.withinDays))return false;
+  }
 
   if (on("stage")) {
     if (search.stage?.length) {
@@ -159,6 +166,7 @@ export function buildFacets(records: readonly BuyerRecord[], search: BuyerSearch
   const itemName = (id: string) => catalogue.find((i) => i.id === id)?.shortName ?? id;
   const hide = hideCompetitors(search);
   return {
+    triggers:count(pass('triggers').flatMap(r=>r.row.trigger?[r.row.trigger.kind]:[]),v=>v==='capability'?'Capability only':v),
     roles: count(pass("roles").map((r) => r.view.role), (v) => BUYER_ROLE_LABELS[v]),
     countries: count(
       pass("location").map((r) => (search.location?.basis === "site" ? r.siteCountry : r.hqCountry)).filter((c): c is string => Boolean(c)),

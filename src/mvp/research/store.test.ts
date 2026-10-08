@@ -2,7 +2,7 @@
 import {beforeAll,afterAll,beforeEach,afterEach,describe,it,expect,vi} from 'vitest';
 import {createTestDb,type Db,assertSchemaReady} from '@/mvp/db';
 import type {RunInput} from '@/mvp/types';
-import {admitDeferredDiscovery,createResearchRun,claimJob,completeJob,reserveBudget,reserveAnalysis,enqueueRawDocs,replayCachedCompanyAnalyses,resumeResearchRun,sessionFor} from './store';
+import {admitDeferredDiscovery,createResearchRun,claimJob,completeJob,reserveBudget,reserveAnalysis,enqueueRawDocs,replayCachedCompanyAnalyses,resumeResearchRun,sessionFor,researchProgress} from './store';
 import {loadCompanyBundle} from '@/mvp/discovery/bundle';
 import {registerCandidate} from './investigation';
 import {researchBudget} from '@/mvp/discovery/plan';
@@ -19,6 +19,13 @@ beforeEach(async()=>{vi.stubEnv('TAVILY_API_KEY','');await db.exec('truncate run
 afterEach(()=>vi.unstubAllEnvs());
 const doc=(n:number):RawDoc & {text:string}=>({sourceKey:'test',sourceName:'Synthetic test',tier:'C',url:`https://example.com/services/${n}`,title:'Engineering contractor',publishedAt:null,text:'Atlas Engineering Limited performs pipeline construction and EPC contracting in India.',isSample:false});
 describe('durable research checkpoints',()=>{
+  it('projects lane counts and pending work from durable jobs without provider calls',async()=>{
+    const id=await createResearchRun(input,db);
+    await db.query("update research_jobs set state='done',result='{}' where run_id=$1",[id]);
+    await db.query("insert into research_jobs(run_id,stage,key,state,payload,result) values($1,'analyse','Example-roundup','done',$2::jsonb,$3::jsonb)",[id,JSON.stringify({kind:'analyse:roundup'}),JSON.stringify({seeded:15})]);
+    const counters=await researchProgress(db,id,'info','Example offline lane proof');
+    expect(counters.sourcingLanes).toMatchObject({roundups:1,roundupCompanies:15,pending:0});
+  });
   it('rejects mismatched material before persistence or provider work',async()=>{
     await expect(createResearchRun({...input,query:'power cables'},db)).rejects.toThrow();
     expect((await db.query('select id from runs')).rows).toHaveLength(0);

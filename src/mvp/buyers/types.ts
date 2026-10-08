@@ -72,6 +72,8 @@ export interface BuyerView {
   chainSummary: { tier2: number; tier3: number; peopleTotal: number; peopleFound: number };
 }
 export interface BuyerRow { /* list row: subset of BuyerView */
+  /** Doc 16: verified strongest trigger, absent on untouched legacy views. */
+  trigger?: Trigger | null;
   leadId: string; name: string; subRoleLabel: string | null; role: BuyerRole; roleLabel: string;
   buyingReason: string; sellSummary: string; competitorNote: string | null;
   country: string | null; fitScore: number; howSure: 'high' | 'medium' | 'low'; stage: BuyerStage;
@@ -96,6 +98,7 @@ export const DERIVED_PREFIX = 'derived:';
 export function isDerivedLeadId(id: string): boolean { return id.startsWith(DERIVED_PREFIX); }
 export type BuyerSignal = 'order_won' | 'contract_won' | 'tender_open' | 'expansion';
 export interface BuyerSearch {
+  triggers?: { kinds?:TriggerKind[]; withinDays?:number; undated?:boolean };
   location?: { any?: string[]; not?: string[]; basis?: 'hq' | 'site' };
   roles?: { any?: BuyerRole[]; not?: BuyerRole[] };
   sell?: { any?: string[] /* item ids */; hideCompetitors?: boolean };
@@ -177,6 +180,7 @@ export interface AddContactInput { companyId: string; slotId: string; name: stri
 
 export interface FacetCount { value: string; label: string; count: number }
 export interface BuyerFacets {
+  triggers?: FacetCount[];
   roles: FacetCount[];
   countries: FacetCount[];
   items: FacetCount[];

@@ -101,7 +101,7 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
         ) : (
           <Loader2 size={17} className="animate-spin text-[#2563eb]" aria-hidden />
         )}
-        {finished ? pausedResearch ? "Research paused · saved results available" : partialCoverage ? "Finished · partial coverage" : "Finished" : failed ? "Stopped" : status === "queued" ? "Starting" : "Running"}: “{runTitle(run)}”
+        {finished ? partialCoverage ? "Finished · partial coverage" : "Finished" : failed ? "Stopped" : status === "queued" ? "Starting" : "Running"}: “{runTitle(run)}”
       </p>
 
       <div aria-live="polite" className="mt-2 space-y-1 text-sm">
@@ -113,11 +113,14 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
         {error ? <p role="alert" className="text-[#b54708]">{error}</p> : null}
         {run?.adhoc_query?.productId ? <p className="text-xs text-[#667085]">Candidate pages are research inputs, not buyers. Saved companies are shown separately; contacts and emails may remain blank.</p> : null}
         {counters.researchCandidates !== undefined ? <p className="text-xs text-[#667085]">{counters.researchCandidates} company research candidates · {counters.investigatedCompanies ?? 0} investigated · {counters.scopedProspects ?? 0} saved prospects</p> : null}
+        {counters.sourcingLanes?<p className="text-xs text-[#667085]">Collecting: trigger → roundup → capability · {counters.sourcingLanes.awardArticles} award/news/filing articles · {counters.sourcingLanes.roundups} roundups fanned out to {counters.sourcingLanes.roundupCompanies} identity candidates · {counters.sourcingLanes.companySites} company sites · {counters.sourcingLanes.pending} runnable jobs remaining</p>:null}
         {counters.researchUsage && counters.researchLimits ? <p className="text-xs text-[#667085]">Usage: {counters.researchUsage.search}/{counters.researchLimits.search} search requests · {counters.researchUsage.reads}/{counters.researchLimits.reads} reads · {counters.researchUsage.aiCalls}/{counters.researchLimits.aiCalls} AI calls. Research stops at its budget.</p> : null}
         {counters.readFailures && Object.keys(counters.readFailures).length ? <details className="text-xs text-[#b54708]"><summary>Why some sources were unreadable</summary><ul className="mt-1 space-y-1">{Object.entries(counters.readFailures).map(([reason,count])=><li key={reason}>{reason.replace(/_/g,' ')}: {count}</li>)}</ul></details> : null}
         {finished && partialCoverage ? <p className="text-xs text-[#b54708]">Some sources or pages remain unchecked. This result does not represent the whole market.</p> : null}
-        {counters.researchStopReason ? <p className="text-xs text-[#b54708]">Research pause: {counters.researchStopReason}</p> : null}
-        {run?.adhoc_query?.targetCompanies ? <p className="text-xs text-[#667085]">Research target: {run.adhoc_query.targetCompanies} companies · not a guaranteed yield. Saved results remain available while research is paused.</p> : null}
+        {counters.researchStopReason ? <p className="text-xs text-[#b54708]">Coverage / review reason: {counters.researchStopReason}</p> : null}
+        {pausedResearch?<p className="text-xs text-[#b54708]">Some saved work needs review or a provider reset before resuming. We do not silently repeat uncertain charged requests.</p>:null}
+        {finished?<p className="text-xs text-[#667085]">This bounded batch has settled. {counters.coverage?.reason??(partialCoverage?'Review coverage warnings before resuming.':'No runnable research remains.')} Completion is not exhaustive market coverage.</p>:null}
+        {run?.adhoc_query?.targetCompanies ? <p className="text-xs text-[#667085]">Research target: {run.adhoc_query.targetCompanies} companies · not a guaranteed yield. Reaching the target skips the capability fallback; already queued work still settles. Budgets remain the hard limits.</p> : null}
         {finished && counters.scopedProspects === 0 ? <p className="text-sm text-[#475467]">No source-backed companies saved in this batch. This does not mean no buyers exist; check coverage and research outcomes.</p> : null}
       </div>
 

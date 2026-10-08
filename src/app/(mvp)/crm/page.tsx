@@ -9,6 +9,7 @@ export default async function CrmPage({searchParams}:{searchParams:Promise<Recor
   const params=await searchParams;const searches=await recentSearches();
   const raw=Object.fromEntries(Object.entries(params).filter(([k,v])=>typeof v==='string'&&v!==''&&k!=='search'&&k!=='open'&&k!=='view'));
   raw.run=String(params.run??params.search??searches.find(s=>s.adhoc_query?.productId)?.id??'none');
+  if(params.view==='verified'){raw.tab='contacts';raw.contacts='validated';}
   const parsed=tableQuerySchema.safeParse(raw);
   if(!parsed.success)return <div className="p-6"><h1 className="page-title">Invalid lead filters</h1><Link href="/crm">Reset filters</Link></div>;
   const query=parsed.data;const data=await crmTables(query);

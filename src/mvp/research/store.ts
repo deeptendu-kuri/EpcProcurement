@@ -140,6 +140,13 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   const facts=(await db.query<{kept:number;dropped:number}>(`select coalesce(sum((result->>'factsKept')::int),0)::int as kept,
     coalesce(sum((result->>'factsDropped')::int),0)::int as dropped from research_jobs where run_id=$1 and state='done'`,[runId])).rows[0];
   const counters:RunCounters={sourcesTotal:counts.filter(c=>c.stage==='collect').reduce((n,c)=>n+c.count,0),sourcesDone:count('collect','done'),sourcesFailed:count('collect','failed'),itemsRead:read,unreadablePages:count('read','done')-read+count('read','failed'),relevant:counts.filter(c=>c.stage==='analyse').reduce((n,c)=>n+c.count,0),buyerPagesChecked:count('analyse','done'),buyerAnalysisFailed:count('analyse','failed'),deferredPages:count('analyse','queued')+count('analyse','paused'),deferredUrls,scopedProspects:prospects,newLeads:prospects,coverageIncomplete:limited>0||session?.state==='partial'||counts.some(c=>c.state==='failed'||c.state==='paused'),researchState:session?.state as RunCounters['researchState'],researchStopReason:session?.stop_reason??null};
+  const lanes=(await db.query<{awardArticles:number;roundups:number;roundupCompanies:number;companySites:number;pending:number}>(`select
+    count(*) filter(where stage='read' and result->>'pageKind' in ('article','filing','tender_notice'))::int as "awardArticles",
+    count(*) filter(where stage='analyse' and payload->>'kind'='analyse:roundup' and state='done')::int as roundups,
+    coalesce(sum((result->>'seeded')::int) filter(where stage='analyse'),0)::int as "roundupCompanies",
+    count(*) filter(where stage='read' and result->>'pageKind'='company_site')::int as "companySites",
+    count(*) filter(where state in ('queued','running'))::int as pending from research_jobs where run_id=$1`,[runId])).rows[0];
+  counters.sourcingLanes=lanes;
   counters.researchCandidates=candidates.count;counters.investigatedCompanies=candidates.investigated;
   counters.factsKept=facts.kept;counters.factsDropped=facts.dropped;
   counters.readFailures=Object.fromEntries(failures.map(f=>[f.reason??'unknown',f.count]));

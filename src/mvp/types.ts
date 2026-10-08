@@ -171,6 +171,7 @@ export interface RunCounters {
   researchUsage?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;pdfPages:number;bingSearches?:number};
   researchLimits?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;bingSearches?:number};
   coverage?: {readsSkipped:number;deferred:number;reason:string|null};
+  sourcingLanes?: {awardArticles:number;roundups:number;roundupCompanies:number;companySites:number;pending:number};
   updatedLeads?: number;
 }
 

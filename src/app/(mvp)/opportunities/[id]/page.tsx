@@ -7,6 +7,8 @@ import { demoEmailInfo } from "@/mvp/email/config";
 import { OpportunityWorkspace } from "@/components/mvp/opportunities/workspace";
 import { enrichmentView } from "@/mvp/enrichment";
 import { prospectDemoEnabled } from "@/mvp/automation/config";
+import {opportunityEvidence} from '@/mvp/evidence';
+import type {WorkspaceTab} from '@/components/mvp/opportunities/workspace-rail';
 
 export default async function OpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string;tab?:string;calendar?:string;open?:string }> }) {
   const { id } = await params;
@@ -16,6 +18,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
   const buyer = await getBuyerView(opportunity.lead_id);
   if (!buyer) notFound();
   const query = await searchParams;
+  const initialTab=(['overview','contacts','chain','conversation','activity'] as WorkspaceTab[]).find(t=>t===query.tab);
   // Exact local path only. No protocol-relative/external back links.
   const returnTo = query.returnTo && /^\/crm(?:\?|$)/.test(query.returnTo) ? query.returnTo : `/crm?search=${opportunity.run_id}`;
   const db = getDb();
@@ -25,5 +28,5 @@ export default async function OpportunityPage({ params, searchParams }: { params
     db.query<{ person_id: string; value: string; verified_at: string | null; source: string; kind: string }>("select cp.person_id, cp.value, cp.verified_at, cp.source, cp.kind from contact_points cp join people p on p.id = cp.person_id where p.current_company_id = $1 and cp.kind in ('email','phone') order by cp.created_at desc", [buyer.companyId]),
     getLeadDetail(opportunity.lead_id),
   ]);
-  return <OpportunityWorkspace key={id} opportunity={opportunity} buyer={buyer} detail={detail} events={events.rows} drafts={drafts.rows} points={points.rows} demoEmail={demoEmailInfo()} returnTo={returnTo} enrichment={await enrichmentView(id)} initialTab={query.tab==='conversation'?'conversation':undefined} calendarResult={query.calendar} demoOutreach={prospectDemoEnabled()} initialEvidenceOpen={query.open} />;
+  return <OpportunityWorkspace key={id} opportunity={opportunity} buyer={buyer} detail={detail} events={events.rows} drafts={drafts.rows} points={points.rows} demoEmail={demoEmailInfo()} returnTo={returnTo} enrichment={await enrichmentView(id)} initialTab={initialTab} calendarResult={query.calendar} demoOutreach={prospectDemoEnabled()} initialEvidenceOpen={query.open} evidenceView={await opportunityEvidence(id)} />;
 }

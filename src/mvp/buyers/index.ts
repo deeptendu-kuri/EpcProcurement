@@ -7,6 +7,7 @@ import { clearBuyerCache, CONFIRM_PREFIX, isUuid, loadBuyerRecords } from "./loa
 import { allSearchRecords, getBuyerPage } from "./chain-db";
 import { getLeadList } from "./lists";
 import { searchContactRecords, searchRecords } from "./search";
+import {hybridSearchRecords} from './hybrid';
 import { isDerivedLeadId, type BuyerRow, type BuyerSearch, type BuyerSearchResult, type BuyerView, type ContactSearchResult, type LeadList } from "./types";
 
 export * from "./types";
@@ -36,13 +37,13 @@ export async function getBuyerView(leadId: string): Promise<BuyerView | null> {
 
 /** SuperSearch buyers: `{ rows, total, facets, contactsFound, contactsTotal, page, pageSize }`. */
 export async function searchBuyers(search: BuyerSearch = {}): Promise<BuyerSearchResult> {
-  const records = await allSearchRecords();
+  const records = await hybridSearchRecords(await allSearchRecords(),getDb());
   return searchRecords(records, search, new Date());
 }
 
 /** SuperSearch contacts: one row per buying-team slot (a named person or an empty slot with Find links). */
 export async function searchContacts(search: BuyerSearch = {}): Promise<ContactSearchResult> {
-  const records = await allSearchRecords();
+  const records = await hybridSearchRecords(await allSearchRecords(),getDb());
   return searchContactRecords(records, search, new Date());
 }
 

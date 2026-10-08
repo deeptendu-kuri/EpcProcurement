@@ -4,10 +4,25 @@ import type { BuyerView } from "@/mvp/buyers/types";
 import { AnyNotChips } from "./filter-chips";
 import { BuyerSidebarView } from "./buyer-sidebar";
 import { DEFAULT_SEARCH, applySearchChange, parseSearchState, searchHref, toBuyerSearch } from "./search-state";
+import {FilterPanel} from './filter-panel';
 
 afterEach(cleanup);
 
 describe("SuperSearch URL state (docs/mvp/14 §10)", () => {
+  it('round-trips strict trigger kind/age filters and resets pagination',()=>{
+    const state=parseSearchState({trigger:'award,order,bogus',age:'90',page:'4'});
+    expect(toBuyerSearch(state,[]).triggers).toEqual({kinds:['award','order'],withinDays:90});
+    expect(parseSearchState(new URLSearchParams(searchHref(state).split('?')[1]))).toEqual(state);
+    expect(applySearchChange(state,{triggerAge:'undated'}).page).toBe(1);
+    expect(toBuyerSearch({...state,triggerAge:'undated'},[]).triggers).toEqual({kinds:['award','order'],undated:true});
+  });
+  it('offers only countries present in results, not the discovery country catalogue',()=>{
+    render(<FilterPanel state={DEFAULT_SEARCH} facets={{countries:[{value:'AE',label:'UAE',count:2}]} as never} markets={[{code:'AE',name:'UAE'},{code:'IN',name:'India'},{code:'BE',name:'Belgium'}]} catalogue={[]} onChange={vi.fn()} onClear={vi.fn()} onCollapse={vi.fn()}/>);
+    expect(screen.getByRole('button',{name:/Add UAE/})).toBeTruthy();
+    expect(screen.queryByRole('button',{name:/Add India/})).toBeNull();
+    expect(screen.queryByRole('button',{name:/Add Belgium/})).toBeNull();
+    expect(screen.getByLabelText('Trigger age')).toBeTruthy();
+  });
   it("round-trips filters through the URL and writes only non-default values", () => {
     const state = {
       ...DEFAULT_SEARCH,

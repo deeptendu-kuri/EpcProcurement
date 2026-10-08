@@ -21,6 +21,19 @@ async function seed(){
   return doc;
 }
 describe('WP6 table read model',()=>{
+  it('traverses two source-proven chain hops, dedupes contacts and does not follow cycles',async()=>{
+    const doc=await seed();const parent=(await db.query<{company_id:string}>('select company_id from search_opportunities')).rows[0].company_id;
+    const child=(await db.query<{id:string}>("insert into companies(canonical_name,normalized_name,types) values('Example Subcontractor Limited','example subcontractor',array['subcontractor']) returning id")).rows[0].id;
+    const supplier=(await db.query<{id:string}>("insert into companies(canonical_name,normalized_name,types) values('Example Supplies Limited','example supplies',array['supplier']) returning id")).rows[0].id;
+    for(const [from,to,quote] of [[parent,child,'Example Subcontractor Limited received a pipeline subcontract from Example Engineering Limited in UAE.'],[child,supplier,'Example Supplies Limited supplied Example Subcontractor Limited in UAE.'],[supplier,parent,'Example Engineering Limited supplied Example Supplies Limited in UAE.']]){
+      await db.query('update source_documents set text=text||$2 where id=$1',[doc.id,'\n'+quote]);
+      const proof=(await db.query<{id:string}>("insert into evidence(document_id,url,quote,extracted_by,quote_verified,tier,publisher_key) values($1,'https://example.com/Example-award',$2,'rule:Example',true,'B','example.com') returning id",[doc.id,quote])).rows[0].id;
+      await db.query("insert into chain_links(parent_company_id,supplier_type,company_id,action,strength,evidence_ids) values($1,'subcontractor',$2,'set','confirmed',$3::uuid[])",[from,to,[proof]]);
+    }
+    const result=await crmTables(query({run,tab:'subcontractors',company:parent}),db);
+    expect(result.total).toBe(2);expect(result.rows).toEqual(expect.arrayContaining([expect.objectContaining({name:'Example Supplies Limited',linkedToName:'Example Subcontractor Limited'})]));
+    const contacts=await crmTables(query({run,tab:'contacts',company:parent}),db);expect(contacts.rows.some(r=>'tier' in r&&r.tier===3)).toBe(true);
+  });
   it('returns one product-scoped award row with verified value/date/country and empty contacts',async()=>{
     await seed();const result=await crmTables(query({run}),db,new Date('2026-10-08'));
     expect(result.total).toBe(1);expect(result.rows[0]).toMatchObject({name:'Example Engineering Limited',operatingCountry:'AE',hqCountry:null,sellSummary:'line pipe',contactsFound:0,sourceCount:1,trigger:{kind:'award',date:'2026-09-28',valueUsd:20e6}});

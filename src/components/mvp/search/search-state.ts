@@ -4,7 +4,8 @@
  * BuyerSearch body sent to POST /api/mvp/buyers. Only non-default values are written, in a
  * fixed order, so links stay short and stable.
  */
-import type { BuyerRole, BuyerSearch, BuyerSignal, BuyerStage, ChainLinkStatus, ChainTier, SlotRole } from "@/mvp/buyers/types";
+import type { BuyerRole, BuyerSearch, BuyerSignal, BuyerStage, ChainLinkStatus, ChainTier, SlotRole, TriggerKind } from "@/mvp/buyers/types";
+export const TRIGGER_KINDS:TriggerKind[]=['award','order','tender','subcontract','capability'];
 
 export const PAGE_SIZE = 25;
 
@@ -31,6 +32,8 @@ export type ResultView = "buyers" | "contacts";
 export const CATEGORY_PREFIX = "cat:";
 
 export interface SearchUrlState {
+  triggerKinds:TriggerKind[];
+  triggerAge:string;
   locAny: string[];
   locNot: string[];
   basis: "hq" | "site";
@@ -66,6 +69,7 @@ export interface SearchUrlState {
 }
 
 export const DEFAULT_SEARCH: SearchUrlState = {
+  triggerKinds:[],triggerAge:'',
   locAny: [],
   locNot: [],
   basis: "hq",
@@ -126,6 +130,7 @@ export function parseSearchState(params: Params): SearchUrlState {
   const get = getter(params);
   const sort = get("sort");
   return {
+    triggerKinds:listOf(get('trigger'),TRIGGER_KINDS),triggerAge:['30','90','365','540','undated'].includes(get('age')??'')?get('age')!:'',
     locAny: list(get("loc")),
     locNot: list(get("locx")),
     basis: get("basis") === "site" ? "site" : "hq",
@@ -166,6 +171,7 @@ export function serializeSearchState(state: SearchUrlState): URLSearchParams {
   };
   const putList = (key: string, values: readonly string[]) => put(key, values.join(","));
   put("q", state.q);
+  putList('trigger',state.triggerKinds);put('age',state.triggerAge);
   putList("loc", state.locAny);
   putList("locx", state.locNot);
   put("basis", state.basis === "site" ? "site" : "");
@@ -260,6 +266,7 @@ function anyNot<T>(any: T[], not: T[]): { any?: T[]; not?: T[] } | undefined {
 /** The request body for POST /api/mvp/buyers (and /contacts). */
 export function toBuyerSearch(state: SearchUrlState, catalogue: CatalogueOption[] = [], pageSize = PAGE_SIZE): BuyerSearch {
   const search: BuyerSearch = { sort: state.sort, page: state.page, pageSize };
+  if(state.triggerKinds.length||state.triggerAge)search.triggers={...(state.triggerKinds.length?{kinds:state.triggerKinds}:{}),...(state.triggerAge==='undated'?{undated:true}:state.triggerAge?{withinDays:Number(state.triggerAge)}:{})};
   const location = anyNot(state.locAny, state.locNot);
   if (location || state.basis === "site") search.location = { ...location, basis: state.basis };
   const roles = anyNot(state.roleAny, state.roleNot);

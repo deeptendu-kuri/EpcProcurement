@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BuyerView } from "@/mvp/buyers/types";
+import type { BuyerView, EvidenceDrawerView } from "@/mvp/buyers/types";
+import {exampleCompany} from '@/mvp/crm/fixtures';
 import type { Opportunity } from "@/mvp/opportunities";
 import { OpportunityWorkspace } from "./workspace";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -11,6 +12,21 @@ const opportunity: Opportunity = { id: "opp-1", lead_id: "lead-1", run_id: "run-
 const buyer = { name: "Buyer", country: "IN", team: [], proof: [] } as unknown as BuyerView;
 function show(overrides: Partial<Opportunity> = {}) { return render(<OpportunityWorkspace opportunity={{ ...opportunity, ...overrides }} buyer={buyer} returnTo="/crm?search=run-1&country=IN" events={[]} drafts={[]} points={[]} demoEmail={{ enabled: true, ready: false, recipient: "test@example.com", error: "Missing key" }} />); }
 describe("guided workspace", () => {
+  it('uses verified trigger and shared source cards, separating HQ from work country',()=>{
+    const header=exampleCompany().row;header.hqCountry='BE';header.operatingCountry='AE';
+    const evidence:EvidenceDrawerView={header,why:'Example Engineering 1 Limited constructs gas pipelines in UAE.',sources:[{documentId:'Example-doc',url:'https://example.com/Example',domain:'example.com',title:'Example verified page',publishedAt:null,kind:'company_site',quotes:[{evidenceId:'Example-proof',sentence:'Example Engineering 1 Limited constructs gas pipelines in UAE.',highlight:'constructs gas pipelines',proves:'material'}]}],contacts:[],related:{above:[],below:[]},activity:[]};
+    render(<OpportunityWorkspace opportunity={{...opportunity,buying_reason:'Example unverified legacy claim',activity_quote:'Example unverified legacy claim',activity_date:'2026-10-08'}} buyer={buyer} returnTo='/crm' events={[]} drafts={[]} points={[]} demoEmail={{enabled:false,ready:false,recipient:null,error:null}} evidenceView={evidence}/>);
+    expect(screen.getByRole('region',{name:'Trigger'}).textContent).toContain('Capability only');
+    expect(screen.getByRole('article',{name:'Source: Example verified page'}).querySelector('mark')?.textContent).toBe('constructs gas pipelines');
+    const info=screen.getByRole('region',{name:'Company information'});expect(info.textContent).toContain('Headquarters countryBelgium');expect(info.textContent).toContain('Operating country · verified workUAE');
+    expect(screen.queryByText('Example unverified legacy claim')).toBeNull();
+    expect(screen.getByRole('region',{name:'Material fit and current activity'}).textContent).not.toContain('2026-10-08');
+  });
+  it('accepts contacts deep links without changing the email journey or sidebar',()=>{
+    render(<OpportunityWorkspace opportunity={opportunity} buyer={buyer} returnTo='/crm' events={[]} drafts={[]} points={[]} demoEmail={{enabled:false,ready:false,recipient:null,error:null}} initialTab='contacts'/>);
+    expect(screen.getByRole('tab',{name:'Contacts'}).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('complementary',{name:'Lead context and actions'})).toBeTruthy();
+  });
   it('guides reviewed prospect demos to conversation without requiring missing personal contact data',()=>{
     render(<OpportunityWorkspace opportunity={{...opportunity,qualification:'approved'}} buyer={buyer} returnTo='/crm' events={[]} drafts={[]} points={[]} demoOutreach demoEmail={{enabled:true,ready:true,recipient:'test@example.com',error:null}}/>);
     fireEvent.click(screen.getByRole('button',{name:'View automatic workflow'}));expect(screen.getByRole('tab',{name:'Email & meetings'}).getAttribute('aria-selected')).toBe('true');expect(screen.queryByRole('region',{name:'Lead journey'})).toBeNull();

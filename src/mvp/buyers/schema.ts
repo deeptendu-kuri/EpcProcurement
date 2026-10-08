@@ -12,6 +12,7 @@ const list = <T extends z.ZodType>(item: T) => z.array(item).max(100);
 
 export const buyerSearchSchema = z
   .object({
+    triggers:z.object({kinds:list(z.enum(['award','order','tender','subcontract','capability'])).optional(),withinDays:z.number().int().min(1).max(3650).optional(),undated:z.boolean().optional()}).strict().optional(),
     location: z.object({ any: list(text).optional(), not: list(text).optional(), basis: z.enum(["hq", "site"]).optional() }).strict().optional(),
     roles: z.object({ any: list(roles).optional(), not: list(roles).optional() }).strict().optional(),
     sell: z.object({ any: list(text).optional(), hideCompetitors: z.boolean().optional() }).strict().optional(),

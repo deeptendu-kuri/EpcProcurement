@@ -6,6 +6,14 @@ vi.mock("./api-client",()=>({apiJson:api,ApiError:class extends Error {status=50
 afterEach(()=>{cleanup();api.mockReset();});
 const run={id:"run-1",status:"done",adhoc_query:{query:"cables",productId:"cables",markets:["IN"]},events:[],counters:{itemsRead:30,relevant:20,scopedProspects:0,deferredPages:10}};
 describe("truthful research progress",()=>{
+  it('shows settled lane counts and a budget stop as completed partial coverage, not a running pause',async()=>{
+    api.mockResolvedValue({run:{...run,counters:{scopedProspects:5,sourcingLanes:{awardArticles:12,roundups:3,roundupCompanies:41,companySites:9,pending:0},coverage:{readsSkipped:2,deferred:3,reason:'Page reading budget reached'},coverageIncomplete:true}}});
+    render(<RunProgress runId='run-1'/>);
+    expect(await screen.findByText(/Finished · partial coverage/)).toBeTruthy();
+    expect(screen.getByText(/12 award\/news\/filing articles/).textContent).toContain('3 roundups fanned out to 41 identity candidates');
+    expect(screen.getByText(/This bounded batch has settled/).textContent).toContain('Page reading budget reached');
+    expect(screen.queryByText(/Paused · partial research/)).toBeNull();
+  });
   it("does not equate pages with buyer companies and explicitly reports partial coverage",async()=>{
     api.mockResolvedValue({run});render(<RunProgress runId="run-1"/>);
     expect(await screen.findByText(/Finished · partial coverage/)).toBeTruthy();
@@ -22,7 +30,7 @@ describe("truthful research progress",()=>{
   it("exposes a resumable budget pause and preserves access to previously saved companies",async()=>{
     api.mockResolvedValue({run:{...run,adhoc_query:{...run.adhoc_query,targetCompanies:70},counters:{scopedProspects:12,researchState:"partial",coverageIncomplete:true,deferredUrls:10,researchStopReason:"Page reading budget reached"}}});
     render(<RunProgress runId="run-1"/>);
-    expect(await screen.findByText(/Research paused · saved results available/)).toBeTruthy();
+    expect(await screen.findByText(/Finished · partial coverage/)).toBeTruthy();
     expect(screen.getByRole("button",{name:"Resume saved research"})).toBeTruthy();
     expect(screen.getByText(/Page reading budget reached/)).toBeTruthy();
     expect(screen.getByText(/Research target: 70 companies/)).toBeTruthy();

@@ -18,7 +18,7 @@ interface Opp {
   activity_status:string|null;material_fit_kind:string|null;
 }
 export interface CompanyTableView {row:LeadRow;role:BuyerRole;contractorRole:ContractorRow['role'];team:ContactSlot[];contacts:TableContact[];ref:WorkspaceRef;refProduct:string;qualification:string;activity:string;}
-export interface ChainTableView {row:SubcontractorRow;contacts:TableContact[];opportunityId:string|null;}
+export interface ChainTableView {row:SubcontractorRow;contacts:TableContact[];opportunityId:string|null;tier?:2|3;}
 export interface TableDataset {companies:CompanyTableView[];chain:ChainTableView[];truncated:boolean;}
 const roleOf=(types:string[],fallback:BuyerRole='epc_contractor'):BuyerRole=>types.includes('subcontractor')?'subcontractor':types.some(t=>/manufacturer|supplier/.test(t))?'manufacturer':types.includes('owner')?'owner':fallback;
 /** A name isn't a proved fact merely because its record or verification flag exists. */
@@ -67,26 +67,36 @@ export async function tableDataset(run:string,db:Queryable=getDb(),now=new Date(
     const company=await companyTableView(db,{...o,evidence_ids:[...o.evidence_ids,...extra.map(e=>e.id)]},team,now);
     if(company)companies.push(company);
   }
-  const ids=companies.map(c=>c.row.companyId);const chain:ChainTableView[]=[];
-  const links=ids.length?(await db.query<{company_id:string;parent_company_id:string;supplier_type:string;strength:'confirmed'|'likely'|'possible';evidence_ids:string[];action:string}>(`select distinct on (parent_company_id,supplier_type,company_id) * from chain_links
-    where parent_company_id=any($1::uuid[]) order by parent_company_id,supplier_type,company_id,created_at desc,id desc`,[ids])).rows:[];
+  const chain:ChainTableView[]=[];
+  // Two bounded hops: tier 2 and tier 3. No needs-map guesses or cyclic expansion.
+  let frontier=companies.map(c=>({id:c.row.companyId,name:c.row.name,root:c,path:[c.row.companyId]}));
+  const edges=new Set<string>();
+  for(const tier of [2,3] as const){
+  const next:typeof frontier=[];
+  const links=frontier.length?(await db.query<{company_id:string;parent_company_id:string;supplier_type:string;strength:'confirmed'|'likely'|'possible';evidence_ids:string[];action:string}>(`select distinct on (parent_company_id,supplier_type,company_id) * from chain_links
+    where parent_company_id=any($1::uuid[]) order by parent_company_id,supplier_type,company_id,created_at desc,id desc`,[frontier.map(p=>p.id)])).rows:[];
   for(const link of links){
     if(link.action!=='set')continue;
-    const parent=companies.find(c=>c.row.companyId===link.parent_company_id)!;
+    const parent=frontier.find(c=>c.id===link.parent_company_id)!;
+    const key=`${parent.id}:${link.company_id}`;
+    if(parent.path.includes(link.company_id)||edges.has(key))continue;
     const child=(await db.query<{canonical_name:string;domain:string|null;types:string[]}>('select canonical_name,domain,types from companies where id=$1',[link.company_id])).rows[0];
     if(!child||companyIdentityReason(child.canonical_name,{confirmedDomain:child.domain,registryRow:link.evidence_ids.length>0}))continue;
     const proof=await triggerProofs(db,link.evidence_ids);
-    const named=proof.filter(p=>namesCompany(p.quote,[child.canonical_name])&&namesCompany(p.quote,[parent.row.name]));
+    const named=proof.filter(p=>namesCompany(p.quote,[child.canonical_name])&&namesCompany(p.quote,[parent.name]));
     if(!named.length)continue; // A user-set edge without source proof remains editable in the old workspace, not asserted here.
     const same=companies.find(c=>c.row.companyId===link.company_id);
     const team=same?.team??buildTeam(roleOf(child.types,'subcontractor'),child.canonical_name,[]);
     const row:SubcontractorRow={companyId:link.company_id,name:child.canonical_name,
-      supplies:named.map(p=>capabilityLabel(selected.find(o=>o.id===parent.row.opportunityId)!.product_id,p.quote)).find(Boolean)??'',
-      linkedToCompanyId:parent.row.companyId,linkedToName:parent.row.name,
+      supplies:named.map(p=>capabilityLabel(parent.root.refProduct,p.quote)).find(Boolean)??'',
+      linkedToCompanyId:parent.id,linkedToName:parent.name,
       link:link.strength==='confirmed'&&!named.some(p=>/\b(?:subcontract\w*|supplied|supplies|nominated)\b/i.test(p.quote))?'possible':link.strength,
-      country:same?.row.operatingCountry??named.flatMap(p=>countriesInQuote(p.quote,[child.canonical_name,parent.row.name]))[0]??null,sellSummary:parent.row.sellSummary,contactsFound:same?.row.contactsFound??0,contactsTotal:team.length,
+      country:same?.row.operatingCountry??named.flatMap(p=>countriesInQuote(p.quote,[child.canonical_name,parent.name]))[0]??null,sellSummary:parent.root.row.sellSummary,contactsFound:same?.row.contactsFound??0,contactsTotal:team.length,
       sourceCount:new Set(named.map(p=>p.document_id)).size};
-    chain.push({row,opportunityId:same?.row.opportunityId??null,contacts:same?.contacts.map(c=>({...c,tier:2 as const}))??team.map(s=>({...s,companyId:link.company_id,companyName:child.canonical_name,opportunityId:null,tier:2,email:null,phone:null,validated:false,source:''}))});
+    edges.add(key);next.push({id:link.company_id,name:child.canonical_name,root:parent.root,path:[...parent.path,link.company_id]});
+    chain.push({row,tier,opportunityId:same?.row.opportunityId??null,contacts:same?.contacts.map(c=>({...c,tier}))??team.map(s=>({...s,companyId:link.company_id,companyName:child.canonical_name,opportunityId:null,tier,email:null,phone:null,validated:false,source:''}))});
+  }
+  frontier=next;
   }
   return {companies,chain,truncated:opps.length>2000};
 }
@@ -104,8 +114,10 @@ export function filterTables(data:TableDataset,q:TableQuery,now=new Date()):Tabl
       &&(!q.activity||(q.activity==='active'?['recent','ongoing'].includes(c.activity):c.activity===q.activity));
   });
   const contractors:ContractorRow[]=match.flatMap(c=>c.row.trigger&&c.row.trigger.kind!=='capability'&&c.row.trigger.role!=='owner'&&c.row.trigger.role!=='supplier'?[{...c.row,role:c.contractorRole,projectName:c.row.trigger.projectName,ownerName:c.row.trigger.ownerName}]:[]);
-  const selected=new Set(match.map(c=>c.row.companyId));const chain=data.chain.filter(c=>selected.has(c.row.linkedToCompanyId));
-  const contacts=[...match.flatMap(c=>c.contacts),...chain.filter(c=>!selected.has(c.row.companyId)).flatMap(c=>c.contacts)];
+  const selected=new Set(match.map(c=>c.row.companyId));const reachable=new Set(selected);
+  for(let hop=0;hop<2;hop++)for(const c of data.chain)if(reachable.has(c.row.linkedToCompanyId))reachable.add(c.row.companyId);
+  const chain=data.chain.filter(c=>reachable.has(c.row.linkedToCompanyId));
+  const contacts=[...new Map([...match.flatMap(c=>c.contacts),...chain.filter(c=>!selected.has(c.row.companyId)).flatMap(c=>c.contacts)].map(c=>[`${c.companyId}:${c.slotId}`,c])).values()];
   const lists={leads:match.map(c=>c.row),contractors,subcontractors:chain.map(c=>c.row),contacts};
   const rows:TableRow[]=[...lists[q.tab]];
   const number=(r:TableRow,field:'date'|'value'|'fit')=>'trigger' in r?(field==='date'?(r.trigger?.date?Date.parse(r.trigger.date):-Infinity):field==='value'?r.trigger?.valueUsd??-Infinity:r.fitScore):-Infinity;

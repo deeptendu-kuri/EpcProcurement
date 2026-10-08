@@ -38,7 +38,8 @@ export async function sourceCards(db:Queryable,ids:string[]):Promise<SourceCard[
     const quote=originalQuote(r.text,r.quote);if(!quote)continue;
     let domain:string;try{const u=new URL(r.url);if(!['https:','http:'].includes(u.protocol))continue;domain=u.hostname;}catch{continue;}
     const classified=classifyPage({url:r.url,title:r.title,text:r.text});
-    const kind:SourceCard['kind']=r.source_key.startsWith('directory:')?'directory':classified==='article'?'news':classified==='junk'?'news':classified;
+    if(classified==='junk')continue;
+    const kind:SourceCard['kind']=r.source_key.startsWith('directory:')?'directory':classified==='article'?'news':classified;
     const card=cards.get(r.document_id)??{documentId:r.document_id,url:r.url,domain,title:r.title??domain,publishedAt:r.published_at,kind,quotes:[]};
     for(const proves of proofGroups(r.fields,quote))card.quotes.push({evidenceId:r.id,sentence:sentenceFor(r.text,quote,null,null)??quote,highlight:quote,proves});
     cards.set(r.document_id,card);
