@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:cloud": "node scripts/build-cloud.mjs",
     "start": "next start",
     "start:cloud": "node scripts/start-cloud.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
@@ -47,5 +48,8 @@
     "typescript": "6.0.2",
     "vitest": "4.1.11"
   },
-  "packageManager": "pnpm@11.19.0"
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22.13.0 <23 || >=24 <25"
+  }
 }

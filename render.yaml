@@ -7,12 +7,12 @@ services:
     plan: free
     # Match the demo Neon database's us-east-2 region to reduce SQL round-trip latency.
     region: ohio
-    buildCommand: corepack pnpm install --frozen-lockfile && corepack pnpm build
+    buildCommand: corepack pnpm install --frozen-lockfile && corepack pnpm build:cloud
     startCommand: corepack pnpm start:cloud
     healthCheckPath: /api/mvp/health
     envVars:
       - key: NODE_VERSION
-        value: "22"
+        value: "24"
       - key: DATABASE_URL
         sync: false
       - key: DEMO_PASSWORD
@@ -33,3 +33,29 @@ services:
         sync: false
       - key: MVP_OFFLINE
         value: "0"
+      - key: APPROVED_DEMO_RECIPIENT_EMAIL
+        sync: false
+      - key: RESEND_RECEIVING_DOMAIN
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: EMAILABLE_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: SALES_PERSON_NAME
+        sync: false
+      - key: MVP_FUNNEL_WORKER
+        value: "on"
+      - key: MVP_PROSPECT_DEMO_OUTREACH
+        value: "on"
+      - key: MVP_DEMO_PROSPECTS_PER_SEARCH
+        value: "1"
+      - key: MVP_RESEARCH_NEWS
+        value: "off"
+      - key: MVP_SCHEDULER
+        value: "off"
+      - key: MVP_OUTREACH_WORKER
+        value: "off"
