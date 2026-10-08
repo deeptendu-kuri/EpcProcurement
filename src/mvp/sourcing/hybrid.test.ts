@@ -43,8 +43,8 @@ describe('WP1 hybrid durable run',()=>{
     const capability=jobs.flatMap(j=>j.result.triggers??[]).find(t=>t.kind==='capability');
     expect(awardTrigger).toBeDefined();expect(capability).toBeDefined();
     expect(awardTrigger?.date).toBe('2026-09-28');expect(capability?.date).toBeNull();
-    const awardCompany=(await db.query<{name:string}>('select c.canonical_name as name from companies c join project_parties pp on pp.company_id=c.id where pp.id=$1',[awardTrigger!.id])).rows[0].name;
-    const capabilityCompany=(await db.query<{name:string}>('select c.canonical_name as name from companies c join search_opportunities o on o.company_id=c.id where o.id=$1',[capability!.id])).rows[0].name;
+    const awardCompany=(await db.query<{name:string}>('select c.canonical_name as name from companies c join company_triggers t on t.company_id=c.id where t.id=$1',[awardTrigger!.id])).rows[0].name;
+    const capabilityCompany=(await db.query<{name:string}>('select c.canonical_name as name from companies c join company_triggers t on t.company_id=c.id where t.id=$1',[capability!.id])).rows[0].name;
     expect(awardCompany).toMatch(/Kalpataru|KPIL/);expect(capabilityCompany).toMatch(/Tekzone/i);
     expect(awardCompany).not.toBe(capabilityCompany);
     expect((await db.query('select id from runs')).rows).toHaveLength(1);

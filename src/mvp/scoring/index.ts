@@ -137,7 +137,8 @@ export function scoreContext(ctx: ScoringContext): LeadScore {
 async function touchedProjects(db: Queryable, runId: string): Promise<string[]> {
   const { rows } = await db.query<{ project_id: string }>(
     `with ev as (
-       select e.id from evidence e join source_documents d on d.id = e.document_id where d.run_id = $1
+       select e.id from evidence e join source_documents d on d.id = e.document_id
+       where d.run_id = $1 or exists(select 1 from run_documents rd where rd.document_id=d.id and rd.run_id=$1)
      ), fe as (
        select entity_type, entity_id from fact_evidence where evidence_id in (select id from ev)
      )
@@ -246,6 +247,8 @@ export async function buildSignalsAndScore(
   const runRef = run.exists ? runId : null;
 
   const touched = run.exists ? await touchedProjects(db, runId) : [];
+  // A real empty search must not re-score unrelated historic projects globally.
+  if(run.exists&&!touched.length)return {created:0,updated:0};
   const scope = touched.length ? touched : null;
 
   await buildSignals(db, scope, runRef, now);

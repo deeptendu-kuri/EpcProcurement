@@ -94,7 +94,7 @@ export async function seedRoundup(db:Db,runId:string,input:RunInput,result:Round
     if(company.role==='owner'||company.role==='consultant')continue;
     const candidate=await db.tx(tx=>registerCandidate(tx,runId,company.name,company.domain??null,result.found_via.documentId,company.quote));
     seeded++;
-    // Keep provenance durably on the fan-out job until WP5's additive candidate column.
+    await db.query('update research_candidates set found_via=$2::jsonb where id=$1',[candidate.id,JSON.stringify(result.found_via)]);
     const domain=candidate.domain_hint;
     if(!domain&&process.env.TAVILY_API_KEY?.trim()){
       // One provider request per durable job, not 40 requests inside a five-minute lease.

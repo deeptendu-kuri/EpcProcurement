@@ -16,10 +16,13 @@ The full inventory also contains the actual RevenueBase **India** Top 25 directo
 
 ## Local checks so far
 
+WP5 persists verified triggers and operating countries, resolves name variants before opportunity insertion, and records roundup provenance. Replayed KPIL extraction is idempotent; same company/value (±15%)/dated reports (≤30 days) union their evidence. A `+` in the actual ₹4,000+ crore headline no longer makes the rules parser lose the crore multiplier. USD equivalents use the existing approximate fixed conversion rates, not live FX. The saved West-team TED notice proves an award and value, but only has a **publication** date: its award date stays unknown. Confirmed subcontract edges require a quote naming both companies. The legacy run-C AVK/Jindal derived rows have no award proofs and must not be upgraded to confirmed links merely to satisfy an acceptance example.
+
 WP4 regressions preserve 20 original A/B pages (19 company/investigation pages plus the rejected World Nuclear Association page), not 20 distinct positive companies. Service, contact and archive pages are tested in corroborated same-company bundles: a contact page alone does not prove material-consuming work. Headquarters are never replaced with work geography, branch offices are not headquarters, and copyright/fetch dates are not award dates. The Jan De Nul Belgian-HQ scenario is explicitly labelled Example; the real Abu Dhabi work quote is unchanged.
 
 - WP1: typecheck, lint, 856 passing tests (2 skipped), production build passed. Commit `2327dc4`.
 - WP2: typecheck, lint, 874 passing tests (2 skipped), production build passed. Commit `d6a17bb`.
 - WP3 final check: typecheck, lint, 884 passing tests (2 skipped), production build passed. Ten new fan-out regressions, including the actual India directory; provider calls mocked. The package commit was amended only after all four checks passed again.
 - WP4: typecheck, lint, 916 passing tests (2 skipped), production build passed. Thirty-two new regressions cover original A/B pages, company hygiene, headquarters versus work geography and sourced activity labels. Two heavy offline integration tests now have explicit 30-second limits after a measured five-second timeout; no assertions were removed.
+- WP5: typecheck, lint, 929 passing tests (2 skipped), production build passed. Thirteen trigger/deduplication regressions include saved run-C originals, publication-versus-award dates, original-text rechecking and evidence-required subcontract links. The migration runner's expected local migration count is now 23.
 - No live searches have been run for these packages. No cloud migrations, push or deployment.

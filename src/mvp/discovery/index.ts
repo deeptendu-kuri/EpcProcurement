@@ -12,6 +12,7 @@ import { companyContactsFromPage } from "@/mvp/enrichment/public-contacts";
 import { bundleScope, bundleSource, type CompanyBundle } from './bundle';
 import {countriesInQuote} from './locations';
 import {companyIdentityReason} from '@/mvp/sourcing/entities';
+import {resolveBuyerCompany,storeTrigger} from '@/mvp/sourcing/triggers';
 
 const operatingCountrySchema=z.object({country:z.string().length(2),quote:z.string().min(5).max(1200)});
 // Optional enrichment must not erase a supported company. Discard malformed
@@ -135,9 +136,7 @@ export async function saveBuyer(db:Db,runId:string,input:RunInput,documentId:str
   if(!source || source.url!==raw.url || raw.isSample || !checked)throw new Error("Original-page buyer evidence failed validation; nothing saved.");
   b=checked;
   return db.tx(async tx=>{
-    const normalized=b.company.toLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").trim();
-    const company=(await tx.query<{id:string}>("select id from companies where normalized_name=$1 and country is not distinct from $2 order by created_at limit 1",[normalized,b.country])).rows[0]
-      ?? (await tx.query<{id:string}>("insert into companies(canonical_name,normalized_name,country,types) values($1,$2,$3,$4::text[]) returning id",[b.company,normalized,b.country,[b.role==="epc_contractor"?"main_epc":b.role]])).rows[0];
+    const company=await resolveBuyerCompany(tx,b.company,b.country,b.role==='epc_contractor'?'main_epc':b.role,bundle?.candidate.domain_hint??null);
     let projectId:string|null=null;
     if(b.project) {
       const normalizedProject=b.project.toLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").trim();
@@ -200,6 +199,9 @@ export async function saveBuyer(db:Db,runId:string,input:RunInput,documentId:str
       fit_score=greatest(fit_score,$9),discovery_version=$11
       where run_id=$1 and company_id=$2 and product_id=$3`,
       [runId,company.id,product.id,evidence,fit,activity.status,activity.date,activity.quote,priority.score,JSON.stringify(priority.components),DISCOVERY_VERSION]);
+    await storeTrigger(tx,runId,company.id,product.id,{kind:'capability',role:b.role==='subcontractor'?'subcontractor':'contractor',title:b.productQuote,
+      date:null,datePrecision:'unknown',valueUsd:null,valueText:null,country:b.operatingCountries?.[0]?.country??null,
+      projectId:null,projectName:null,ownerName:null,strength:'possible',evidenceIds:evidence});
     return inserted.rows.length>0;
   });
 }

@@ -26,6 +26,8 @@ import { detectMarkets } from '@/mvp/pipeline/filter';
 import { buildSignalsAndScore } from '@/mvp/scoring';
 import { captureOpportunities } from '@/mvp/opportunities';
 import { awardTriggerSnapshots, budgetedAwardProviders, capabilityTriggerSnapshots } from '@/mvp/sourcing/hybrid';
+import {persistAwardTriggers} from '@/mvp/sourcing/triggers';
+import {persistRoundupAwards} from '@/mvp/sourcing/roundup-triggers';
 import { tedSource } from '@/mvp/pipeline/sources/ted';
 import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@/mvp/sourcing/roundup';
 
@@ -169,6 +171,7 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         if(!await db.tx(tx=>owned(tx,job)))return {processed:true,stale:true};
         await db.query('update research_jobs set result=$3::jsonb where id=$1 and lease_token=$2',[job.id,job.lease_token,JSON.stringify({roundup})]);
         const seeded=await seedRoundup(db,job.run_id,input,roundup,session.budget);
+        await persistRoundupAwards(db,job.run_id,input,roundup);
         await completeJob(db,job,{roundup,...seeded,budgetLimited:providers.limited,coverageWarning:roundup.warnings.length>0});
         await researchProgress(db,job.run_id,'check',`Roundup: ${seeded.seeded} verified identity candidates; ${seeded.queued} website reads and ${seeded.lookups} bounded lookup tasks. Candidates are not confirmed buyers.`);
         for(const warning of roundup.warnings)await researchProgress(db,job.run_id,'info',warning);
@@ -192,9 +195,9 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
           return true;
         });
         if(!resolved)return {processed:true,stale:true};
+        const triggers=await persistAwardTriggers(db,job.run_id,input.productId!,await awardTriggerSnapshots(db,id));
         await buildSignalsAndScore(job.run_id,{db});
         await captureOpportunities(job.run_id,input,db);
-        const triggers=await awardTriggerSnapshots(db,id);
         await completeJob(db,job,{extracted,triggers,factsKept:extracted.stats.kept,factsDropped:extracted.stats.dropped,budgetLimited:providers.limited});
         await researchProgress(db,job.run_id,'check',`Award analysis: ${triggers.length} verified triggers; ${extracted.stats.kept} facts kept, ${extracted.stats.dropped} quotes dropped.${providers.limited?' Shared AI coverage limit; rules-only facts retained.':''}`);
         await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};

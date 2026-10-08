@@ -8,6 +8,7 @@ import { originalQuote } from '@/mvp/discovery/evidence';
 import { buyerPageCandidate } from '@/mvp/discovery/plan';
 import { reserveAnalysis, reserveBudget, markBudget, type ResearchBudget } from '@/mvp/research/store';
 import { isJsonGenerationError,JSON_ONLY_INSTRUCTION } from '@/mvp/llm/groq';
+import {triggersForCompany} from './triggers';
 
 /** Initial routing, replaced by the richer deterministic classifier in WP2. */
 export function needsAwardAnalysis(raw: RawDoc, text: string, input: RunInput): boolean {
@@ -95,8 +96,7 @@ export async function capabilityTriggerSnapshots(db: Queryable, runId: string, p
     const proofs=(await db.query<Proof>(`select e.id,e.quote,d.text,'' as field from evidence e join source_documents d on d.id=e.document_id
       where e.id=any($1::uuid[]) and e.document_id=any($2::uuid[]) and e.quote_verified=true`,[row.evidence_ids,documentIds])).rows.filter(p=>originalQuote(p.text,p.quote)!==null);
     if(!proofs.length)continue;
-    out.push({id:row.id,kind:'capability',role:'contractor',title:proofs[0].quote,date:null,datePrecision:'unknown',valueUsd:null,
-      valueText:null,country:null,projectId:null,projectName:null,ownerName:null,strength:'possible',evidenceIds:proofs.map(p=>p.id)});
+    out.push(...(await triggersForCompany(db,row.company_id,runId,productId)).filter(t=>t.kind==='capability'&&t.evidenceIds.some(id=>proofs.some(p=>p.id===id))));
   }
   return out;
 }

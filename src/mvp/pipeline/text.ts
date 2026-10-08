@@ -165,7 +165,7 @@ const CURRENCY_ALIASES: Record<string, string> = {
 
 /** Money pattern used by the rules extractor and by `parseMoney`. */
 export const MONEY_RE =
-  /(?:(US\$|USD|\$|€|EUR|£|GBP|INR|Rs\.?|₹|SAR|SR|AED|QAR|OMR|KWD|BHD|NOK|MYR|RM|SEK|DKK)\s?(\d[\d,]*(?:\.\d+)?)(?:\s?(billion|million|crores?|lakhs?|thousand|bn|mn|mln|cr)\b)?|(\d[\d,]*(?:\.\d+)?)\s?(billion|million|crores?|lakhs?|bn|mn)?\s?(USD|EUR|INR|SAR|AED|QAR|OMR|KWD|BHD|NOK|MYR|SEK|DKK)\b)/i;
+  /(?:(US\$|USD|\$|€|EUR|£|GBP|INR|Rs\.?|₹|SAR|SR|AED|QAR|OMR|KWD|BHD|NOK|MYR|RM|SEK|DKK)\s?(\d[\d,]*(?:\.\d+)?)\+?(?:\s?(billion|million|crores?|lakhs?|thousand|bn|mn|mln|cr)\b)?|(\d[\d,]*(?:\.\d+)?)\+?\s?(billion|million|crores?|lakhs?|bn|mn)?\s?(USD|EUR|INR|SAR|AED|QAR|OMR|KWD|BHD|NOK|MYR|SEK|DKK)\b)/i;
 
 /** Parse "USD 450 million", "Rs 1,250 crore", "35000000 NOK" → amount, currency and USD value. */
 export function parseMoney(text: string | null | undefined): { amount: number; currency: string; usd: number | null } | null {
@@ -286,6 +286,8 @@ export function displayCompanyName(name: string): string {
 
 /** Well-known companies written several ways in the press; each group counts as one company. */
 const KNOWN_ALIAS_GROUPS: { key: string; short: string; country: string | null; names: string[] }[] = [
+  // Full name and acronym are explicitly paired in the stored September 2026 filing reports.
+  { key:'kpil',short:'KPIL',country:'IN',names:['KPIL','Kalpataru Projects International','Kalpataru Projects International Limited'] },
   { key: "aramco", short: "Aramco", country: "SA", names: ["saudi aramco", "aramco", "saudi arabian oil", "saudi arabian oil company"] },
   { key: "adnoc", short: "ADNOC", country: "AE", names: ["adnoc", "abu dhabi national oil", "abu dhabi national oil company"] },
   { key: "petronas", short: "PETRONAS", country: "MY", names: ["petronas", "petroliam nasional", "petroliam nasional berhad"] },

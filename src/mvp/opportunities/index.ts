@@ -5,6 +5,7 @@ import type { BuyerRecord } from "@/mvp/buyers/view";
 import type { RunInput, RunRow } from "@/mvp/types";
 import { journey, uniquePublishedContacts, verifiedProspect } from "./workflow";
 import { searchedProductLabel } from '@/mvp/config/product-label';
+import {strongestTrigger,syncOpportunityTrigger,triggersForCompany} from '@/mvp/sourcing/triggers';
 
 export interface Opportunity {
   id: string; run_id: string; lead_id: string; keyword: string; product_id: string; product_name: string;
@@ -50,7 +51,11 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
     for (const record of records) {
       if (!eligibleForProduct(record, product.id)) continue;
       if (!awards.some(s => s.company_id === record.view.companyId && s.project_id === record.projectId && s.evidence_ids.some(id => readIds.has(id)))) continue;
-      if (!record.view.country || !input.markets.includes(record.view.country)) continue;
+      const best=strongestTrigger(await triggersForCompany(tx,record.view.companyId,runId,product.id));
+      // Hybrid work geography is independently verified; never reject a Belgian HQ for UAE work.
+      // Older/offline searches keep their established country eligibility without claiming a trigger.
+      const hybrid=(await tx.query('select run_id from research_sessions where run_id=$1',[runId])).rows.length>0;
+      if(best?.country?!input.markets.includes(best.country):!hybrid&&(!record.view.country||!input.markets.includes(record.view.country)))continue;
       const proof = record.view.proof.filter(p => readIds.has(p.evidenceId));
       if (!proof.length) continue;
       if (companies.has(record.view.companyId)) continue;
@@ -62,6 +67,9 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
         [runId, record.view.leadId, input.query, product.id, searchedProductLabel(product.id,input.query),
           input.contactRole ?? "buyer", `${record.view.buyingReason} Potential need: ${item.why}`, proof.map(p => p.evidenceId), record.view.companyId]);
       count += result.rows.length;
+      if(!result.rows.length)await tx.query(`update search_opportunities set evidence_ids=array(select distinct unnest(evidence_ids||$4::uuid[]))
+        where run_id=$1 and company_id=$2 and product_id=$3`,[runId,record.view.companyId,product.id,proof.map(p=>p.evidenceId)]);
+      await syncOpportunityTrigger(tx,runId,record.view.companyId,product.id);
     }
   });
   return count;
