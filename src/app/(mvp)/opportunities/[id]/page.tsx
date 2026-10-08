@@ -8,7 +8,7 @@ import { OpportunityWorkspace } from "@/components/mvp/opportunities/workspace";
 import { enrichmentView } from "@/mvp/enrichment";
 import { prospectDemoEnabled } from "@/mvp/automation/config";
 
-export default async function OpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string;tab?:string;calendar?:string }> }) {
+export default async function OpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ returnTo?: string;tab?:string;calendar?:string;open?:string }> }) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
   const opportunity = await getOpportunity(id);
@@ -25,5 +25,5 @@ export default async function OpportunityPage({ params, searchParams }: { params
     db.query<{ person_id: string; value: string; verified_at: string | null; source: string; kind: string }>("select cp.person_id, cp.value, cp.verified_at, cp.source, cp.kind from contact_points cp join people p on p.id = cp.person_id where p.current_company_id = $1 and cp.kind in ('email','phone') order by cp.created_at desc", [buyer.companyId]),
     getLeadDetail(opportunity.lead_id),
   ]);
-  return <OpportunityWorkspace key={id} opportunity={opportunity} buyer={buyer} detail={detail} events={events.rows} drafts={drafts.rows} points={points.rows} demoEmail={demoEmailInfo()} returnTo={returnTo} enrichment={await enrichmentView(id)} initialTab={query.tab==='conversation'?'conversation':undefined} calendarResult={query.calendar} demoOutreach={prospectDemoEnabled()} />;
+  return <OpportunityWorkspace key={id} opportunity={opportunity} buyer={buyer} detail={detail} events={events.rows} drafts={drafts.rows} points={points.rows} demoEmail={demoEmailInfo()} returnTo={returnTo} enrichment={await enrichmentView(id)} initialTab={query.tab==='conversation'?'conversation':undefined} calendarResult={query.calendar} demoOutreach={prospectDemoEnabled()} initialEvidenceOpen={query.open} />;
 }

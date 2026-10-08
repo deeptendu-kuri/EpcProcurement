@@ -20,13 +20,14 @@ const AGREEMENT_TEXT: Record<Agreement, string> = {
 };
 
 /** Provides the lead's evidence map and the side panel that ⓘ buttons open. */
-export function EvidenceProvider({ evidence, children }: { evidence: Record<string, EvidenceView>; children: React.ReactNode }) {
+export function EvidenceProvider({ evidence, children, onOpenEvidence }: { evidence: Record<string, EvidenceView>; children: React.ReactNode; onOpenEvidence?:(ids:string[],title?:string)=>void }) {
   const [state, setState] = useState<{ ids: string[]; title?: string } | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   const open = useCallback((ids: string[], title?: string) => {
+    if(onOpenEvidence){onOpenEvidence(ids,title);return;}
     returnFocus.current = document.activeElement as HTMLElement | null;
     setState({ ids, title });
-  }, []);
+  }, [onOpenEvidence]);
   const close = useCallback(() => {
     setState(null);
     returnFocus.current?.focus?.();

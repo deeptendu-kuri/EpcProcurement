@@ -1,0 +1,74 @@
+'use client';
+import {useEffect,useRef,useState} from 'react';
+import Link from 'next/link';
+import {useRouter} from 'next/navigation';
+import type {EvidenceDrawerView} from '@/mvp/buyers/types';
+import {BUYER_STAGE_LABELS} from '@/mvp/buyers/types';
+import {marketName} from '@/mvp/config/markets';
+import {apiJson} from '../api-client';
+import {getBuyer} from '../search/buyer-api';
+import {AddToListDialog} from '../search/lead-lists';
+import {AddContactModal} from '../buyers/add-contact-modal';
+import {addContact} from '../buyers/chain-api';
+import {SourceCards} from './source-card';
+
+export interface DrawerTarget {opportunityId?:string;companyId?:string;leadId?:string;run?:string}
+export const drawerKey=(t:DrawerTarget)=>t.opportunityId??(t.companyId?`company:${t.companyId}`:t.leadId??'');
+export function parseDrawerTarget(value:string,run?:string):DrawerTarget|null{
+  const uuid=/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+  if(uuid.test(value))return {opportunityId:value,run};
+  if(value.startsWith('company:')&&uuid.test(value.slice(8)))return {companyId:value.slice(8),run};
+  return null;
+}
+export function EvidenceDrawer({target,onClose,onTarget,onNext,onPrevious,returnTo='/crm',initial}:{target:DrawerTarget;onClose:()=>void;onTarget?:(target:DrawerTarget)=>void;onNext?:()=>void;onPrevious?:()=>void;returnTo?:string;initial?:EvidenceDrawerView}){
+  const key=drawerKey(target),router=useRouter();const panel=useRef<HTMLDivElement>(null);
+  const [loaded,setLoaded]=useState<{key:string;view?:EvidenceDrawerView;error?:string}>(initial?{key,view:initial}:{key:''});
+  const [list,setList]=useState(false);const [adding,setAdding]=useState<EvidenceDrawerView['contacts'][number]|null>(null);const [actionError,setActionError]=useState('');
+  const [retry,setRetry]=useState(0);
+  useEffect(()=>{
+    if(initial&&retry===0)return;
+    const controller=new AbortController();
+    void (async()=>{
+      try{
+        let company=target.companyId;
+        if(!target.opportunityId&&!company&&target.leadId)company=(await getBuyer(target.leadId,controller.signal)).companyId;
+        const path=target.opportunityId?`/api/mvp/evidence/${encodeURIComponent(target.opportunityId)}`:`/api/mvp/evidence/company/${encodeURIComponent(company??'')}?run=${encodeURIComponent(target.run&&target.run!=='none'?target.run:'all')}`;
+        const view=await apiJson<EvidenceDrawerView>(path,{signal:controller.signal});if(!controller.signal.aborted)setLoaded({key,view});
+      }catch(e){if(!controller.signal.aborted)setLoaded({key,error:e instanceof Error?e.message:'Could not load verified evidence.'});}
+    })();return ()=>controller.abort();
+  },[key,target.companyId,target.opportunityId,target.leadId,target.run,initial,retry]);
+  useEffect(()=>{
+    const previous=document.activeElement as HTMLElement|null;panel.current?.focus();
+    return ()=>{if(previous?.isConnected)previous.focus();};
+  },[]);
+  useEffect(()=>{
+    const onKey=(e:KeyboardEvent)=>{
+      if(e.key==='Escape'){e.preventDefault();onClose();return;}
+      if(e.target instanceof HTMLElement&&e.target.closest('input,textarea,select,[contenteditable="true"]'))return;
+      if(e.key==='j'&&onNext){e.preventDefault();onNext();}
+      if(e.key==='k'&&onPrevious){e.preventDefault();onPrevious();}
+      if(e.key==='Tab'){
+        const nodes=Array.from(panel.current?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input,select,textarea,[tabindex="0"]')??[]);
+        const first=nodes[0],last=nodes.at(-1);
+        if(e.shiftKey&&(document.activeElement===first||document.activeElement===panel.current)){e.preventDefault();last?.focus();}
+        else if(!e.shiftKey&&(document.activeElement===last||document.activeElement===panel.current)){e.preventDefault();first?.focus();}
+      }
+    };window.addEventListener('keydown',onKey);return ()=>window.removeEventListener('keydown',onKey);
+  },[onClose,onNext,onPrevious]);
+  const view=loaded.key===key?loaded.view:undefined;const error=loaded.key===key?loaded.error:undefined;
+  const workspace=view?.header.opportunityId?`/opportunities/${view.header.opportunityId}?returnTo=${encodeURIComponent(/^\/crm(?:\?|$)/.test(returnTo)?returnTo:'/crm')}`:null;
+  const reject=async()=>{if(!view?.header.opportunityId)return;try{await apiJson(`/api/mvp/opportunities/${view.header.opportunityId}`,{method:'PATCH',body:{qualification:'rejected'}});router.refresh();onClose();}catch(e){setActionError(e instanceof Error?e.message:'Could not update.');}};
+  return <div className="fixed inset-0 z-50 flex justify-end" role="presentation"><button className="absolute inset-0 bg-slate-900/25" aria-label="Close evidence drawer" onClick={onClose}/><div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="hybrid-evidence-title" className="relative h-full w-full max-w-[560px] overflow-y-auto bg-white shadow-2xl outline-none">
+    <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--line)] bg-white px-5 py-4"><h2 id="hybrid-evidence-title" className="font-bold">Company evidence</h2><div className="flex gap-2"><button disabled={!onPrevious} onClick={onPrevious} aria-label="Previous result" className="btn btn-secondary btn-sm">↑ k</button><button disabled={!onNext} onClick={onNext} aria-label="Next result" className="btn btn-secondary btn-sm">↓ j</button><button onClick={onClose} aria-label="Close" className="btn btn-secondary btn-sm">✕</button></div></div>
+    {!view&&!error?<p role="status" className="p-5">Checking original sources…</p>:null}{error?<div role="alert" className="p-5"><p>{error}</p><button onClick={()=>setRetry(n=>n+1)} className="btn btn-secondary mt-3">Retry</button></div>:null}
+    {view?<div className="space-y-6 p-5"><header><h3 className="text-xl font-bold">{view.header.name}</h3><p className="mt-1 text-sm text-[var(--muted)]">{view.header.whatTheyDo}{view.header.operatingCountry?` · Work in ${marketName(view.header.operatingCountry)}`:''}</p><div className="mt-3 flex flex-wrap gap-2"><span className="pill">{view.header.trigger?.kind==='capability'?'Capability only':view.header.trigger?.kind??'Trigger not established'}</span>{view.header.trigger?.date?<span className="pill">{view.header.trigger.date}</span>:null}<span className="pill">{BUYER_STAGE_LABELS[view.header.stage]} · {view.header.fitScore}</span></div><div className="mt-4 flex flex-wrap gap-2">{workspace?<Link className="btn btn-primary btn-sm" href={workspace}>Open workspace</Link>:<span className="text-xs">Related company · no saved product opportunity</span>}{target.leadId&&!target.leadId.startsWith('derived:')?<button onClick={()=>setList(true)} className="btn btn-secondary btn-sm">Add to list</button>:null}{workspace?<button onClick={()=>void reject()} className="btn btn-secondary btn-sm">Not relevant</button>:null}</div></header>
+      {actionError?<p role="alert">{actionError}</p>:null}<section><h3 className="font-bold">Why this is a lead</h3><p className="mt-2 text-sm leading-6">{view.why}</p><p className="mt-2 text-xs text-[var(--muted)]">Potential customer, not a confirmed purchase. {view.header.sellSummary?`Searched product: ${view.header.sellSummary}.`:''}</p></section>
+      <section><h3 className="mb-3 font-bold">Sources ({view.sources.length})</h3><SourceCards sources={view.sources}/></section>
+      <section><h3 className="font-bold">Related companies</h3>{!view.related.above.length&&!view.related.below.length?<p className="mt-2 text-sm text-[var(--muted)]">No source-backed relationship established.</p>:null}{[...view.related.above.map(r=>({r,id:r.linkedToCompanyId,name:r.linkedToName,direction:'Contractor above'})),...view.related.below.map(r=>({r,id:r.companyId,name:r.name,direction:'Supplier / subcontractor below'}))].map(({r,id,name,direction})=><div key={`${direction}:${id}`} className="mt-2 rounded-lg bg-[var(--subtle)] p-3 text-sm"><p>{direction} · {r.link}</p><button disabled={!onTarget} className="mt-1 font-semibold text-[var(--accent-2)] underline" onClick={()=>onTarget?.({companyId:id,run:target.run})}>{name} · show their evidence</button></div>)}</section>
+      <section><h3 className="font-bold">Contacts</h3><p className="mt-1 text-xs text-[var(--muted)]">Role review is not email validation. Validated addresses are available in Contacts.</p><ul className="mt-3 space-y-2">{view.contacts.map(s=><li key={s.slotId} className="rounded-lg border border-[var(--line)] p-3 text-sm"><p className="font-semibold">{s.person?.name??s.title}</p><p className="text-xs text-[var(--muted)]">{s.role.replaceAll('_',' ')} · {s.person?s.status==='confirmed'?'Role reviewed':'Likely':'Not found'}</p><div className="mt-2 flex gap-3">{s.findLinks[0]?<a href={s.findLinks[0].url} target="_blank" rel="noreferrer" className="underline">Find</a>:null}<button className="underline" onClick={()=>setAdding(s)}>Add</button>{workspace?<Link href={`${workspace}&tab=contacts`} className="underline">Validate</Link>:null}</div></li>)}</ul></section>
+      <section><h3 className="font-bold">Activity</h3><ul className="mt-2 space-y-2 text-sm">{view.activity.map((a,i)=><li key={`${a.at}:${i}`}><p>{a.text}</p><time className="text-xs text-[var(--muted)]">{a.at}</time></li>)}{!view.activity.length?<li className="text-[var(--muted)]">No activity yet.</li>:null}</ul></section>
+    </div>:null}
+    {list&&target.leadId?<AddToListDialog leadIds={[target.leadId]} onClose={()=>setList(false)}/>:null}
+    {adding&&view?<AddContactModal company={view.header.name} slotTitle={adding.title} onClose={()=>setAdding(null)} onSubmit={async values=>{await addContact({...values,companyId:view.header.companyId,slotId:adding.slotId,leadId:target.leadId&&!target.leadId.startsWith('derived:')?target.leadId:undefined});setRetry(n=>n+1);router.refresh();}}/>:null}
+  </div></div>;
+}

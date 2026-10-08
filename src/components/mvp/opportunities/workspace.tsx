@@ -18,6 +18,7 @@ import { SupplyChainExplorer } from "../buyers/supply-chain-explorer";
 import { ProofList } from "../search/buyer-sections";
 import { BuyerHistorySection, ProjectSection, SupplyChainSection } from "../lead-sections";
 import { EvidenceProvider } from "../evidence";
+import {EvidenceDrawer,parseDrawerTarget,drawerKey,type DrawerTarget} from '../evidence/evidence-drawer';
 import { OpportunityRail, namedContacts, WORKSPACE_TABS, type ContactPoint, type WorkspaceTab } from "./workspace-rail";
 
 interface Props {
@@ -25,11 +26,11 @@ interface Props {
   events: { id: number; body: string; created_at: string }[];
   drafts: { id: string; subject: string | null; body: string | null; delivery_state: string | null; delivery_recipient: string | null; campaign_status: string | null; created_at: string }[];
   points: ContactPoint[]; enrichment?: EnrichmentView; detail?: LeadDetail | null;
-  initialTab?:WorkspaceTab; calendarResult?:string; demoOutreach?:boolean;
+  initialTab?:WorkspaceTab; calendarResult?:string; demoOutreach?:boolean; initialEvidenceOpen?:string;
 }
 
 /** Restores company intelligence and supply-chain depth in the search-scoped lead workflow. */
-export function OpportunityWorkspace({ opportunity, buyer, returnTo, events, drafts, points, demoEmail, enrichment, detail,initialTab,calendarResult,demoOutreach=false }: Props) {
+export function OpportunityWorkspace({ opportunity, buyer, returnTo, events, drafts, points, demoEmail, enrichment, detail,initialTab,calendarResult,demoOutreach=false,initialEvidenceOpen='' }: Props) {
   // An unnamed project does not negate evidence of an award in legacy records.
   const o={...opportunity,buying_reason:opportunity.buying_reason.replace("Company-level services evidence; no awarded project established.","Company-level opportunity; no specific project name established.")};
   const router = useRouter();
@@ -37,6 +38,7 @@ export function OpportunityWorkspace({ opportunity, buyer, returnTo, events, dra
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [evidenceTarget,setEvidenceTarget]=useState<DrawerTarget|null>(()=>parseDrawerTarget(initialEvidenceOpen,o.run_id));
   const [summary, setSummary] = useState<string|null>(null);
   const [ownerName, setOwner] = useState(o.owner_name);
   const [nextAction, setAction] = useState(o.next_action);
@@ -66,7 +68,7 @@ export function OpportunityWorkspace({ opportunity, buyer, returnTo, events, dra
     if (next === null) return;
     event.preventDefault(); selectTab(WORKSPACE_TABS[next].id); document.getElementById(`tab-${WORKSPACE_TABS[next].id}`)?.focus();
   }
-  return <EvidenceProvider evidence={detail?.evidence ?? {}}><div className="flex min-w-0 flex-col gap-5 pb-8">
+  return <EvidenceProvider evidence={detail?.evidence ?? {}} onOpenEvidence={()=>{setEvidenceTarget({opportunityId:o.id,leadId:o.lead_id,run:o.run_id});const url=new URL(window.location.href);url.searchParams.set('open',o.id);window.history.replaceState(window.history.state,'',url.pathname+url.search);}}><div className="flex min-w-0 flex-col gap-5 pb-8">
     <div className="flex flex-wrap items-center justify-between gap-2"><Link href={returnTo} className="text-sm font-semibold text-[var(--accent-2)]">← Back to filtered CRM results</Link><Link href={`/find?run=${encodeURIComponent(o.run_id)}`} className="text-xs text-[var(--text-2)] hover:underline">From search: {o.keyword}</Link></div>
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div className="flex min-w-0 flex-1 basis-full items-start gap-3 sm:basis-auto"><span className="mt-1 grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-2)]"><Building2 size={24} aria-hidden /></span><div className="min-w-0"><p className="eyebrow">Lead workspace · {o.project_name ? "Project-linked opportunity" : "Company-level opportunity"}</p><h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight">{o.name}</h1><p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--text-2)]">{o.country ? <span className="inline-flex items-center gap-1"><MapPin size={14} aria-hidden />{marketName(o.country)}</span> : null}{businessActivity ? <span>{businessActivity}</span> : null}<span>Product: {o.product_name}</span></p></div></div>
@@ -109,5 +111,5 @@ export function OpportunityWorkspace({ opportunity, buyer, returnTo, events, dra
       </div>
       <OpportunityRail opportunity={o} buyer={buyer} enrichment={enrichment} points={points} busy={busy} selectTab={selectTab} patch={patch} recipient={demoEmail.recipient} demoOutreach={demoOutreach} />
     </div>
-  </div></EvidenceProvider>;
+  </div>{evidenceTarget?<EvidenceDrawer key={drawerKey(evidenceTarget)} target={{leadId:evidenceTarget.opportunityId===o.id?o.lead_id:undefined,...evidenceTarget}} onTarget={t=>{setEvidenceTarget(t);const url=new URL(window.location.href);url.searchParams.set('open',drawerKey(t));window.history.replaceState(window.history.state,'',url.pathname+url.search);}} onClose={()=>{setEvidenceTarget(null);const url=new URL(window.location.href);url.searchParams.delete('open');window.history.replaceState(window.history.state,'',url.pathname+url.search);}} returnTo={returnTo}/>:null}</EvidenceProvider>;
 }

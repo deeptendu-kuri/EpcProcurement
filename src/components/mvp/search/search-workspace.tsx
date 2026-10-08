@@ -16,7 +16,7 @@ import { AddContactModal, type AddContactValues } from "../buyers/add-contact-mo
 import { addContact, confirmContact, isDerivedId, saveDerivedBuyer } from "../buyers/chain-api";
 import { BUYER_STAGE_LABELS, HOW_SURE_LABELS, LINK_LABELS, countryName } from "./buyer-labels";
 import { searchBuyers, searchContacts } from "./buyer-api";
-import { BuyerSidebar, DerivedBuyerSidebar } from "./buyer-sidebar";
+import {EvidenceDrawer} from '../evidence/evidence-drawer';
 import { ContactsTable, contactKey } from "./contacts-table";
 import { FilterPanel, type MarketOption } from "./filter-panel";
 import { AddToListDialog, LeadListsView } from "./lead-lists";
@@ -397,7 +397,6 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
   const total = result?.total ?? 0;
   const selectableRows = rows.filter((row) => !isDerivedRow(row));
   const allSelected = selectableRows.length > 0 && selectableRows.every((row) => selected.has(row.leadId));
-  const openRow = openId && isDerivedId(openId) ? (rows.find((row) => row.leadId === openId) ?? null) : null;
   const notFound = Math.max(0, (result?.contactsTotal ?? 0) - (result?.contactsFound ?? 0));
   const activeFilters = activeFilterCount(state);
 
@@ -641,26 +640,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
         </div>
       </div>
 
-      {openRow ? (
-        <DerivedBuyerSidebar
-          key={openRow.leadId}
-          row={openRow}
-          saving={Boolean(openRow.derivedKey && savingDerived.has(openRow.derivedKey))}
-          onClose={() => setOpen("")}
-          onSave={() => void saveDerived(openRow)}
-        />
-      ) : openId && !isDerivedId(openId) ? (
-        <BuyerSidebar
-          key={openId}
-          leadId={openId}
-          onClose={() => setOpen("")}
-          onAddToList={(ids) => setListIds(ids)}
-          onOpenCompany={(name) => {
-            setOpen("");
-            navigate({ q: name });
-          }}
-        />
-      ) : null}
+      {openId?<EvidenceDrawer key={openId} target={openId.startsWith('company:')?{companyId:openId.slice(8)}:{leadId:openId}} onClose={()=>setOpen('')} onTarget={t=>setOpen(t.companyId?`company:${t.companyId}`:t.leadId??'')} onPrevious={rows.findIndex(r=>r.leadId===openId)>0?()=>setOpen(rows[rows.findIndex(r=>r.leadId===openId)-1].leadId):undefined} onNext={rows.findIndex(r=>r.leadId===openId)>=0&&rows.findIndex(r=>r.leadId===openId)<rows.length-1?()=>setOpen(rows[rows.findIndex(r=>r.leadId===openId)+1].leadId):undefined}/>:null}
       {addingContact ? (
         <AddContactModal
           company={addingContact.company}
