@@ -33,7 +33,7 @@ describe('durable research checkpoints',()=>{
   it('creates persisted run, tasks and outbox without a provider request',async()=>{
     const id=await createResearchRun(input,db);
     const jobs=(await db.query('select id from research_jobs where run_id=$1',[id])).rows;
-    expect(jobs).toHaveLength(2); // two planned Bing headlines; Tavily is unconfigured
+    expect(jobs).toHaveLength(5); // two Bing headlines + BSE/NSE/CPPP; Tavily is unconfigured
     expect((await db.query('select id from research_outbox where run_id=$1',[id])).rows).toHaveLength(jobs.length);
     expect((await sessionFor(db,id))?.state).toBe('active');
   });

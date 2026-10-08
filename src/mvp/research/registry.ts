@@ -1,5 +1,7 @@
 import type { RunInput } from "@/mvp/types";
 import type { RawDoc } from "@/mvp/pipeline/contracts";
+import {SOURCING_REGISTRY} from '@/mvp/sourcing/registry';
+import {getCatalogue} from '@/mvp/config/buyers-config';
 
 export interface ResearchSource {
   id: string; url: string; country: string; materials: readonly string[];
@@ -13,7 +15,10 @@ export const RESEARCH_SOURCES: readonly ResearchSource[] = [{
   url: "https://www.dewa.gov.ae/en/builder/useful-tools/consultant-and-contractor-listing",
   type: "directory", parser: "contractor-table", permission: "public-listing",
   claims: ["listed-company", "contractor-specialisation", "published-contact"], maxPages: 3,
-}];
+},...SOURCING_REGISTRY.filter(s=>s.id!=='dewa-contractor-list'&&!s.adapter&&!s.reviewRequired).map(s=>({
+  id:s.id,url:s.url,country:s.market,materials:getCatalogue().items.map(p=>p.id),type:'directory' as const,parser:'contractor-table' as const,
+  permission:'public-listing' as const,claims:['source-discovery'],maxPages:s.maxPages,
+}))];
 export function sourceSeeds(input: RunInput): RawDoc[] {
   return RESEARCH_SOURCES.filter(s => s.permission === "public-listing" && input.markets.includes(s.country) && s.materials.includes(input.productId ?? ""))
     .map(s => ({ sourceKey: `directory:${s.id}`, sourceName: "Official contractor listing", tier: "A", url: s.url,

@@ -21,12 +21,12 @@ describe('WP2 admission before provider/page costs',()=>{
     expect((await db.query("select key from research_budget_reservations where run_id=$1 and kind='read'",[id])).rows).toHaveLength(0);
     expect((await db.query("select id from run_events where run_id=$1 and message like 'skipped:%'",[id])).rows).toHaveLength(3);
   });
-  it('settles exhausted Bing/Tavily coverage as done with warnings, without invoking providers',async()=>{
+  it('settles exhausted Bing/Tavily coverage without invoking search providers; public registries remain independent',async()=>{
     vi.stubEnv('TAVILY_API_KEY','fixture-key');vi.stubEnv('MVP_MAX_BING_QUERIES','0');vi.stubEnv('MVP_MAX_SEARCH_QUERIES','0');
     const id=await createResearchRun(input,db);
-    const deps:ResearchDeps={collect:vi.fn(),read:vi.fn(),discover:vi.fn(),save:vi.fn()};
+    const collect=vi.fn(async()=>[] as RawDoc[]);const deps:ResearchDeps={collect,read:vi.fn(),discover:vi.fn(),save:vi.fn()};
     for(let n=0;n<16&&(await sessionFor(db,id))?.state==='active';n++)await processResearchTick(db,deps,id);
-    expect(deps.collect).not.toHaveBeenCalled();
+    expect(collect).toHaveBeenCalledTimes(3);expect(collect.mock.calls.every(call=>(call as unknown[])[0]==='registry')).toBe(true);expect(deps.read).not.toHaveBeenCalled();
     expect((await sessionFor(db,id))?.state).toBe('done');
     expect((await sessionFor(db,id))?.stop_reason).toContain('budget');
     expect((await db.query('select status,error from runs where id=$1',[id])).rows[0]).toEqual({status:'done',error:null});

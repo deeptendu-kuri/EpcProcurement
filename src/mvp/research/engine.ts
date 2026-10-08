@@ -30,6 +30,7 @@ import {persistAwardTriggers} from '@/mvp/sourcing/triggers';
 import {persistRoundupAwards} from '@/mvp/sourcing/roundup-triggers';
 import { tedSource } from '@/mvp/pipeline/sources/ted';
 import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@/mvp/sourcing/roundup';
+import {SOURCING_REGISTRY,collectRegistry,registryPageTargets,registryReadWarning,registryRaw} from '@/mvp/sourcing/registry';
 
 export interface ResearchDeps {
   collect(source:string,ctx:SourceContext,payload:Record<string,unknown>):Promise<RawDoc[]>;
@@ -42,6 +43,10 @@ export interface ResearchDeps {
 }
 export const productionResearchDeps:ResearchDeps={
   async collect(source,ctx,payload){
+    if(source==='registry'){
+      const entry=SOURCING_REGISTRY.find(s=>s.id===payload.registryId);if(!entry)throw new Error('Unknown public registry.');
+      return collectRegistry(entry,ctx.input);
+    }
     if(source==='directory-seed')return [payload.raw as RawDoc];
     if(source==='tavily')return collectTavilyQuery(ctx,payload.query as Parameters<typeof collectTavilyQuery>[1]);
     if(source==='bing-query')return collectBingQuery(ctx,String(payload.market),String(payload.query));
@@ -113,7 +118,9 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         const used=(await db.query<{units:number}>("select coalesce(sum(units),0)::int as units from research_budget_reservations where run_id=$1 and kind='pdf_pages'",[job.run_id])).rows[0].units;
         const page=await deps.read(raw.url,{fullPage:true,maxPdfPages:Math.max(0,Math.min(10,20-used)),allowUrl:url=>!junkReason(url,null,input.markets)});
         if(!page.ok){
-          await completeJob(db,job,{unreadable:true,failureReason:page.reason});await markBudget(db,job.run_id,'read',job.key,'completed');
+          const warning=raw.research?.registryId?registryReadWarning(raw.research.registryId,page.reason,page.detail):{};
+          await completeJob(db,job,{unreadable:true,failureReason:page.reason,...warning});await markBudget(db,job.run_id,'read',job.key,'completed');
+          if('requiresManualFetch' in warning&&warning.requiresManualFetch)await researchProgress(db,job.run_id,'info',`Registry ${raw.research?.registryId}: HTTP 403 requiresManualFetch. No access-control bypass was attempted.`);
           if(raw.research?.candidateId)await db.query("update research_candidates set state='unreadable',reason=$2 where id=$1 and run_id=$3",[raw.research.candidateId,`Website read failed (${page.reason}); company research retained.`,job.run_id]);
           await researchProgress(db,job.run_id,'read',`Source read failed (${page.reason}); no invented content substituted.`);return {processed:true};
         }
@@ -141,6 +148,13 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       let paginationLimited=false;
       if(raw.research?.registryId){
         const entry=RESEARCH_SOURCES.find(s=>s.id===raw.research?.registryId);
+        const source=SOURCING_REGISTRY.find(s=>s.id===raw.research?.registryId);
+        if(source){
+          const used=(await db.query<{count:number}>("select count(*)::int as count from research_jobs where run_id=$1 and stage='read' and payload->'raw'->'research'->>'registryId'=$2",[job.run_id,source.id])).rows[0].count;
+          const targets=registryPageTargets(source,links,input);
+          for(const target of targets.slice(0,Math.max(0,source.maxPages-used)))if(!await db.tx(tx=>queueRead(tx,job.run_id,registryRaw(source,target.url,target.text),session.budget,EXTRACTOR_PRIORITY.roundup)))paginationLimited=true;
+          if(targets.length>Math.max(0,source.maxPages-used))paginationLimited=true;
+        }
         const next=links.find(l=>/^(?:next|next page|›|→)$/i.test(l.text.trim())&&domainOf(l.url)===domainOf(raw.url));
         const showing=stored.text.match(/showing\s+(\d+)\s+to\s+(\d+)\s+of\s+([\d,]+)/i);
         const hasMore=Boolean(showing&&Number(showing[2])<Number(showing[3].replace(/,/g,'')));
@@ -258,6 +272,11 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
     const quota=error instanceof Error&&/quota|rate.?limit|429|budget/i.test(error.message);
     if(quota&&job.stage==='analyse'){await parkJob(db,job,'AI provider quota/rate limit: saved research is retained.');return {processed:true,paused:true};}
     const message=error instanceof Error?error.message:'';
+    if(job.stage==='collect'&&job.payload.source==='registry'){
+      const warning=registryReadWarning(String(job.payload.registryId),'registry_unavailable',/^Registry HTTP \d{3}$/.test(message)?message.replace('Registry ',''):undefined);
+      await completeJob(db,job,warning);await researchProgress(db,job.run_id,'info',`Registry coverage warning (${job.payload.registryId}): public source unavailable; remaining lanes continue${warning.requiresManualFetch?'; HTTP 403 requiresManualFetch':''}.`);
+      await finishIdleResearch(db,job.run_id);return {processed:true,coverageWarning:true};
+    }
     // Only known provider diagnostics are exposed; arbitrary errors can contain credentials or response bodies.
     const safe=error instanceof z.ZodError?`Buyer response validation failed: ${[...new Set(error.issues.map(i=>i.path.join('.')))].slice(0,5).join(', ')}. Accepted JSON is retained for review when available.`:
       /^Targeted web search (?:could not connect; no automatic paid retry|is not configured)\.$/.test(message)?message:
@@ -278,16 +297,16 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
   const sessions=(await db.query<{run_id:string}>(`select s.run_id from research_sessions s where s.state='active' and ($1::uuid is null or s.run_id=$1)
     and not exists(select 1 from research_jobs j where j.run_id=s.run_id and j.state in ('queued','running'))`,[runId??null])).rows;
   for(const s of sessions){
-    const jobs=(await db.query<{stage:string;state:string;error:string|null;payload:{source?:string};result:{deferred?:number;documentId?:string;unreadable?:boolean;budgetLimited?:boolean}|null}>('select stage,state,error,payload,result from research_jobs where run_id=$1',[s.run_id])).rows;
+    const jobs=(await db.query<{stage:string;state:string;error:string|null;payload:{source?:string;raw?:RawDoc};result:{deferred?:number;documentId?:string;unreadable?:boolean;budgetLimited?:boolean}|null}>('select stage,state,error,payload,result from research_jobs where run_id=$1',[s.run_id])).rows;
     const collections=jobs.filter(j=>j.stage==='collect');
-    const remoteCollections=collections.filter(j=>j.payload.source!=='directory-seed');
-    const reads=jobs.filter(j=>j.stage==='read');
-    const originalRead=reads.some(j=>j.result?.documentId);
+    const remoteCollections=collections.filter(j=>!['directory-seed','registry'].includes(j.payload.source??''));
+    const reads=jobs.filter(j=>j.stage==='read'&&!j.payload.raw?.research?.registryId);
+    const originalRead=jobs.some(j=>j.stage==='read'&&j.result?.documentId);
     // Enqueueing a known directory URL is not evidence that a remote source was reached.
     // Likewise, an all-unreadable run is a failure, not a completed zero-buyer search.
     const noReachableOriginal=!originalRead&&(remoteCollections.length>0&&remoteCollections.every(j=>j.state==='failed')||
       reads.length>0&&reads.every(j=>j.state==='failed'||j.result?.unreadable));
-    const failed=jobs.some(j=>j.state==='failed'),allSourcesFailed=collections.length>0&&collections.every(j=>j.state==='failed')||noReachableOriginal;
+    const failed=jobs.some(j=>j.state==='failed'),allSourcesFailed=remoteCollections.length>0&&remoteCollections.every(j=>j.state==='failed')&&!originalRead||noReachableOriginal;
     // A settled optional source/read failure is a coverage warning, not a permanent funnel barrier.
     // A supervised review may resume one bundle while other jobs remain parked.
     // Once runnable work settles, those jobs mean partial, not running forever.

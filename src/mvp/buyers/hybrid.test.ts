@@ -13,6 +13,12 @@ function record():BuyerRecord{
   const c=exampleCompany();return {row:{...c.row},view:{leadId:c.row.opportunityId,companyId:c.row.companyId,stage:'early',sellItems:[{itemId:'line-pipe'}]},competitorForAll:false,leadStatus:'new',createdAt:'2026-10-08',groupKey:'Example',hqCountry:'BE',siteCountry:'AE'} as unknown as BuyerRecord;
 }
 describe('WP8 hybrid SuperSearch projections',()=>{
+  it('never casts a derived lead key as a database UUID and scopes it through its root',async()=>{
+    const r=record();const root=r.view.leadId;r.view.leadId='derived:Example';r.derived={key:'Example',rootLeadId:root,link:'possible'};
+    provider.mockResolvedValue([]);const query=vi.fn().mockResolvedValue({rows:[{id:root,client_product_ids:['line-pipe']}]});
+    await hybridSearchRecords([r],{query} as unknown as Queryable);
+    expect(query.mock.calls[0][1]).toEqual([[root]]);expect(provider).toHaveBeenCalledWith(expect.anything(),r.view.companyId,undefined,'line-pipe');
+  });
   it('never uses fetch/created date to pass a dated trigger filter',()=>{
     const r=record();expect(matches(r,{triggers:{withinDays:90}},new Date('2026-10-08'))).toBe(false);
     expect(matches(r,{triggers:{undated:true}},new Date('2026-10-08'))).toBe(true);

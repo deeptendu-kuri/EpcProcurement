@@ -16,6 +16,8 @@ export interface StructuredFacts {
 
 /** One item discovered by a source (05 §3 DiscoveredItem + FetchedDocument). */
 export interface RawDoc {
+  /** Registry routing metadata only; never evidence by itself. */
+  kind?:'roundup';
   /** 'ted' | 'gdelt' | 'rss:<host>' | 'fixture' */
   sourceKey: string;
   sourceName: string;

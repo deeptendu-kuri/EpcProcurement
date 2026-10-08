@@ -31,7 +31,7 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
     add('trigger','tavily',code,0,{query:`${material} ${activity} contract awarded orders ${name}`,topic:'news',days:365});
     if(TED_COUNTRIES[code])add('trigger','ted',code,0,{});
     for(const [n,registry] of RESEARCH_SOURCES.filter(r=>r.country===code&&r.materials.includes(input.productId)&&r.permission==='public-listing').entries()){
-      add('roundup','registry',code,n,{url:registry.url,registryId:registry.id,priority:2050});
+      add('roundup','registry',code,n,{url:registry.url,registryId:registry.id,priority:1950,includeDomains:[new URL(registry.url).hostname.replace(/^www\./,'')]});
     }
     add('roundup','tavily',code,0,{query:`${activity} contractors ${name} list top companies`,topic:'general'});
     for(let n=0;n<2;n++)add('capability','tavily',code,n,{query:`${activities[n%activities.length]} contractor ${name} services projects`,topic:'general'});

@@ -4,10 +4,13 @@ import {strongestTrigger,triggersForCompany,triggerStageCap} from '@/mvp/sourcin
 import type {BuyerRecord} from './view';
 import {capabilityLabel} from '@/mvp/discovery/locations';
 export async function hybridSearchRecords(records:BuyerRecord[],db:Queryable):Promise<BuyerRecord[]>{
-  const scopes=(await db.query<{id:string;client_product_ids:string[]}>('select id,client_product_ids from leads where id=any($1::uuid[])',[records.map(r=>r.view.leadId)])).rows;
+  const uuid=(id:string)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  const leadOf=(r:BuyerRecord)=>r.derived?.rootLeadId??r.view.leadId;
+  const scopes=(await db.query<{id:string;client_product_ids:string[]}>('select id,client_product_ids from leads where id=any($1::uuid[])',[[...new Set(records.map(leadOf).filter(uuid))]])).rows;
   const byLead=new Map<string,Awaited<ReturnType<typeof triggersForCompany>>>();
   for(const r of records){
-    const products=scopes.find(s=>s.id===r.view.leadId)?.client_product_ids??[];
+    if(!uuid(r.view.companyId)){byLead.set(r.view.leadId,[]);continue;}
+    const products=scopes.find(s=>s.id===leadOf(r))?.client_product_ids??[];
     const all=products.length? (await Promise.all(products.map(p=>triggersForCompany(db,r.view.companyId,undefined,p)))).flat():await triggersForCompany(db,r.view.companyId);
     byLead.set(r.view.leadId,all);
   }

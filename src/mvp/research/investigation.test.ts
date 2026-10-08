@@ -68,6 +68,7 @@ describe('source-aware company investigations',()=>{
   });
   it('selects relevant permitted sources, not a cables directory for unrelated markets',()=>{
     const base={query:'cables',productId:'cables',leadKinds:['supply_subcontract' as const]};
-    expect(sourceSeeds({...base,markets:['AE']})).toHaveLength(1);expect(sourceSeeds({...base,markets:['IN']})).toEqual([]);
+    expect(sourceSeeds({...base,markets:['AE']}).some(s=>s.research?.registryId==='dewa-contractor-list')).toBe(true);
+    const india=sourceSeeds({...base,markets:['IN']});expect(india).toHaveLength(3);expect(india.some(s=>s.research?.registryId==='dewa-contractor-list')).toBe(false);
   });
 });
