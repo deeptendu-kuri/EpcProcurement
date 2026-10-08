@@ -2,12 +2,11 @@ import Link from "next/link";
 import { PackageSearch } from "lucide-react";
 import { getActiveProducts, getClientProfile } from "@/mvp/config/profile";
 import { marketName } from "@/mvp/config/markets";
-import { getRun, isUuid, listRecentRuns } from "@/mvp/repo";
+import { getRun, isUuid } from "@/mvp/repo";
 import { listSavedSearches } from "@/mvp/saved-searches";
 import { EmptyState } from "@/components/mvp/empty-state";
 import { FindForm } from "@/components/mvp/find-form";
 import { PageHeader } from "@/components/mvp/page-header";
-import { RecentRuns } from "@/components/mvp/recent-runs";
 import { SavedSearchesList } from "@/components/mvp/saved-searches-list";
 import { catalogueOptions } from "@/components/mvp/search/page-data";
 import {funnelStatus} from '@/mvp/automation/config';
@@ -36,12 +35,12 @@ export default async function FindPage({ searchParams }: FindPageProps) {
     );
   }
 
-  const [runs, saved, selectedRun,automation] = await Promise.all([listRecentRuns(10), listSavedSearches(), runParam ? getRun(runParam) : Promise.resolve(null),funnelStatus()]);
+  const [saved, selectedRun,automation] = await Promise.all([listSavedSearches(), runParam ? getRun(runParam) : Promise.resolve(null),funnelStatus()]);
   const suggestions = catalogueOptions().slice(0, 8).map(product => product.name);
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Find buyers" subtitle="Choose the material and countries. Explore companies and available contacts; contact role is optional." />
+      <PageHeader title={runParam?"Research progress":"Find buyers"} subtitle={runParam?"Review this search’s coverage and saved results.":"Choose what you sell and where you want buyers. We save the results automatically."} />
       <AutomationReadiness status={automation}/>
       <FindForm
         products={catalogueOptions()}
@@ -51,8 +50,8 @@ export default async function FindPage({ searchParams }: FindPageProps) {
         initialTicketId={ticketParam}
         initialInput={selectedRun?.adhoc_query ?? null}
       />
-      <SavedSearchesList searches={saved} />
-      <RecentRuns runs={runs} />
+      <details className="card p-4"><summary className="cursor-pointer text-sm font-semibold">Scheduled searches ({saved.length})</summary><div className="mt-4"><SavedSearchesList searches={saved} /></div></details>
+      <Link href="/overview" className="self-start text-sm text-[var(--muted)] underline">View your previous searches in Overview</Link>
     </div>
   );
 }

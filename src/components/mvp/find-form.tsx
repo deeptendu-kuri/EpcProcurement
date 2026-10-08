@@ -8,7 +8,6 @@ import { apiJson } from "./api-client";
 import { RunProgress } from "./run-progress";
 import { EVENTS, emit } from "./shell/events";
 import { useToast } from "./shell/toast";
-import Link from "next/link";
 import { COUNTRIES } from "@/mvp/config/countries";
 import { CONTACT_ROLES } from "@/mvp/opportunities/workflow";
 
@@ -34,7 +33,7 @@ export interface FindFormProps {
 }
 
 /** Find (09 §4.1, 13 §7): what you offer + markets + lead type → Search now (queued) → live progress; Save this search. */
-export function FindForm({ markets, products, suggestions, initialRunId = null, initialTicketId = null, initialInput = null }: FindFormProps) {
+export function FindForm({ markets, products, initialRunId = null, initialTicketId = null, initialInput = null }: FindFormProps) {
   const router = useRouter();
   const pathname = usePathname();
   const toast = useToast();
@@ -182,82 +181,39 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
 
   return (
     <div className="flex flex-col gap-4">
-      <form onSubmit={submit} className="card flex flex-col gap-4 p-4 sm:p-5" aria-label="Search for opportunities">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 text-sm font-semibold">Product to sell
-            <select aria-label="Product to sell" className="control h-11 px-2" value={productId} onChange={e => { setProductId(e.target.value); setQuery(products.find(p => p.id === e.target.value)?.name ?? ""); }}>
-              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      <form onSubmit={submit} className="card flex flex-col gap-5 p-5 sm:p-6" aria-label="Search for opportunities">
+        <div className="grid gap-5 sm:grid-cols-2" data-tour="find-query">
+          <label className="flex flex-col gap-2 text-sm font-semibold">What do you sell?
+            <select aria-label="Product to sell" data-main-search className="control h-12 px-3 font-normal" value={productId} onChange={e=>{setProductId(e.target.value);setQuery(products.find(p=>p.id===e.target.value)?.name??"");}}>
+              {products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm font-semibold">Add a country
-            <select aria-label="Add a country" className="control h-11 px-2" value="" onChange={e => { if (e.target.value && !selected.includes(e.target.value)) setSelected(s => [...s, e.target.value]); }}>
-              <option value="">Select any country</option>
-              {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+          <label className="flex flex-col gap-2 text-sm font-semibold">Where do you want buyers?
+            <select aria-label="Add a country" className="control h-12 px-3 font-normal" value="" onChange={e=>{if(e.target.value&&!selected.includes(e.target.value))setSelected(s=>[...s,e.target.value]);}}>
+              <option value="">Add a country</option>{COUNTRIES.map(c=><option key={c.code} value={c.code}>{c.name}</option>)}
             </select>
           </label>
         </div>
-        <details className="text-sm"><summary className="cursor-pointer font-semibold text-[var(--text-2)]">Optional: prioritize a contact role</summary><p className="mt-2 text-xs text-[var(--text-2)]">Search finds projects and buying companies first. Relevant contacts are listed with role tags; procurement is the default outreach priority.</p>
-          <label className="mt-2 flex max-w-md flex-col gap-1 text-sm font-semibold">Priority contact role
-            <select aria-label="Priority contact role" className="control h-11 px-2" value={contactRole} onChange={e => setContactRole(e.target.value)}>
-              {CONTACT_ROLES.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </label>
-        </details>
-        <details className="text-sm"><summary className="cursor-pointer font-semibold text-[var(--text-2)]">Research depth & target · bounded provider usage</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex flex-col gap-1 font-semibold">Research mode<select aria-label="Research mode" className="control h-11 px-2" value={researchMode} onChange={e=>{const mode=e.target.value as "preview" | "batch" | "deep";setResearchMode(mode);setTargetCompanies(mode==="deep"?50:20);}}><option value="preview">Preview · smallest research budget</option><option value="batch">Batch · broader bounded research</option><option value="deep">Deep · work toward 50–100 companies</option></select></label><label className="flex flex-col gap-1 font-semibold">Target companies<input aria-label="Target companies" type="number" min={researchMode === "deep" ? 50 : 1} max={100} value={targetCompanies} onChange={e=>setTargetCompanies(Number(e.target.value))} className="input h-11 px-3" /></label></div><p className="mt-2 text-xs text-[var(--text-2)]">A research target, not a guaranteed number of leads. Provider budgets and source coverage may stop a batch early. Missing contacts stay blank; they never remove a relevant company. Larger modes may use more search and AI credits.</p></details>
-        <p className="text-xs text-[#6b7280]">Find contractors with relevant projects or documented buying-compatible work. Only the selected product is offered. No supplier-only sellers, open tenders or project owners. Research budgets can limit country coverage.</p>
-        <p className="rounded-lg bg-[var(--accent-soft)] p-3 text-sm">Research priority is not a purchase probability or sending gate. Companies appear even without contacts. If enabled before this search, bounded demo emails start after evidence-supported product fit and go only to the approved inbox—not to buyers. <Link href="/outreach" className="font-semibold text-[var(--accent-2)] underline">See automation mode →</Link></p>
-        <div className="flex flex-col gap-2 sm:flex-row" data-tour="find-query">
-          <label htmlFor="find-query" className="sr-only">What do you offer?</label>
-          <input
-            id="find-query"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder='What do you offer? e.g. "line pipe", "piping"'
-            maxLength={200}
-            className="input h-11 min-w-0 flex-1 px-3 text-base"
-          />
-          <button type="submit" disabled={submitting} className="btn btn-primary h-11 px-5" data-tour="find-search-now">
-            {submitting ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <Search size={16} aria-hidden />}
-            {submitting ? "Starting…" : "Search now"}
-          </button>
-        </div>
-
-        {suggestions.length ? (
-          <div className="flex flex-wrap items-center gap-1.5" aria-label="Suggestions from your products">
-            {suggestions.map((text) => (
-              <button key={text} type="button" onClick={() => { setQuery(text); const product = products.find(p => p.name === text); if (product) setProductId(product.id); }} className="chip hover:border-[var(--line-strong)]">
-                {text}
-              </button>
-            ))}
+        <fieldset data-tour="find-markets">
+          <legend className="mb-2 text-xs font-semibold text-[var(--muted)]">Selected countries · click to remove</legend>
+          <div className="flex flex-wrap gap-2">{selected.map(code=>COUNTRIES.find(c=>c.code===code)??{code,name:code}).map(market=><button key={market.code} type="button" aria-pressed="true" aria-label={market.name} onClick={()=>toggleMarket(market.code)} className="inline-flex min-h-9 items-center gap-2 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-3 text-sm text-[var(--accent-2)]"><Check size={13} aria-hidden />{market.name}<span aria-hidden>×</span><span className="sr-only">Remove country</span></button>)}</div>
+          {!selected.length?<p className="text-sm text-[var(--muted)]">Add at least one country above.</p>:null}
+        </fieldset>
+        <details className="rounded-lg border border-[var(--line)] p-3 text-sm" open={Boolean(initialInput&&(initialInput.query!==products.find(p=>p.id===initialInput.productId)?.name||initialInput.researchMode==="deep"))}>
+          <summary className="cursor-pointer font-semibold text-[var(--text-2)]">Advanced options · keywords, contact roles & research budget</summary>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 font-semibold">Search keywords<input id="find-query" aria-label="What do you offer?" value={query} onChange={e=>setQuery(e.target.value)} maxLength={200} className="input h-11 px-3 font-normal" /></label>
+            <label className="flex flex-col gap-1 font-semibold">Priority contact role<select aria-label="Priority contact role" className="control h-11 px-2 font-normal" value={contactRole} onChange={e=>setContactRole(e.target.value)}>{CONTACT_ROLES.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
+            <label className="flex flex-col gap-1 font-semibold">Research mode<select aria-label="Research mode" className="control h-11 px-2 font-normal" value={researchMode} onChange={e=>{const mode=e.target.value as "preview"|"batch"|"deep";setResearchMode(mode);setTargetCompanies(mode==="deep"?50:20);}}><option value="preview">Preview · smallest research budget</option><option value="batch">Batch · broader bounded research</option><option value="deep">Deep · work toward 50–100 companies</option></select></label>
+            <label className="flex flex-col gap-1 font-semibold">Target companies<input aria-label="Target companies" type="number" min={researchMode==="deep"?50:1} max={100} value={targetCompanies} onChange={e=>setTargetCompanies(Number(e.target.value))} className="input h-11 px-3 font-normal" /></label>
           </div>
-        ) : null}
-        <p className="text-xs text-[var(--muted)]">We look for companies that recently won work or orders for {products.find(p=>p.id===productId)?.name??query} in {selected.map(m=>COUNTRIES.find(c=>c.code===m)?.name??m).join(', ')}, then for companies that do this work, then for who they buy from. Every saved fact needs original-page evidence.</p>
-
-        <div className="flex flex-col gap-4" data-tour="find-markets">
-          <fieldset className="flex flex-wrap items-center gap-2">
-            <legend className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#6b7280]">Markets</legend>
-            {selected.map(code => COUNTRIES.find(c => c.code === code) ?? { code, name: code }).map((market) => {
-              const on = selected.includes(market.code);
-              return (
-                <button
-                  key={market.code}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => toggleMarket(market.code)}
-                  className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors ${
-                    on ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-2)]" : "border-[var(--line-strong)] bg-white text-[#4b5563] hover:border-[#b9bdc6]"
-                  }`}
-                >
-                  {on ? <Check size={13} aria-hidden /> : null}
-                  {market.name}
-                </button>
-              );
-            })}
-          </fieldset>
-
+          <p className="mt-3 text-xs leading-relaxed text-[var(--muted)]">Optional: prioritize a contact role. All available contacts still appear with role tags. A research target is not a guaranteed number of leads; deeper modes may consume more credits. Companies appear even without contacts.</p>
+        </details>
+        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[var(--line)] pt-4">
+          <p className="max-w-2xl text-xs leading-relaxed text-[var(--muted)]">Relevant contractors and material-consuming companies · saved automatically · missing details stay blank. No supplier-only sellers, open tenders or project owners.</p>
+          <button type="submit" disabled={submitting} className="btn btn-primary h-12 px-6" data-tour="find-search-now">{submitting?<Loader2 size={16} className="animate-spin" aria-hidden />:<Search size={16} aria-hidden />}{submitting?"Starting…":"Find buyers"}</button>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-3" data-tour="find-save">
+        <details className="text-sm"><summary className="cursor-pointer text-[var(--muted)]">Schedule this search to refresh later</summary><div className="mt-3"><div className="flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-3" data-tour="find-save">
           {saveOpen ? (
             <div className="flex w-full flex-wrap items-end gap-2">
               <label className="flex min-w-0 flex-[1_1_200px] flex-col gap-1 text-xs font-semibold text-[#6b7280]">
@@ -273,7 +229,7 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
                   <option value="manual">Manual only</option>
                 </select>
               </label>
-              <button type="button" onClick={save} disabled={saving} className="btn btn-primary">
+              <button type="button" onClick={save} disabled={saving} className="btn btn-secondary">
                 {saving ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <Bookmark size={15} aria-hidden />}
                 Save
               </button>
@@ -288,11 +244,8 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
               <span className="text-xs text-[#6b7280]">Saved searches refresh by themselves every 6, 12 or 24 hours while the app runs.</span>
             </>
           )}
-        </div>
-
-        {error ? (
-          <p role="alert" className="rounded-lg border border-[#fecdca] bg-[#fef3f2] px-3 py-2 text-sm font-semibold text-[#b42318]">{error}</p>
-        ) : null}
+        </div></div></details>
+        {error?<p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>:null}
       </form>
 
       {ticketId && !runId ? (
@@ -301,7 +254,7 @@ export function FindForm({ markets, products, suggestions, initialRunId = null, 
           Waiting in line{position > 0 ? ` (number ${position})` : ""}: another search is running. Yours starts right after it.
         </section>
       ) : null}
-      {runId ? <><RunProgress key={runId} runId={runId} onFinished={onFinished} /><Link href={`/crm?search=${runId}`} className="btn btn-primary self-start">Open this search’s CRM results</Link></> : null}
+      {runId ? <RunProgress key={runId} runId={runId} onFinished={onFinished} /> : null}
     </div>
   );
 }

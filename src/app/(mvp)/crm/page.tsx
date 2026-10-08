@@ -4,6 +4,8 @@ import {crmTables} from '@/mvp/crm/tables';
 import {tableQuerySchema,tableParams} from '@/mvp/crm/contracts';
 import {EvidenceTables} from '@/components/mvp/tables/evidence-tables';
 import {formatDate} from '@/components/mvp/labels';
+import {marketName} from '@/mvp/config/markets';
+import {SearchSwitcher} from '@/components/mvp/tables/search-switcher';
 export const dynamic='force-dynamic';
 export default async function CrmPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
   const params=await searchParams;const searches=await recentSearches();
@@ -14,10 +16,9 @@ export default async function CrmPage({searchParams}:{searchParams:Promise<Recor
   if(!parsed.success)return <div className="p-6"><h1 className="page-title">Invalid lead filters</h1><Link href="/crm">Reset filters</Link></div>;
   const query=parsed.data;const data=await crmTables(query);
   const selected=searches.find(r=>r.id===query.run);
-  return <div className="flex flex-col gap-5 p-5 lg:p-7">
+  return <div className="flex flex-col gap-5">
     <header className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="page-title">Leads</h1><p className="page-desc">Results for your selected search. Click a company for its evidence, contacts, supply chain and email progress.</p></div><div className="flex gap-2"><Link href="/search" className="btn btn-secondary">SuperSearch · all companies</Link><Link href="/find" className="btn btn-primary">New search</Link></div></header>
-    <form action="/crm" className="card flex flex-wrap items-end gap-4 p-4" aria-label="Select search"><label className="min-w-64 flex-1 text-sm font-semibold">Search<select name="run" defaultValue={query.run} className="control mt-1 w-full p-2"><option value="none">Choose a search</option>{searches.filter(s=>s.adhoc_query?.productId).map(s=><option key={s.id} value={s.id}>{s.adhoc_query?.query} · {formatDate(s.created_at)}</option>)}<option value="all">All searches (explicit)</option></select></label><input type="hidden" name="tab" value={query.tab}/><button className="btn btn-secondary">Show results</button><div className="text-xs text-[var(--muted)]">{selected?.adhoc_query?.markets?.join(', ')}{selected?<p>Updated {formatDate(selected.finished_at??selected.created_at)}</p>:null}</div></form>
-    <EvidenceTables key={tableParams(query).toString()} data={data} query={query} initialOpen={typeof params.open==='string'?params.open:''}/>
-    <Link href="/search" className="text-sm text-[var(--muted)] underline">SuperSearch · explore across searches</Link>
+    {searches.some(s=>s.adhoc_query?.productId)?<section className="card flex flex-wrap items-end gap-4 p-4" aria-label="Select search"><SearchSwitcher value={query.run} tab={query.tab} options={searches.filter(s=>s.adhoc_query?.productId).map(s=>({id:s.id,label:`${s.adhoc_query?.query} · ${formatDate(s.created_at)}`}))}/><div className="pb-1 text-xs text-[var(--muted)]">{selected?.adhoc_query?.markets?.map(marketName).join(', ')}{selected?<p className="mt-1">Updated {formatDate(selected.finished_at??selected.created_at)} · <Link className="underline" href={`/find?run=${selected.id}`}>Research details</Link></p>:null}{query.run==='all'?<p>Combined saved results. Select a search above for product-specific leads.</p>:null}</div></section>:null}
+    {query.run==='none'?<section className="card p-8"><h2 className="text-lg font-bold">Your leads will appear here</h2><p className="mt-2 text-sm text-[var(--muted)]">Start a material search. Its companies, contractors, supply chain and available contacts will be kept together.</p><Link href="/find" className="btn btn-secondary mt-4">Start your first search</Link></section>:<EvidenceTables key={tableParams(query).toString()} data={data} query={query} initialOpen={typeof params.open==='string'?params.open:''}/>}
   </div>;
 }

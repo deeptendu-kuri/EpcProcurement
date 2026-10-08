@@ -1,46 +1,31 @@
-import { describe, expect, it } from "vitest";
-import { TOUR_LENGTH, TOUR_STEPS, onStepPage, progressText, stepPath, tourSelector } from "./steps";
-
-describe("guided tour step registry (docs/mvp/13 §8)", () => {
-  it("has 12 steps with unique ids, in page order Overview → Find → SuperSearch → buyer → Pipeline", () => {
-    expect(TOUR_LENGTH).toBe(12);
-    expect(new Set(TOUR_STEPS.map((step) => step.id)).size).toBe(12);
-    const pages = TOUR_STEPS.map((step) => step.page);
-    const order = ["/overview", "/find", "/search", "lead", "/pipeline"];
-    const firstIndex = order.map((page) => pages.indexOf(page as (typeof pages)[number]));
-    expect(firstIndex.every((index) => index >= 0)).toBe(true);
-    expect([...firstIndex].sort((a, b) => a - b)).toEqual(firstIndex);
-    expect(TOUR_STEPS[0].element).toBeUndefined(); // welcome is a centred message
+import {describe,expect,it} from "vitest";
+import {TOUR_LENGTH,TOUR_STEPS,onStepPage,progressText,stepPath,tourSelector} from "./steps";
+describe("optional search-scoped guide",()=>{
+  it("has six unique steps from a search through a meeting",()=>{
+    expect(TOUR_LENGTH).toBe(6);expect(new Set(TOUR_STEPS.map(s=>s.id)).size).toBe(6);
+    expect(TOUR_STEPS.map(s=>s.page)).toEqual(["/overview","/find","/crm","lead","/outreach","/outreach"]);
   });
-
-  it("shows progress as 'Step n of 12'", () => {
-    expect(progressText(0)).toBe("Step 1 of 12");
-    expect(progressText(3)).toBe("Step 4 of 12");
-    expect(progressText(11)).toBe("Step 12 of 12");
+  it("uses actual progress and the visible guide targets",()=>{
+    expect(progressText(0)).toBe("Step 1 of 6");expect(progressText(5)).toBe("Step 6 of 6");
+    expect(tourSelector("results-tabs")).toBe('[data-tour="results-tabs"]');
   });
-
-  it("offers sample leads on every lead step that needs leads", () => {
-    for (const step of TOUR_STEPS.filter((item) => item.needsLeads)) {
-      expect(step.emptyDescription).toMatch(/Load sample buyers/);
-      if (step.page === "/search") expect(step.emptyElement).toBe("load-sample");
+  it("explains missing leads without inviting sample data or inventing facts",()=>{
+    for(const step of TOUR_STEPS.filter(s=>s.needsLeads)){
+      expect(step.emptyDescription).toContain("never creates data or sends email");
+      expect(step.emptyDescription).not.toMatch(/Load sample/);
     }
   });
-
-  it("builds selectors and page paths, and needs a lead id for the lead page", () => {
-    expect(tourSelector("find-query")).toBe('[data-tour="find-query"]');
-    const leadStep = TOUR_STEPS.find((step) => step.page === "lead")!;
-    expect(stepPath(leadStep, null)).toBeNull();
-    expect(stepPath(leadStep, "abc")).toBe("/buyers/abc");
-    expect(onStepPage(leadStep, "/buyers/abc", "abc")).toBe(true);
-    expect(onStepPage(TOUR_STEPS[2], "/find", null)).toBe(true);
-    expect(onStepPage(TOUR_STEPS[2], "/search", null)).toBe(false);
+  it("preserves the selected search and opens the full opportunity, not a legacy buyer",()=>{
+    const lead=TOUR_STEPS[3];
+    expect(stepPath(lead,null,"run")).toBeNull();
+    expect(stepPath(lead,"opportunity","run")).toBe("/opportunities/opportunity?returnTo=%2Fcrm%3Frun%3Drun");
+    expect(onStepPage(lead,"/opportunities/opportunity","opportunity")).toBe(true);
+    expect(stepPath(TOUR_STEPS[2],null,"run")).toBe("/crm?run=run");
   });
-
-  it("points the last step at the first board column (not the whole, taller-than-screen board)", () => {
-    const last = TOUR_STEPS[TOUR_STEPS.length - 1];
-    expect(last.page).toBe("/pipeline");
-    expect(last.element).toBe("pipeline-first-column");
-    expect(last.emptyElement).toBe("pipeline-board");
-    expect(last.side).toBe("bottom");
+  it("does not describe manual drafting or unrelated tender pipelines",()=>{
+    const text=TOUR_STEPS.map(s=>s.description).join(" ");
+    expect(text).not.toMatch(/open tenders|drag a card|Draft email/);
+    expect(text).toContain("approved inbox");
+    expect(TOUR_STEPS[5].element).toBe("automation-conversations");
   });
 });

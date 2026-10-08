@@ -8,9 +8,7 @@ import type { BuyerRow, BuyerSearchResult, ContactRow, ContactSearchResult } fro
 import { ApiError } from "../api-client";
 import { EmptyState } from "../empty-state";
 import { Pagination } from "../leads/pagination";
-import { useAppStatus } from "../shell/app-shell";
 import { safeStorage } from "../shell/events";
-import { statusLabel } from "../shell/time-ago";
 import { useToast } from "../shell/toast";
 import { AddContactModal, type AddContactValues } from "../buyers/add-contact-modal";
 import { addContact, confirmContact, isDerivedId, saveDerivedBuyer } from "../buyers/chain-api";
@@ -228,7 +226,6 @@ export interface SearchWorkspaceProps {
 export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: SearchWorkspaceProps) {
   const router = useRouter();
   const toast = useToast();
-  const { status, now } = useAppStatus();
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState<BuyerSearchResult | null>(null);
   const [contacts, setContacts] = useState<ContactSearchResult | null>(null);
@@ -480,10 +477,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
 
   const topRight = (
     <>
-      <span className="hidden items-center gap-1.5 whitespace-nowrap md:inline-flex" data-tour="updated-ago">
-        {status.queue.running ? <Loader2 size={13} className="animate-spin text-[var(--accent)]" aria-hidden /> : null}
-        {status.queue.running ? "Searching…" : statusLabel(status.lastFinishedAt, now)}
-      </span>
+
       {tab === "search" ? <SavedSearchesMenu state={state} onApply={(query) => startTransition(() => router.replace(query ? `/search?${query}` : "/search"))} /> : null}
     </>
   );
@@ -577,9 +571,8 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
         ) : noData ? (
           <EmptyState
             icon={<Users size={20} aria-hidden />}
-            title="No buyers yet"
-            text="Run a live search on Find, or load sample buyers to see how SuperSearch works."
-            showSample
+            title="No saved companies yet"
+            text="Start a new material search. SuperSearch will let you explore and filter its saved companies alongside other searches."
           />
         ) : view === "contacts" ? (
           contacts && contacts.rows.length ? (
@@ -619,7 +612,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
   );
 
   return (
-    <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 md:h-dvh">
+    <div className="flex h-[calc(100dvh-3.5rem)] min-h-0">
       {tab === "search" && !filtersCollapsed ? (
         <aside aria-label="Filters" className="hidden w-[300px] shrink-0 border-r border-[var(--line)] bg-white lg:block">
           {panel}
@@ -635,6 +628,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
 
       <div className="flex min-w-0 flex-1 flex-col bg-white">
         <TopTabs tab={tab} right={topRight} />
+        {tab==="search"?<p className="border-b border-[var(--line)] px-4 py-2 text-xs text-[var(--muted)] lg:px-6">All saved companies across searches · filters only, no new web search. For a specific material, open its search from <Link className="font-semibold underline" href="/overview">Overview</Link>.</p>:null}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
           {tab === "search" ? results : <LeadListsView onOpenBuyer={setOpen} openId={openId} />}
         </div>

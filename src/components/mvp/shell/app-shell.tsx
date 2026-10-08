@@ -26,7 +26,6 @@ import type { AppStatus } from "@/mvp/types";
 import { apiJson } from "../api-client";
 import { TourController } from "../tour/tour-controller";
 import { EVENTS, emit, isTypingTarget, safeStorage } from "./events";
-import { GLOBAL_SEARCH_ID, GlobalSearch } from "./global-search";
 import { ShortcutsDialog } from "./shortcuts-dialog";
 import { statusLabel } from "./time-ago";
 import { ToastProvider } from "./toast";
@@ -316,7 +315,7 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
       if (event.key === "/") {
-        const input = document.getElementById(GLOBAL_SEARCH_ID) as HTMLInputElement | null;
+        const input = document.querySelector<HTMLElement>('[data-main-search]');
         if (input) {
           event.preventDefault();
           input.focus();
@@ -380,14 +379,17 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
           ) : null}
 
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className={`sticky top-0 z-30 flex h-14 items-center ${fullBleed ? "md:hidden" : ""} gap-2 border-b border-[var(--line)] bg-white/90 px-3 backdrop-blur sm:gap-3 lg:px-6`}>
+            <header aria-label="Workspace header" className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-[var(--line)] bg-white/95 px-3 backdrop-blur sm:gap-3 lg:px-6">
               {/* Wrapper carries md:hidden: the unlayered .btn display rule would beat a utility on the button itself. */}
               <span className="contents md:hidden">
                 <button type="button" onClick={() => setMobileOpen(true)} aria-label="Open menu" className="btn btn-ghost btn-icon">
                   <Menu size={18} />
                 </button>
               </span>
-              <GlobalSearch />
+              <div className="flex min-w-0 items-center gap-2 text-sm text-[var(--muted)]">
+                <span className="hidden sm:inline">Workspace</span><span className="hidden sm:inline" aria-hidden>/</span>
+                <span className="truncate font-semibold text-[var(--foreground)]">{NAV.find(item => isActive(pathname, item.href, item.also))?.label ?? "Buyer Intelligence"}</span>
+              </div>
               <div className="ml-auto flex items-center gap-2">
                 <span
                   className="hidden items-center gap-1.5 whitespace-nowrap text-xs font-medium text-[#6b7280] lg:inline-flex"
@@ -397,10 +399,7 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
                   {searching ? <Loader2 size={13} className="animate-spin text-[var(--accent)]" aria-hidden /> : null}
                   {searching ? "Searching…" : statusLabel(status.lastFinishedAt, now)}
                 </span>
-                {pathname !== "/find" ? <Link href="/find" className="btn btn-primary" data-tour="topbar-search-now" title="Start a new product search">
-                  <Search size={15} aria-hidden />
-                  <span className="hidden sm:inline">New search</span>
-                </Link> : null}
+                <button type="button" onClick={() => emit(EVENTS.startTour)} className="btn btn-secondary btn-sm" data-tour="guide-button"><CircleHelp size={15} aria-hidden />Guide</button>
               </div>
             </header>
 

@@ -11,7 +11,7 @@ const props={markets:[{code:"IN",name:"India"}],products:[{id:"cables",name:"Ele
 describe("bounded material research form",()=>{
   it("keeps role optional and explicitly distinguishes a target from a yield promise",()=>{
     render(<FindForm {...props}/>);
-    expect(screen.getByText("Optional: prioritize a contact role")).toBeTruthy();
+    expect(screen.getByText(/Optional: prioritize a contact role/)).toBeTruthy();
     expect(screen.getByText(/not a guaranteed number of leads/)).toBeTruthy();
     expect(screen.getByText(/Companies appear even without contacts/)).toBeTruthy();
     expect(api).not.toHaveBeenCalled();

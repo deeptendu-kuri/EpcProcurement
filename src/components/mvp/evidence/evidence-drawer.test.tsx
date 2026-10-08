@@ -1,5 +1,5 @@
 import {afterEach,describe,it,expect,vi} from 'vitest';
-import {cleanup,render,screen,fireEvent,waitFor} from '@testing-library/react';
+import {cleanup,render,screen,fireEvent,waitFor,within} from '@testing-library/react';
 import {EvidenceDrawer,parseDrawerTarget} from './evidence-drawer';
 import {EvidenceTables} from '../tables/evidence-tables';
 import {SourceCard} from './source-card';
@@ -14,6 +14,16 @@ vi.mock('../search/lead-lists',()=>({AddToListDialog:()=>null}));
 const data=exampleDataset(2);const example:EvidenceDrawerView={header:data.companies[0].row,why:'Example: verified source sentence.',sources:[{documentId:'Example-doc',url:'https://example.com/Example',domain:'example.com',title:'Example saved source',publishedAt:null,kind:'company_site',quotes:[{evidenceId:'Example-proof',sentence:'Example: verified source sentence.',highlight:'verified source',proves:'material'}]}],related:{above:[],below:[]},contacts:data.companies[0].team,activity:[]};
 afterEach(()=>{cleanup();vi.clearAllMocks();window.history.replaceState({},'','/');});
 describe('WP7 universal evidence drawer',()=>{
+  it('returns from the full workspace to the same selected search and filters',async()=>{
+    api.mockResolvedValue(example);const query=tableQuerySchema.parse({run:'all',tab:'leads',country:'AE',keyword:'line pipe',q:'Engineering'});
+    render(<EvidenceTables data={filterTables(exampleDataset(2),query)} query={query}/>);
+    fireEvent.click(screen.getByRole('table').querySelector('tbody tr button')!);
+    const link=within(await screen.findByRole('dialog')).getByRole('link',{name:'Open workspace'});
+    const back=new URL(link.getAttribute('href')!,'http://localhost').searchParams.get('returnTo')!;
+    const params=new URL(back,'http://localhost').searchParams;
+    expect(params.get('run')).toBe('all');expect(params.get('country')).toBe('AE');expect(params.get('keyword')).toBe('line pipe');expect(params.get('q')).toBe('Engineering');
+    expect(api.mock.calls.every(call=>call.length<2||call[1]?.method!=='POST')).toBe(true);
+  });
   it('shows the source sentence with a highlight, workspace and honest role slots',()=>{render(<EvidenceDrawer target={{opportunityId:example.header.opportunityId}} initial={example} onClose={()=>{}}/>);expect(screen.getByRole('dialog')).toBeTruthy();expect(screen.getByText('verified source',{selector:'mark'})).toBeTruthy();expect(screen.getByRole('link',{name:'Open workspace'})).toBeTruthy();expect(screen.getAllByText(/Not found/)).toHaveLength(7);expect(api).not.toHaveBeenCalled();});
   it('supports j/k/Esc but does not navigate while typing',()=>{const next=vi.fn(),prev=vi.fn(),close=vi.fn();render(<><input aria-label="Example note"/><EvidenceDrawer target={{opportunityId:example.header.opportunityId}} initial={example} onClose={close} onNext={next} onPrevious={prev}/></>);fireEvent.keyDown(window,{key:'j'});fireEvent.keyDown(window,{key:'k'});fireEvent.keyDown(screen.getByLabelText('Example note'),{key:'j'});fireEvent.keyDown(window,{key:'Escape'});expect(next).toHaveBeenCalledOnce();expect(prev).toHaveBeenCalledOnce();expect(close).toHaveBeenCalledOnce();});
   it('validates shared drawer URL state and rejects executable or malformed targets',()=>{expect(parseDrawerTarget(example.header.opportunityId)).toEqual({opportunityId:example.header.opportunityId,run:undefined});expect(parseDrawerTarget('javascript:alert(1)')).toBeNull();expect(parseDrawerTarget('company:bad')).toBeNull();});

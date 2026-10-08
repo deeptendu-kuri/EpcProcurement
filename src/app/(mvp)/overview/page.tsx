@@ -1,42 +1,46 @@
 import Link from "next/link";
+import { ArrowRight, Search, Layers, Mail, CalendarCheck } from "lucide-react";
 import { PageHeader } from "@/components/mvp/page-header";
-import { listOpportunities, recentSearches, isVerified } from "@/mvp/opportunities";
+import { GuideButton } from "@/components/mvp/tour/guide-button";
+import { recentSearches } from "@/mvp/opportunities";
+import { searchWorkflowCounts } from "@/mvp/opportunities/workspace-stats";
 import { marketName } from "@/mvp/config/markets";
 import { formatDateTime } from "@/components/mvp/labels";
 import { runStatusText } from "@/components/mvp/run-steps";
-import { isUuid } from "@/mvp/repo";
 
-export default async function OverviewPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const params = await searchParams;
+const journey = [{icon:Search,label:"Search a material"},{icon:Layers,label:"Review companies & contacts"},{icon:Mail,label:"Follow the conversation"},{icon:CalendarCheck,label:"Confirm a meeting"}];
+
+export default async function OverviewPage() {
   const searches = await recentSearches();
-  const selected = typeof params.search === "string" && isUuid(params.search) ? searches.find(r => r.id === params.search) : searches.find(r => r.adhoc_query?.productId);
-  const results = selected ? (await listOpportunities(selected.id)).filter(o=>o.qualification!=='rejected') : [];
-  const verified = results.filter(isVerified);
-  const active = results.filter(r => r.activity_status === "recent" || r.activity_status === "ongoing");
-  const withContacts = results.filter(r => (r.named_contact_count ?? 0) > 0 || Boolean(r.public_contacts?.length));
-  return <div className="flex flex-col gap-5">
-    <PageHeader title="Your sales workspace" subtitle="Choose a search to see its projects and leads. Track each conversation through to a meeting." actions={<div className="flex gap-2"><Link href="/search" className="btn btn-secondary">SuperSearch</Link><Link href="/find" className="btn btn-primary">New search</Link></div>} />
-    <section className="card p-5" aria-label="Getting started">
-      <h2 className="text-lg font-bold">Start with the product you want to sell</h2>
-      <p className="mt-1 text-sm text-[#6b7280]">Search a material and country. We save source-backed companies, projects and available contacts; missing details stay blank. Qualified companies can start the approved-inbox email demo automatically. <Link href="/settings?tab=automation" className="font-semibold underline">Email & Calendar setup</Link> is needed only once.</p>
-      <ol className="mt-4 grid gap-3 text-sm sm:grid-cols-4">{["1. New search", "2. Projects & contacts", "3. Email conversation", "4. Booked meeting"].map(t => <li key={t} className="rounded-lg bg-[var(--subtle)] p-3 font-semibold">{t}</li>)}</ol>
-    </section>
-    <section className="card p-5" data-tour="overview-kpis" aria-label="Selected search">
-      <form action="/overview" className="mb-4 flex flex-wrap items-end gap-2"><label className="flex min-w-0 flex-1 flex-col gap-1 text-sm font-semibold">Which search would you like to view?<select name="search" defaultValue={selected?.id || ""} className="control h-11 min-w-0 px-3"><option value="" disabled>Select your product search</option>{searches.filter(s=>s.adhoc_query?.productId).map(s=><option value={s.id} key={s.id}>{s.adhoc_query?.query} · {s.adhoc_query?.markets.map(marketName).join(", ")} · {formatDateTime(s.created_at)}</option>)}</select></label><button disabled={!searches.some(s=>s.adhoc_query?.productId)} className="btn btn-primary h-11">View this search</button></form>
-      <div className="flex flex-wrap items-center justify-between gap-3"><div>
-        <p className="text-xs font-semibold uppercase text-[#6b7280]">Selected search — no mixed results</p>
-        <h2 className="mt-1 text-xl font-bold">{selected?.adhoc_query?.query ?? "No product search yet"}</h2>
-        <p className="text-sm text-[#6b7280]">{selected ? `${selected.adhoc_query?.markets.map(marketName).join(", ")} · ${runStatusText(selected.status,selected.counters)} · ${formatDateTime(selected.created_at)}` : "Run a new search to create a product-specific CRM."}</p>
-      </div>{selected ? <Link className="btn btn-primary" href={`/crm?search=${selected.id}`}>Open search results</Link> : <Link className="btn btn-primary" href="/find">Start your first search</Link>}</div>
-      {selected?.counters.researchState==='partial' ? <p role="status" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-[#b54708]">Search finished with partial coverage; saved companies remain available. {selected.counters.researchStopReason || 'Some research needs review.'} <Link href={`/find?run=${selected.id}`} className="font-semibold underline">View coverage & research details</Link></p> : null}
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">{[[results.length, "Saved prospects"], [active.length, "Recent / ongoing work"], [withContacts.length, "With published / named contacts"], [verified.length, "Validated contacts ready"]].map(([n, label]) => <div key={label} className="rounded-lg border border-[var(--line)] p-3"><p className="text-2xl font-bold">{n}</p><p className="text-xs text-[#6b7280]">{label}</p></div>)}</div>
-      <p className="mt-3 text-xs text-[#6b7280]">Counts refer to opportunities in this selected search, not pages or confirmed orders. Companies without contacts remain visible. Validated = reviewed buyer fit + reviewed current role + provider-validated email. Samples never count as validated.</p>
-    </section>
-    <section className="card" aria-label="Recent searches"><div className="card-header"><h2 className="card-title">Recent searches</h2><Link href="/crm?search=all" className="btn btn-secondary btn-sm">All searches CRM</Link></div>
-      {!searches.length ? <p className="p-5 text-sm text-[#6b7280]">No searches yet. Use Find buyers to begin.</p> : <ul className="divide-y divide-[var(--line)]">{searches.map(r => <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
-        <div className="min-w-0"><p className="font-semibold">{r.adhoc_query?.query || "Earlier search"}</p><p className="text-xs text-[#6b7280]">{r.adhoc_query?.markets.map(marketName).join(", ")} · {formatDateTime(r.created_at)} · {runStatusText(r.status,r.counters)} · {r.result_count} product-scoped prospects</p>{!r.adhoc_query?.productId ? <p className="text-xs text-[#b54708]">Legacy search: product provenance unavailable. Existing leads are preserved in Advanced search.</p> : null}</div>
-        {r.adhoc_query?.productId ? <div className="flex flex-wrap gap-2"><Link href={`/overview?search=${r.id}`} className="btn btn-secondary btn-sm">Select search</Link><Link href={`/crm?search=${r.id}`} className="btn btn-primary btn-sm">Open results</Link></div> : <Link href={`/find?run=${r.id}`} className="btn btn-secondary btn-sm">View search log</Link>}
-      </li>)}</ul>}
-    </section>
+  const productSearches = searches.filter(r => r.adhoc_query?.productId);
+  const workflowCounts = await searchWorkflowCounts(productSearches.map(r=>r.id));
+  return <div className="flex flex-col gap-6">
+    <PageHeader title="Your sales workspace" subtitle={productSearches.length ? "Pick a search to continue with its companies, contacts and conversations." : "Find companies that could buy the materials you sell."} actions={productSearches.length ? <Link href="/find" className="btn btn-primary"><Search size={16} aria-hidden />Find buyers</Link> : undefined} />
+    {!productSearches.length ? <section className="card overflow-hidden" aria-label="Getting started" data-tour="overview-searches">
+      <div className="max-w-3xl p-6 sm:p-10">
+        <span className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]"><Search size={24} aria-hidden /></span>
+        <h2 className="text-2xl font-bold tracking-tight">Start with what you sell.</h2>
+        <p className="mt-3 max-w-xl text-base leading-relaxed text-[var(--muted)]">Choose a material and the countries you want to sell in. We’ll organise source-backed companies and projects into a dedicated lead workspace for that search.</p>
+        <div className="mt-6 flex flex-wrap gap-3"><Link href="/find" className="btn btn-primary">Find buyers<ArrowRight size={16} aria-hidden /></Link><GuideButton /></div>
+      </div>
+      <ol className="grid gap-4 border-t border-[var(--line)] bg-[var(--subtle)] p-6 text-sm sm:grid-cols-4 sm:px-10">{journey.map(({icon:Icon,label},index) => <li key={label} className="flex items-center gap-2"><Icon size={16} className="shrink-0 text-[var(--accent)]" aria-hidden /><span><span className="text-[var(--muted)]">{index+1}. </span>{label}</span></li>)}</ol>
+    </section> : <section className="card overflow-hidden" aria-label="Your searches" data-tour="overview-searches">
+      <div className="card-header"><div><h2 className="card-title">Your searches</h2><p className="mt-1 text-sm text-[var(--muted)]">Each search keeps its own leads. Results are never mixed here.</p></div><span className="pill">{productSearches.length} searches</span></div>
+      <ul className="divide-y divide-[var(--line)]">{productSearches.map(r => {
+        const workflows = workflowCounts.find(t=>t.run_id===r.id)?.workflow_count ?? 0;
+        const meetings = workflowCounts.find(t=>t.run_id===r.id)?.meeting_count ?? 0;
+        const partial = r.counters.researchState === "partial";
+        return <li key={r.id} className="grid items-center gap-4 p-5 sm:grid-cols-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(220px,1fr)_150px_90px_170px_auto]">
+          <div className="min-w-0"><Link href={`/crm?run=${r.id}`} className="text-base font-bold text-[var(--foreground)] hover:text-[var(--accent)] hover:underline">{r.adhoc_query?.query || "Product search"}</Link><p className="mt-1 text-sm text-[var(--muted)]">{r.adhoc_query?.markets.map(marketName).join(", ")}</p><p className="mt-1 text-xs text-[var(--muted)]">{formatDateTime(r.created_at)}</p></div>
+          <div><span className={`pill ${partial ? "bg-amber-50 text-amber-800" : ""}`}>{runStatusText(r.status,r.counters)}</span><Link href={`/find?run=${r.id}`} className="mt-2 block text-xs text-[var(--muted)] underline">Research details</Link></div>
+          <div><p className="text-xl font-bold">{r.result_count}</p><p className="text-xs text-[var(--muted)]">saved leads</p></div>
+          <div className="text-sm"><p>{workflows ? `${workflows} email workflow${workflows===1?"":"s"}` : "No email workflow yet"}</p><p className="mt-1 text-xs text-[var(--muted)]">{meetings ? `${meetings} meeting${meetings===1?"":"s"} booked` : "No meeting booked"}</p></div>
+          <Link href={`/crm?run=${r.id}`} className="btn btn-secondary justify-self-start">View leads<ArrowRight size={15} aria-hidden /></Link>
+          {partial ? <p className="text-xs text-amber-800 xl:col-span-5">Partial coverage: {r.counters.researchStopReason || "Some sources could not be completed."} Saved leads remain available.</p> : null}
+        </li>;
+      })}</ul>
+    </section>}
+    <p className="text-xs leading-relaxed text-[var(--muted)]">Missing contact details stay blank. A saved company is a potential buyer, not a confirmed purchase. <Link href="/outreach" className="underline">Email automation</Link> shows actual conversation progress; demo emails go only to the configured approved inbox.</p>
+    {searches.some(r => !r.adhoc_query?.productId) ? <details className="text-sm text-[var(--muted)]"><summary className="cursor-pointer">Earlier searches without product grouping</summary><ul className="mt-3 space-y-2">{searches.filter(r=>!r.adhoc_query?.productId).map(r=><li key={r.id}><Link className="underline" href={`/find?run=${r.id}`}>{r.adhoc_query?.query || "Earlier search"} · {formatDateTime(r.created_at)}</Link></li>)}</ul><p className="mt-2">These searches are preserved. Explore their saved companies in <Link className="underline" href="/search">SuperSearch</Link>.</p></details> : null}
   </div>;
 }

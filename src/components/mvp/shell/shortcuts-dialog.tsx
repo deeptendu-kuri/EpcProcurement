@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 
 export const SHORTCUTS: { keys: string[]; label: string }[] = [
-  { keys: ["/"], label: "Search buyers" },
+  { keys: ["/"], label: "Focus this page’s search or filter" },
   { keys: ["j", "k"], label: "Move down / up in a list" },
   { keys: ["Enter"], label: "Preview the selected buyer" },
   { keys: ["o"], label: "Open the selected buyer" },

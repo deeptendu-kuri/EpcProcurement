@@ -4,7 +4,8 @@ import type { BuyerView, EvidenceDrawerView } from "@/mvp/buyers/types";
 import {exampleCompany} from '@/mvp/crm/fixtures';
 import type { Opportunity } from "@/mvp/opportunities";
 import { OpportunityWorkspace } from "./workspace";
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const navigation=vi.hoisted(()=>({replace:vi.fn((path:string)=>window.history.replaceState(window.history.state,'',path))}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(),replace:navigation.replace }) }));
 vi.mock("../outreach/conversation-timeline",()=>({ConversationTimeline:()=> <div>Email automation timeline</div>}));
 vi.mock("../buyers/supply-chain-explorer",()=>({SupplyChainExplorer:({leadId,contactsOnly,productScope}:{leadId:string;contactsOnly:boolean;productScope:{id:string}})=> <div data-testid="restored-chain" data-lead={leadId} data-product={productScope.id}>{contactsOnly ? "Company contact roles & details" : "Supply chain and sub-contacts"}</div>}));
 afterEach(cleanup);
@@ -12,6 +13,15 @@ const opportunity: Opportunity = { id: "opp-1", lead_id: "lead-1", run_id: "run-
 const buyer = { name: "Buyer", country: "IN", team: [], proof: [] } as unknown as BuyerView;
 function show(overrides: Partial<Opportunity> = {}) { return render(<OpportunityWorkspace opportunity={{ ...opportunity, ...overrides }} buyer={buyer} returnTo="/crm?search=run-1&country=IN" events={[]} drafts={[]} points={[]} demoEmail={{ enabled: true, ready: false, recipient: "test@example.com", error: "Missing key" }} />); }
 describe("guided workspace", () => {
+  it('puts the navigation before project details and preserves the active tab in the URL',()=>{
+    window.history.replaceState({},'','/opportunities/opp-1?returnTo=%2Fcrm%3Fcountry%3DIN');
+    show();const tabs=screen.getByRole('tablist',{name:'Lead workspace'}),trigger=screen.getByRole('region',{name:'Trigger'});
+    expect(tabs.compareDocumentPosition(trigger)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab',{name:'Contacts'}));
+    const params=new URLSearchParams(window.location.search);expect(params.get('tab')).toBe('contacts');expect(params.get('returnTo')).toBe('/crm?country=IN');expect(navigation.replace).toHaveBeenCalledWith(expect.stringContaining('tab=contacts'),{scroll:false});
+    expect(screen.queryByRole('region',{name:'Trigger'})).toBeNull();expect(screen.getByRole('complementary',{name:'Lead context and actions'})).toBeTruthy();
+    window.history.replaceState({},'','/');
+  });
   it('uses verified trigger and shared source cards, separating HQ from work country',()=>{
     const header=exampleCompany().row;header.hqCountry='BE';header.operatingCountry='AE';
     const evidence:EvidenceDrawerView={header,why:'Example Engineering 1 Limited constructs gas pipelines in UAE.',sources:[{documentId:'Example-doc',url:'https://example.com/Example',domain:'example.com',title:'Example verified page',publishedAt:null,kind:'company_site',quotes:[{evidenceId:'Example-proof',sentence:'Example Engineering 1 Limited constructs gas pipelines in UAE.',highlight:'constructs gas pipelines',proves:'material'}]}],contacts:[],related:{above:[],below:[]},activity:[]};
@@ -43,7 +53,7 @@ describe("guided workspace", () => {
     expect((screen.getByLabelText("Summary", { exact: true }) as HTMLTextAreaElement).value).toBe("Saved review notes");
     expect(screen.queryByRole("button", { name: /Send|Preview demo email/ })).toBeNull();
     expect(screen.getByRole("complementary",{name:"Lead context and actions"})).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Back to filtered CRM/ }).getAttribute("href")).toBe("/crm?search=run-1&country=IN");
+    expect(screen.getByRole("link", { name: /Back to leads/ }).getAttribute("href")).toBe("/crm?search=run-1&country=IN");
     fireEvent.click(screen.getByRole("tab",{name:"Contacts"}));
     expect(screen.getByText(/Contact verification is not connected/)).toBeTruthy();
   });

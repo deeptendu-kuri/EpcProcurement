@@ -244,10 +244,11 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
           <label htmlFor="search-q" className="sr-only">Company, project or product</label>
           <input
             id="search-q"
+            data-main-search
             value={q}
             onChange={(event) => setQ(event.target.value)}
             onBlur={() => q.trim() !== state.q && onChange({ q: q.trim() })}
-            placeholder="Company, project or product"
+            placeholder="Filter saved companies"
             className="input h-9 w-full pl-8 text-sm"
           />
         </form>

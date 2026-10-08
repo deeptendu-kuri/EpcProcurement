@@ -788,6 +788,19 @@ body.driver-active {
   color: #ffffff;
 }
 
+.driver-popover.mvp-tour .driver-popover-footer .driver-popover-navigation-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.driver-popover.mvp-tour .driver-popover-footer .tour-skip-btn {
+  border-color: transparent;
+  padding-inline: 4px;
+  font-weight: 400;
+  text-decoration: underline;
+}
+
 .driver-popover.mvp-tour .tour-sample-btn {
   display: inline-block;
   margin-top: 10px;
