@@ -337,10 +337,10 @@ async function advanceThread(t:FunnelThread) {
   }
   if (t.state==="qualifying") {
     if (o.qualification!=="approved") {
-      const fit=await qualifyBuyer(o);
+      const fit=await qualifyBuyer(o,{demoFallback:t.mode==='prospect_demo'});
       if (!fit.approved) {await updateState(t,"review",`Product fit was not established: ${fit.reason}`);return;}
       await updateOpportunity(o.id,{qualification:"approved"});
-      await note(getDb(),o.id,`AI approved possible ${o.product_name} buyer fit with verified verbatim evidence: ${fit.reason}. Not a confirmed order.`);
+      await note(getDb(),o.id,`${fit.basis==='demo_evidence_fallback'?'Deterministic demo-only evidence check':'AI'} approved possible ${o.product_name} buyer fit with verified verbatim evidence: ${fit.reason}. Not a confirmed order or validated buyer contact.`);
     }
     if(t.mode==="prospect_demo") {
       const refreshed=await getOpportunity(o.id);

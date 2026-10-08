@@ -15,6 +15,7 @@ let sent: Record<string, unknown>[];
 let events: Record<string, unknown>[];
 let decisions: unknown[];
 let receivingFails: boolean;
+let groqFailure: number | null;
 const fetchMock = vi.fn();
 const quote = "Unit EPC won the awarded pipeline construction contract on 2026-10-01; the scope includes procurement and installation of line pipe.";
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
@@ -28,10 +29,12 @@ beforeEach(async () => {
     SESSION_SECRET: "integration-session-secret-".repeat(3), APP_URL: "http://localhost:3007", SALES_TIMEZONE: "Asia/Kolkata",
     SALES_START_HOUR: "10", SALES_END_HOUR: "18", MEETING_DURATION_MINUTES: "30" })) vi.stubEnv(key, value);
   await db.exec("delete from funnel_messages;delete from funnel_threads;delete from funnel_integrations;delete from enrichment_requests;delete from contact_verification_requests;delete from search_opportunities;delete from leads;delete from projects;delete from runs;delete from contact_points;delete from person_roles;delete from people;delete from companies;delete from evidence;delete from llm_usage;update funnel_control set enabled=false,enabled_at=null,worker_until=null,worker_lease=null,last_error=null;");
-  inbox = []; sent = []; events = []; decisions = []; receivingFails = false; fetchMock.mockReset();
+  await db.exec('delete from source_documents;');
+  inbox = []; sent = []; events = []; decisions = []; receivingFails = false; groqFailure = null; fetchMock.mockReset();
   fetchMock.mockImplementation(async (input: string | URL, options: RequestInit = {}) => {
     const url = new URL(String(input));
     if (url.origin === "https://api.groq.com") {
+      if (groqFailure) return response({ error: { message: "Example provider unavailable" } }, groqFailure);
       expect(decisions.length).toBeGreaterThan(0);
       return response({ choices: [{ message: { content: JSON.stringify(decisions.shift()) } }], usage: { prompt_tokens: 100, completion_tokens: 80 } });
     }
@@ -103,6 +106,31 @@ async function incoming(opportunity: string, text: string) {
 }
 
 describe("joined local funnel with real adapters and mocked provider HTTP", () => {
+  it.each([413, 429])('sends exactly one approved-inbox demo introduction without contacts when AI returns HTTP %s', async status => {
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH', 'on');
+    const o = await seedCompletedSearch(); const prospect = (await getOpportunity(o))!;
+    const doc = (await db.query<{ id: string }>("insert into source_documents(source_key,publisher_key,url,canonical_url,content_hash,text) values('example','buyer.co','https://buyer.co/award','https://buyer.co/award',$1,$2) returning id", [`example-outage-${status}`, quote])).rows[0].id;
+    await db.query('update evidence set document_id=$2 where id=$1', [evidenceId, doc]);
+    await db.query('insert into run_documents(run_id,document_id) values($1,$2)', [prospect.run_id, doc]);
+    groqFailure = status;
+    await processFunnelTick();
+    expect(sent).toHaveLength(1); expect(sent[0].to).toEqual(['deeptendukuri@gmail.com']);
+    expect(String(sent[0].text)).toContain('Hi Unit EPC procurement team');
+    expect((await thread(o))).toMatchObject({ state: 'active', mode: 'prospect_demo', person_id: null });
+    expect(isVerified((await getOpportunity(o))!)).toBe(false);
+    expect((await db.query('select id from people')).rows).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => /api\.(hunter\.io|emailable\.com)/.test(String(url)))).toHaveLength(0);
+    const notes = (await db.query<{body:string}>('select body from opportunity_events where opportunity_id=$1', [o])).rows.map(row => row.body).join('\n');
+    expect(notes).toContain('Deterministic demo-only evidence check');
+    await processFunnelTick(); expect(sent).toHaveLength(1);
+  });
+  it('never falls back to a send for real-buyer mode when AI is unavailable', async () => {
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH', 'off');
+    const o = await seedCompletedSearch(); groqFailure = 413;
+    await processFunnelTick();
+    expect((await thread(o))).toMatchObject({ state: 'review', mode: 'buyer' });
+    expect(sent).toHaveLength(0);
+  });
   it('automatically takes a fresh source-backed partial search through real adapters to a meeting without manual approval or fake contacts',async()=>{
     vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');vi.stubEnv('MVP_FUNNEL_WORKER','on');
     const o=await seedCompletedSearch();const prospect=(await getOpportunity(o))!;

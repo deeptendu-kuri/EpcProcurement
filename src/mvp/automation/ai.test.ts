@@ -1,7 +1,8 @@
 // @vitest-environment node
 import {afterAll,afterEach,beforeAll,beforeEach,describe,it,expect,vi} from "vitest";
 import {createTestDb,setDbForTests,type Db} from "@/mvp/db";
-import {analyseReply,initialEmail,qualifyBuyer} from "./ai";
+import {analyseReply,initialEmail,qualifyBuyer,QUALIFICATION_DATA_BYTES} from "./ai";
+import {LLMHttpError,QuotaExceededError} from "@/mvp/llm/types";
 import type {Opportunity} from "@/mvp/opportunities";
 const complete=vi.hoisted(()=>vi.fn());let name="groq";
 vi.mock("@/mvp/llm",()=>({getLLM:()=>({name,complete})}));
@@ -12,7 +13,68 @@ beforeAll(async()=>{db=await createTestDb();setDbForTests(db);evidenceId=(await 
 afterAll(async()=>{setDbForTests(undefined);await db?.close();});
 beforeEach(()=>{name="groq";complete.mockReset();opportunity.evidence_ids=[evidenceId];});
 afterEach(()=>vi.unstubAllEnvs());
+/** Synthetic fixture, explicitly Example; source text is stored and linked to its own run. */
+async function exampleOpportunity(text='Example EPC won the EPC contract for construction and installation of line pipe in the UAE.') {
+  const run=(await db.query<{id:string}>("insert into runs(status) values('done') returning id")).rows[0].id;
+  const company=(await db.query<{id:string}>("insert into companies(canonical_name,normalized_name,types) values('Example EPC',$1,'{main_epc}') returning id",['example '+crypto.randomUUID()])).rows[0].id;
+  const lead=(await db.query<{id:string}>("insert into leads(kind,buyer_company_id,score_breakdown,gate_results,class,reasons,scoring_version,is_sample) values('supply_subcontract',$1,'{}','[]','research','[]',1,false) returning id",[company])).rows[0].id;
+  const url='https://example.com/award/'+crypto.randomUUID();
+  const doc=(await db.query<{id:string}>("insert into source_documents(source_key,publisher_key,url,canonical_url,content_hash,text) values('Example','example.com',$1,$1,$2,$3) returning id",[url,crypto.randomUUID(),text])).rows[0].id;
+  await db.query('insert into run_documents(run_id,document_id) values($1,$2)',[run,doc]);
+  const evidence=(await db.query<{id:string}>("insert into evidence(document_id,url,quote,extracted_by,quote_verified,tier,publisher_key) values($1,$2,$3,'Example fixture',true,'C','example.com') returning id",[doc,url,text])).rows[0].id;
+  const id=(await db.query<{id:string}>("insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,buying_reason,evidence_ids) values($1,$2,$3,'line pipe','line-pipe','Line pipe',$4,$5::uuid[]) returning id",[run,lead,company,text,[evidence]])).rows[0].id;
+  return {o:{...opportunity,id,run_id:run,name:'Example EPC',product_id:'line-pipe',product_name:'Line pipe',keyword:'line pipe',buying_reason:text,evidence_ids:[evidence]} as Opportunity,doc,evidence,company,url};
+}
 describe("grounded Groq sales decisions",()=>{
+  it('bounds many quotes from long repeated pages and sends no page text to the qualification model',async()=>{
+    const s=await exampleOpportunity();const ids:string[]=[];const quotes=Array.from({length:35},(_,i)=>`Example EPC undertakes line pipe construction and installation. Example scope ${i}: ${'technical context '.repeat(18)}`);
+    await db.query('update source_documents set text=$2 where id=$1',[s.doc,quotes.join('\n')+'\n'+'Example unrelated page background. '.repeat(3000)]);
+    for(const quote of quotes)ids.push((await db.query<{id:string}>("insert into evidence(document_id,url,quote,extracted_by,quote_verified,tier,publisher_key) values($1,$2,$3,'Example fixture',true,'C','example.com') returning id",[s.doc,s.url,quote])).rows[0].id);
+    complete.mockResolvedValue({text:JSON.stringify({approved:false,confidence:.7,reason:'Example negative decision',companyEvidenceId:null,productEvidenceId:null})});
+    await qualifyBuyer({...s.o,evidence_ids:ids,buying_reason:'Example '.repeat(5000)});
+    const request=complete.mock.calls.at(-1)![0],data=JSON.parse(request.user);
+    expect(Buffer.byteLength(request.user,'utf8')).toBeLessThanOrEqual(QUALIFICATION_DATA_BYTES);
+    expect(data.evidence.length).toBeGreaterThan(0);expect(data.evidence.length).toBeLessThanOrEqual(12);
+    expect(data.evidence.every((q:Record<string,unknown>)=>Object.keys(q).sort().join(',')==='id,quote,url')).toBe(true);
+    expect(request.user).not.toContain('unrelated page background');
+    expect(data.productEvidenceIds.every((id:string)=>data.evidence.some((q:{id:string})=>q.id===id))).toBe(true);
+  });
+  it.each([408,413,429,500,502,503,504])('uses a literal own-search demo fallback on Groq HTTP %s, never by default',async status=>{
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');const s=await exampleOpportunity();
+    complete.mockRejectedValue(new LLMHttpError('groq',status,'Example provider unavailable'));
+    await expect(qualifyBuyer(s.o)).rejects.toThrow('Example provider unavailable');
+    expect(await qualifyBuyer(s.o,{demoFallback:true})).toMatchObject({approved:true,basis:'demo_evidence_fallback',reason:expect.stringContaining('approved-inbox-only')});
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','off');await expect(qualifyBuyer(s.o,{demoFallback:true})).rejects.toThrow('Example provider unavailable');
+  });
+  it.each([new QuotaExceededError('groq',900,1000),new DOMException('Example timeout','TimeoutError'),new TypeError('fetch failed')])('handles an unavailable AI budget/network only in explicit prospect-demo mode: %s',async error=>{
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');const s=await exampleOpportunity();complete.mockRejectedValue(error);
+    expect((await qualifyBuyer(s.o,{demoFallback:true})).basis).toBe('demo_evidence_fallback');
+  });
+  it.each(['other_search','missing_page','unverified','borrowed_scope','wrong_product','owner','open_tender','sample','rejected'])('does not let the demo fallback bypass evidence, role or rejection: %s',async mode=>{
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');const s=await exampleOpportunity();complete.mockRejectedValue(new LLMHttpError('groq',413,'Example too large'));
+    if(mode==='other_search')s.o.run_id=crypto.randomUUID();
+    if(mode==='missing_page')await db.query('update source_documents set text=$2 where id=$1',[s.doc,'Example page without that quote']);
+    if(mode==='unverified')await db.query('update evidence set quote_verified=false where id=$1',[s.evidence]);
+    if(mode==='borrowed_scope')await db.query('update evidence set quote=$2 where id=$1',[s.evidence,'Example EPC is headquartered here. Example Other Contractor installs line pipe.']);
+    if(mode==='wrong_product')s.o.product_id='hdpe-pipe';
+    if(mode==='owner')await db.query("update companies set types='{owner}' where id=$1",[s.company]);
+    if(mode==='open_tender'){
+      const text='Example EPC invites bids for an open tender for line pipe installation.';
+      await db.query('update evidence set quote=$2 where id=$1',[s.evidence,text]);await db.query('update source_documents set text=$2 where id=$1',[s.doc,text]);
+    }
+    if(mode==='sample')s.o.is_sample=true;if(mode==='rejected')s.o.qualification='rejected';
+    const result=await qualifyBuyer(s.o,{demoFallback:true}).catch(()=>({approved:false}));expect(result.approved).toBe(false);
+  });
+  it('never replaces AI rejection, forged citations, malformed output, auth failure or mock AI with a fallback',async()=>{
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');const s=await exampleOpportunity();
+    complete.mockResolvedValue({text:JSON.stringify({approved:false,confidence:1,reason:'Example supplier-only rejection',companyEvidenceId:null,productEvidenceId:null})});
+    expect((await qualifyBuyer(s.o,{demoFallback:true})).approved).toBe(false);
+    complete.mockResolvedValue({text:JSON.stringify({approved:true,reason:'Example forged citation',companyEvidenceId:'not-supplied',productEvidenceId:s.evidence})});
+    expect((await qualifyBuyer(s.o,{demoFallback:true})).approved).toBe(false);
+    complete.mockResolvedValue({text:'not json'});await expect(qualifyBuyer(s.o,{demoFallback:true})).rejects.toThrow('invalid decision');
+    complete.mockRejectedValue(new LLMHttpError('groq',401,'Example auth failed'));await expect(qualifyBuyer(s.o,{demoFallback:true})).rejects.toThrow('Example auth failed');
+    name='mock';await expect(qualifyBuyer(s.o,{demoFallback:true})).rejects.toThrow('Live Groq');
+  });
   it('handles a negative decision with null citations without a schema error; positive decisions still require real IDs',async()=>{
     complete.mockResolvedValue({text:JSON.stringify({approved:false,confidence:.8,reason:'No buyer-compatible scope established.',companyEvidenceId:null,productEvidenceId:null})});
     expect(await qualifyBuyer(opportunity)).toEqual({approved:false,reason:'No buyer-compatible scope established.'});
