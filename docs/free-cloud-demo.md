@@ -43,4 +43,15 @@ The operator helper `scripts/deploy-render-demo.mjs` scopes mutations to the exi
 
 Disable funnel enrollment before rollback. Repoint the Render service to a known-good compatible commit and redeploy; retain expand-only migrations and historical delivery/calendar IDs. Rolling back code does not unsend mail or cancel meetings. Do not clear the database or recipient suppressions.
 
+## Observed deployment proof — 8 October 2026
+
+- Render deployed application commit `86b14b1` successfully on the verified Free service. `main` was not changed.
+- The existing database advanced from nine to 22 migrations. Its six pre-existing searches, 34 lead records and 54 companies were preserved.
+- The isolated production build passed. The existing full suite passed 850 tests with two skipped; the added cloud-build isolation test passed separately.
+- Public health returned 200, unauthenticated protected requests returned 401, and cloud password login succeeded. Browser checks passed Overview, New search, My leads, Email automation and Settings without JavaScript errors.
+- One real Saudi ductile-iron-pipe research run completed independently of the browser: three search calls, 20 read attempts, 17 stored documents and three AI analysis calls. It saved **zero qualified prospects** and reported partial coverage. This proves cloud execution, not adequate buyer-discovery quality; no prospect email was sent for that search.
+- A separately labelled inbox-only diagnostic introduction was automatically processed by the cloud worker. Resend reported **delivered**, to the single approved Gmail, with the correct managed-domain Reply-To. No actual buyer was contacted or fabricated.
+- Funnel enrollment is enabled, with one prospect per new search and the existing delivery caps. At this checkpoint Google OAuth URLs were registered by the operator, but cloud Calendar consent had not completed. Cloud AI replies and Calendar/Meet booking are not yet proven by this deployment check.
+- Raw browser captures and private operator evidence are in ignored `tmp/free-cloud-deploy/`. Do not share its environment backup.
+
 References: [Render Free limitations](https://render.com/docs/free), [Next.js on Render](https://render.com/docs/deploy-nextjs-app), [Google server OAuth](https://developers.google.com/identity/protocols/oauth2/web-server), [Resend receiving](https://resend.com/docs/dashboard/receiving/introduction).
