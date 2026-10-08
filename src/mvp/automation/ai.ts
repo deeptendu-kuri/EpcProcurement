@@ -6,7 +6,7 @@ import { prospectDemoEnabled, seller, sellerSignature } from "./config";
 import { LLMHttpError, QuotaExceededError } from "@/mvp/llm/types";
 import { freshReply, replySchema, type ReplyDecision } from "./policy";
 import { companyNames, namesCompany, originalQuote, otherWorkSubject } from "@/mvp/discovery/evidence";
-import { buyerPageCandidate } from "@/mvp/discovery/plan";
+import { buyerPageCandidate, buyingActivities, materialEvidenceKind } from "@/mvp/discovery/plan";
 
 function parse(text: string): unknown {
   const start=text.indexOf("{");const end=text.lastIndexOf("}");
@@ -31,14 +31,15 @@ type BuyerQualification = {approved:boolean;reason:string;basis?:'demo_evidence_
 /** Full source pages stay server-side. Repeated page text must never inflate an AI request. */
 export const QUALIFICATION_DATA_BYTES = 10_000;
 function qualificationData(o:Opportunity,quotes:QualificationEvidence[]) {
-  const data={company:o.name.slice(0,240),product:o.product_name.slice(0,200),keyword:o.keyword.slice(0,200),reason:o.buying_reason.slice(0,800),productEvidenceIds:[] as string[],evidence:[] as {id:string;quote:string;url:string}[]};
+  const data={company:o.name.slice(0,240),product:o.product_name.slice(0,200),keyword:o.keyword.slice(0,200),reason:o.buying_reason.slice(0,800),compatibleActivities:buyingActivities(o.product_id),productEvidenceIds:[] as string[],productEvidenceKinds:{} as Record<string,'explicit'|'application'>,evidence:[] as {id:string;quote:string;url:string}[]};
   const priority=(q:QualificationEvidence)=>Number(buyerPageCandidate(q.quote,o.product_id))*2+Number(namesCompany(q.quote,companyNames(o.name,q.quote)));
   const seen=new Set<string>();
   for(const q of [...quotes].sort((a,b)=>priority(b)-priority(a)||a.quote.length-b.quote.length||a.id.localeCompare(b.id))) {
     const key=q.url+'\n'+q.quote;if(seen.has(key)||data.evidence.length>=12)continue;
-    const next={...data,evidence:[...data.evidence,{id:q.id,quote:q.quote,url:q.url}],productEvidenceIds:buyerPageCandidate(q.quote,o.product_id)?[...data.productEvidenceIds,q.id]:data.productEvidenceIds};
+    const kind=buyerPageCandidate(q.quote,o.product_id)?materialEvidenceKind(q.quote,o.product_id):'none';
+    const next={...data,evidence:[...data.evidence,{id:q.id,quote:q.quote,url:q.url}],productEvidenceIds:kind!=='none'?[...data.productEvidenceIds,q.id]:data.productEvidenceIds,productEvidenceKinds:kind!=='none'?{...data.productEvidenceKinds,[q.id]:kind}:data.productEvidenceKinds};
     if(Buffer.byteLength(JSON.stringify(next),'utf8')>QUALIFICATION_DATA_BYTES)continue;
-    data.evidence=next.evidence;data.productEvidenceIds=next.productEvidenceIds;seen.add(key);
+    data.evidence=next.evidence;data.productEvidenceIds=next.productEvidenceIds;data.productEvidenceKinds=next.productEvidenceKinds;seen.add(key);
   }
   return data;
 }
@@ -81,7 +82,7 @@ export async function qualifyBuyer(o: Opportunity,options:{demoFallback?:boolean
   let decision:unknown;
   try {decision=await ask(`Decide whether this company is a potential BUYER of the exact searched product. Awarded/ongoing relevant work OR documented company services demonstrating compatible installation/construction/procurement can qualify. An award is not mandatory for company-level prospects. Exclude project owners, open bids, supplier-only sellers and competitors. A potential need is not a confirmed order.
     Select the supplied evidence IDs connecting THIS company to buying-compatible work and to a plausible use of THIS exact product (material/type matters). The application will cite and validate the ORIGINAL stored quotes itself; do not rewrite or return quote text. Do not borrow a different company's scope. Do not require a current purchase order, but do require concrete product-application evidence.
-    productEvidenceId MUST be one of productEvidenceIds: other supplied quotes may establish identity or location but not product-consuming work. If evidence is insufficient, approved=false. Return only {approved,confidence,reason,companyEvidenceId,productEvidenceId}.`,data);}
+    productEvidenceId MUST be one of productEvidenceIds: other supplied quotes may establish identity or location but not product-consuming work. productEvidenceKinds distinguishes explicit material wording from a compatible application using the existing material rules; compatibleActivities supplies this product's consuming-work context. An application is sufficient for a POTENTIAL buyer. Do not require the literal product name, a purchase order, an explicit procurement sentence, quantity, grade or specifications when a quoted, company-attributed consuming application is established. For example, an EPC contractor constructing a physical oil/gas pipeline can be a potential line-pipe buyer even when the source says "gas pipeline EPC" rather than "line pipe". Do not apply that inference to HDPE/PVC/ductile-iron work or infer a particular pipe grade. Similarly, electrical cable installation supports potential power/control cable demand, not telecom cable or a particular specification. State inferred demand as potential, not confirmed. Still reject owners, supplier-only sellers, unrelated materials and borrowed scope. If evidence is insufficient, approved=false. Return only {approved,confidence,reason,companyEvidenceId,productEvidenceId}.`,data);}
   catch(error){
     const fallback=unavailableAI(error)?demoEvidenceFallback(o,quotes,Boolean(options.demoFallback),error instanceof LLMHttpError?`AI HTTP ${error.status}`:'AI temporarily unavailable'):null;
     if(fallback)return fallback;

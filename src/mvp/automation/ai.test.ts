@@ -26,6 +26,19 @@ async function exampleOpportunity(text='Example EPC won the EPC contract for con
   return {o:{...opportunity,id,run_id:run,name:'Example EPC',product_id:'line-pipe',product_name:'Line pipe',keyword:'line pipe',buying_reason:text,evidence_ids:[evidence]} as Opportunity,doc,evidence,company,url};
 }
 describe("grounded Groq sales decisions",()=>{
+  it('supplies material application context for pipeline EPC without requiring literal line-pipe demand',async()=>{
+    const s=await exampleOpportunity('Example EPC secured an engineering, procurement and construction (EPC) gas pipeline project in the United Arab Emirates.');
+    complete.mockResolvedValue({text:JSON.stringify({approved:true,confidence:.5,reason:'Potential line-pipe demand inferred from gas-pipeline EPC, not a confirmed order',companyEvidenceId:s.evidence,productEvidenceId:s.evidence})});
+    expect((await qualifyBuyer(s.o)).approved).toBe(true);
+    const request=complete.mock.calls.at(-1)![0],data=JSON.parse(request.user);
+    expect(data.productEvidenceKinds).toEqual({[s.evidence]:'application'});
+    expect(data.compatibleActivities).toContain('pipeline EPC');
+    expect(request.system).toContain('Do not require the literal product name');
+    expect(Buffer.byteLength(request.user,'utf8')).toBeLessThanOrEqual(QUALIFICATION_DATA_BYTES);
+    complete.mockClear();
+    expect((await qualifyBuyer({...s.o,product_id:'hdpe-pipe'})).approved).toBe(false);
+    expect(complete).not.toHaveBeenCalled();
+  });
   it('bounds many quotes from long repeated pages and sends no page text to the qualification model',async()=>{
     const s=await exampleOpportunity();const ids:string[]=[];const quotes=Array.from({length:35},(_,i)=>`Example EPC undertakes line pipe construction and installation. Example scope ${i}: ${'technical context '.repeat(18)}`);
     await db.query('update source_documents set text=$2 where id=$1',[s.doc,quotes.join('\n')+'\n'+'Example unrelated page background. '.repeat(3000)]);
