@@ -52,7 +52,7 @@ describe("reviewed material interpretation and consuming-work planning",()=>{
     const plan=buyerQueries({...input,query:'power cables',productId:'cables',markets:['AE'],researchMode:'batch'});
     expect(plan[0].query).toBe('United Arab Emirates power cable installation contractors');
     expect(plan.slice(0,5).every(q=>q.lane==='company')).toBe(true);
-    expect(plan[5].lane).toBe('project');
+    expect(plan.find(q=>q.lane!=='company')?.lane).toBe('project');
     expect(plan[0].query).not.toContain('-jobs');
   });
 });

@@ -6,6 +6,7 @@ import { namesCompany } from "@/mvp/discovery/evidence";
 import { buyerPageCandidate } from "@/mvp/discovery/plan";
 import { addJob } from "./store";
 import { readLane, readLaneLimits } from "./registry";
+import { companyIdentityReason,nonCompanyDomain } from '@/mvp/sourcing/entities';
 
 export interface ResearchCandidate {id:string;key:string;company:string;domain_hint:string|null;identity_document_id:string|null;identity_quote:string|null;document_ids:string[];state:string}
 export interface DirectorySeed {company:string;quote:string|null;domain:string|null;row:number}
@@ -30,7 +31,7 @@ export function directorySeeds(text:string,productId:string):DirectorySeed[] {
 }
 /** Conservative page-brand seed. A title/hint is not a purchasing or legal-verification claim. */
 export function pageCompany(text:string,title:string|null,url:string):string|null {
-  if(NON_COMPANY.test(domainOf(url)))return null;
+  if(NON_COMPANY.test(domainOf(url))||nonCompanyDomain(domainOf(url)))return null;
   const legal=/\b(?:contracting|contractors?|engineering|infrastructure|fabrication|construction|utility|utilities|mechanical|electrical|steel)\b/i;
   const domain=domainOf(url).split('.')[0].replace(/[^a-z0-9]/g,'');
   const genericFirst=/^(?:cable|cables|pipe|pipes|pipeline|gas|oil|electrical|mechanical|civil|structural|industrial|engineering|construction|building|comprehensive|third|power|steel|utility|utilities|services?|solutions?|design|installation|maintenance|inspection|testing|top|latest|best|about|contact|welcome)$/i;
@@ -42,7 +43,7 @@ export function pageCompany(text:string,title:string|null,url:string):string|nul
     const domainBrand=!genericFirst.test(first)&&(first.length>=5&&domain.startsWith(first)||tokens.join('').toLowerCase()===domain);
     const declaredBrand=segments.length>1&&segment===segments.at(-1)&&tokens.length>=2&&!genericFirst.test(first);
     const namedBusiness=/\b(?:llc|ltd|limited|inc|plc|corporation)\b/i.test(name)||legal.test(name)&&first.length>=3&&!genericFirst.test(first);
-    if(name.length>=5&&name.length<=105&&(domainBrand||namedBusiness||declaredBrand)&&namesCompany(text,[name])&&!/^(?:our |services|projects|electrical installation|pipeline construction|cable laying in|top \d|best \d|approved |list of|directory)|\b(?:news|awarded|wins?|secured|jobs|market|report|tender|contract award)\b/i.test(name))return name;
+    if(name.length>=5&&name.length<=105&&(domainBrand||namedBusiness||declaredBrand)&&!companyIdentityReason(name,{confirmedDomain:domainOf(url)})&&namesCompany(text,[name])&&!/^(?:our |services|projects|electrical installation|pipeline construction|cable laying in|top \d|best \d|approved |list of|directory)|\b(?:news|awarded|wins?|secured|jobs|market|report|tender|contract award)\b/i.test(name))return name;
   }
   return null;
 }

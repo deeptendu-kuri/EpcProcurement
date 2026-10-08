@@ -27,7 +27,8 @@ describe("company-first evidence-backed buyer discovery",()=>{
     expect((await discoverBuyers(db,run,input,doc,raw)).cached).toBe(true);expect(mock.complete).toHaveBeenCalledTimes(1);
     expect((await discoverBuyers(db,run,{...input,markets:['AE']},doc,raw)).buyers).toEqual([]);
     const unknown=discoverySchema.parse({buyers:[{...buyer,country:null,countryQuote:null,operatingCountries:['AE']}]}).buyers[0];
-    expect(buyerEvidence(unknown,quote,{...input,markets:['AE']}).buyer?.country).toBeNull();
+    // The quote explicitly places work in India; malformed AE hints cannot hide that.
+    expect(buyerEvidence(unknown,quote,{...input,markets:['AE']}).buyer).toBeNull();
   });
   it("keeps unknown geography blank and accepts an adjacent, unambiguous consuming activity",async()=>{
     const identity="Atlas Works is an engineering company.";
@@ -75,7 +76,7 @@ describe("company-first evidence-backed buyer discovery",()=>{
   it("matches a documented operating market rather than rejecting foreign headquarters",()=>{
     const scope="Atlas Works constructs gas transmission pipelines in Saudi Arabia.";
     const candidate={...buyer,productQuote:scope,operatingCountries:[{country:"SA",quote:scope}]};
-    expect(buyerEvidence(candidate,quote+"\n"+scope,{...input,markets:["SA"]}).buyer?.country).toBe("SA");
+    expect(buyerEvidence(candidate,quote+"\n"+scope,{...input,markets:["SA"]}).buyer).toMatchObject({country:'IN',operatingCountries:[{country:'SA',quote:scope}]});
     const other="Beta Works constructs gas transmission pipelines in Saudi Arabia.";
     expect(validateBuyer({...candidate,operatingCountries:[{country:"SA",quote:other}]},quote+"\n"+scope+"\n"+other,{...input,markets:["SA"]})).toBe(false);
   });
@@ -87,11 +88,11 @@ describe("company-first evidence-backed buyer discovery",()=>{
     expect(validateBuyer({...buyer,role:"fabricator",companyQuote:output,countryQuote:output,productQuote:output},output,{...input,productId:"welding-consumables"})).toBe(false);
   });
   it("uses a cited operating-work country and literal activity when headquarters/product output is unusable",()=>{
-    const identity="Larsen & Toubro (L&T) is an engineering, procurement and construction contractor based in India.";
+    const identity="Larsen & Toubro Limited (L&T) is an engineering, procurement and construction contractor based in India.";
     const work="In the UAE, L&T has secured an order to construct 132/11 kV substations along with associated cabling works.";
-    const candidate={...buyer,company:"Larsen & Toubro (L&T)",companyQuote:identity,countryQuote:identity,productQuote:"...secured an order...",activityQuote:work};
+    const candidate={...buyer,company:"Larsen & Toubro Limited (L&T)",companyQuote:identity,countryQuote:identity,productQuote:"...secured an order...",activityQuote:work};
     const checked=buyerEvidence(candidate,identity+"\n"+work,{...input,productId:"cables",markets:["AE"]}).buyer;
-    expect(checked?.country).toBe("AE");expect(checked?.productQuote).toBe(work);expect(checked?.countryQuote).toBe(work);
+    expect(checked?.country).toBe("IN");expect(checked?.productQuote).toBe(work);expect(checked?.countryQuote).toBe(identity);expect(checked?.operatingCountries).toEqual([{country:'AE',quote:work}]);
     const other="In the UAE, Beta Works has secured an order to construct substations along with associated cabling works.";
     expect(validateBuyer({...candidate,activityQuote:other},identity+"\n"+other,{...input,productId:"cables",markets:["AE"]})).toBe(false);
     expect(validateBuyer({...candidate,activityQuote:null},identity+"\n"+work,{...input,productId:"cables",markets:["AE"]})).toBe(false);
@@ -104,7 +105,7 @@ describe("company-first evidence-backed buyer discovery",()=>{
     const text=identity+" "+headquarters;
     const candidate={...buyer,company:"Kalpataru Projects International Limited (KPIL)",companyQuote:identity,
       productQuote:"secured a major EPC gas pipeline construction contract in the United Arab Emirates",countryQuote:"Mumbai-headquartered infrastructure major",confidence:0.2};
-    const result=buyerEvidence(candidate,text,input);expect(result.buyer).not.toBeNull();
+    const result=buyerEvidence(candidate,text,{...input,markets:['AE']});expect(result.buyer).not.toBeNull();
     expect(result.buyer?.productQuote).toBe(identity);expect(text.includes(result.buyer!.countryQuote!)).toBe(true);
     expect(result.buyer?.countryQuote).toContain("Mumbai");
   });

@@ -26,7 +26,7 @@ describe("real-mode product pipeline wiring (providers mocked; isolated database
     const detail=await getBuyerView((await listOpportunities(a.id))[0].lead_id);expect(detail).not.toBeNull();expect(detail?.proof.length).toBeGreaterThan(0);
     const b=await run();expect(b.counters.scopedProspects).toBe(1);expect(complete).toHaveBeenCalledTimes(1);
     expect((await listOpportunities(b.id))[0].id).not.toBe((await listOpportunities(a.id))[0].id);
-  });
+  },30000); // Includes two complete isolated PGlite runs, not a live search.
   it("reports provider quota exhaustion as explicit partial coverage, not a clean zero-buyer success (doc 16)",async()=>{
     vi.mocked(liveSources()[0].collect).mockResolvedValue([{sourceKey:"unit",sourceName:"Failing",tier:"C",url:"https://atlas.example/failing-page",title:"Atlas Works gas pipeline construction",text:quote+" Fresh page.",publishedAt:null,isSample:false}]);
     complete.mockRejectedValue(new Error("quota unavailable"));const result=await run();

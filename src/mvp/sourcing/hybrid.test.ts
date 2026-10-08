@@ -52,7 +52,7 @@ describe('WP1 hybrid durable run',()=>{
     expect((await db.query('select id from funnel_threads')).rows).toHaveLength(0);
     expect((await db.query('select id from contact_points')).rows).toHaveLength(0);
     expect(deps.read).not.toHaveBeenCalled();
-  });
+  },30000); // PGlite/fixture resolution can exceed Vitest's 5s default on Windows.
   it('stored-page continuation keeps the run and does not recollect or call a live provider',async()=>{
     const id=(await db.query<{id:string}>("insert into runs(adhoc_query,status) values($1::jsonb,'running') returning id",[JSON.stringify(input)])).rows[0].id;
     await attachStoredHybridRun(id,input,[raw(article),raw(site)],db);

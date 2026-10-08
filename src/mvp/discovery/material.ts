@@ -2,7 +2,7 @@ import { getCatalogue, getCatalogueItem } from "@/mvp/config/buyers-config";
 
 /** Reviewed consuming activities. Search hints, never proof of demand or seller capabilities. */
 export const MATERIAL_ACTIVITIES: Readonly<Record<string, readonly string[]>> = {
-  "line-pipe": ["pipeline construction", "gas transmission", "oil pipeline", "pipeline installation"],
+  "line-pipe": ["pipeline construction", "gas transmission", "oil pipeline", "pipeline installation", "oil & gas pipelines", "cross-country pipeline", "pipeline EPC", "transmission pipeline", "gas pipeline laying", "CGD network"],
   "cs-process-pipe": ["process piping", "plant piping", "mechanical piping"],
   "ss-duplex-pipe": ["stainless piping", "stainless steel piping", "duplex piping"],
   "alloy-pipe": ["alloy piping", "power plant piping", "boiler piping"],
@@ -32,7 +32,7 @@ export const MATERIAL_ACTIVITIES: Readonly<Record<string, readonly string[]>> = 
   plates: ["pressure vessel fabrication", "storage tank fabrication", "steel plate fabrication"],
   rebar: ["reinforced concrete construction", "rebar installation", "reinforcement fixing"],
   "gratings-handrails": ["industrial platform construction", "steel structure erection", "pipe support installation"],
-  cables: ["power cable installation", "electrical contracting", "power distribution construction", "cable laying", "electrical installation"],
+  cables: ["power cable installation", "electrical contracting", "power distribution construction", "cable laying", "electrical installation", "HV cable installation", "EHV cable installation", "HVDC cable installation", "11kV to 400kV cable installation", "substation cabling", "underground cabling"],
   "cable-trays": ["cable tray installation", "electrical installation", "MEP installation"],
   instruments: ["process instrumentation installation", "instrumentation installation", "process automation"],
   insulation: ["thermal insulation installation", "industrial insulation", "pipe insulation"],

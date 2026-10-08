@@ -132,9 +132,9 @@ export async function loadBuyerRecords(opts: { leadIds?: string[]; db?: Queryabl
   const buyerPartyIds = parties.filter((p) => buyerIds.includes(p.company_id)).map((p) => p.id);
   const [roles, facts] = await Promise.all([
     personIds.length ? rows<PersonRoleRow>(db, "select * from person_roles where person_id = any($1::uuid[])", [personIds]) : [],
-    rows<{ entity_type: string; entity_id: string; evidence_id: string }>(
+    rows<{ entity_type: string; entity_id: string; field: string; evidence_id: string }>(
       db,
-      `select entity_type, entity_id, evidence_id from fact_evidence
+      `select entity_type, entity_id, field, evidence_id from fact_evidence
         where (entity_type = 'company' and entity_id = any($1::uuid[]))
            or (entity_type = 'project_party' and entity_id = any($2::uuid[]))
            or (entity_type = 'person' and entity_id = any($3::uuid[]))`,
@@ -249,6 +249,7 @@ export async function loadBuyerRecords(opts: { leadIds?: string[]; db?: Queryabl
           peopleByCompany,
           evidence,
           buyerEvidenceIds,
+          capabilityEvidenceIds: facts.filter(f => f.entity_type === 'company' && f.entity_id === buyer.id && f.field === 'capability_activity').map(f => f.evidence_id),
           confirmedPersonIds: new Set([...(confirmedByLead.get(lead.id) ?? []), ...confirmedPeople]),
           foundViaName: viaNames.get((lead as LeadRow & { found_via_lead_id?: string | null }).found_via_lead_id ?? "") ?? null,
           awardedDate: project ? (awardedByProject.get(project.id) ?? null) : null,

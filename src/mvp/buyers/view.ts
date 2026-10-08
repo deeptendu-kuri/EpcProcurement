@@ -45,6 +45,7 @@ import { whyYouFor, type WhyYouFacts } from "./why-you";
 import { CONSULTANT_REASON, isConsultant, plainWords, supplierTypeKeyFor, whatTheyDoLabel } from "./what-they-do";
 import { companyGroupKey } from "./group";
 import { isPlaceName } from "@/mvp/pipeline/merge";
+import { capabilityLabel } from "@/mvp/discovery/locations";
 
 export const PLACE_NAME_REASON = "Place name, not a company";
 import { currentStep, windowSteps } from "./window";
@@ -91,6 +92,8 @@ export interface BuyerInput {
   evidence: Readonly<Record<string, EvidenceLite>>;
   /** Evidence behind facts about the buyer itself (company row, its party rows). */
   buyerEvidenceIds: string[];
+  /** Only quote-verified consuming-work facts, never navigation or neighbouring companies. */
+  capabilityEvidenceIds?: string[];
   confirmedPersonIds: ReadonlySet<string>;
   /** Project stage event dates (awarded …) for the trigger date fallback. */
   awardedDate?: string | null;
@@ -359,7 +362,11 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
 
   // ── what they do (15 §A) ──
   const typeKey = supplierTypeKeyFor(role, situation, { ...situationFacts, name, types: buyer.types ?? [], sector: project?.sector ?? null });
-  const whatTheyDo = whatTheyDoLabel(typeKey, role === "owner" && openTender);
+  const capability = (input.capabilityEvidenceIds ?? []).flatMap(id => {
+    const ev = input.evidence[id];
+    return ev?.verified ? (lead.client_product_ids ?? []).map(product => capabilityLabel(product, ev.quote)).filter(Boolean) : [];
+  })[0];
+  const whatTheyDo = capability ?? whatTheyDoLabel(typeKey, role === "owner" && openTender);
   const consultant = isConsultant(name, buyer.types ?? []);
   const placeName = isPlaceName(name);
 

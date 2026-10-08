@@ -15,10 +15,14 @@ describe('grounded first-party consuming companies without a compulsory AI reque
     expect(result).toMatchObject({company:'Atlas Electrical LLC',role:'subcontractor',country:null,project:null,activityDate:null,confidence:0});
     expect(result?.productQuote).toBe('We install power cables and electrical distribution systems.');
   });
-  it('preserves an original office location and excludes a clearly different market',()=>{
-    const b=bundle('Our works include power cable installation.','Our office is in Dubai, United Arab Emirates.');
+  it('preserves original headquarters and excludes a clearly different market without work proof',()=>{
+    const b=bundle('Our works include power cable installation.','We are headquartered in Dubai, United Arab Emirates.');
     expect(groundedCompanyBuyer(b,input)?.country).toBe('AE');
     expect(groundedCompanyBuyer(b,{...input,markets:['IN']})).toBeNull();
+  });
+  it('does not relabel a branch office as headquarters or actual work',()=>{
+    const result=groundedCompanyBuyer(bundle('Our works include power cable installation.','Our office is in Dubai, United Arab Emirates.'),input);
+    expect(result?.country).toBeNull();expect(result?.operatingCountries).toEqual([]);
   });
   it.each(['We install optical fiber cables for telecom.','We sell power cables to contractors.','Our client Beta Engineering installs power cables.','Our services include power cable installation: job vacancy.','Our services fabricate electrical cables.','Our services provide engineering consultancy.'])('does not promote unsupported/sales/third-party work: %s',work=>{
     expect(groundedCompanyBuyer(bundle(work),input)).toBeNull();
