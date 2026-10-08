@@ -39,7 +39,9 @@
     ".next-discovery/types/**/*.ts",
     ".next-discovery/dev/types/**/*.ts",
     ".next-hybrid/types/**/*.ts",
-    ".next-hybrid/dev/types/**/*.ts"
+    ".next-hybrid/dev/types/**/*.ts",
+    ".next-hybrid-delivery/types/**/*.ts",
+    ".next-hybrid-delivery/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

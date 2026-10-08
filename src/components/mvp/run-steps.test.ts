@@ -3,7 +3,7 @@ import { countersLine, mergeCounters, progressPercent, runStatusText, stepIndex 
 
 describe("run progress helpers", () => {
   it("never describes paused research as a fully finished search",()=>{
-    expect(runStatusText('done',{researchState:'partial'})).toBe('Research paused');
+    expect(runStatusText('done',{researchState:'partial'})).toBe('Finished · partial coverage');
     expect(runStatusText('done',{coverageIncomplete:true})).toBe('Finished · partial coverage');
     expect(runStatusText('done')).toBe('Finished');
     expect(runStatusText('running',{coverageIncomplete:true})).toBe('Running');

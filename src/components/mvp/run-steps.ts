@@ -6,7 +6,7 @@ export type RunStep = (typeof RUN_STEPS)[number];
 
 /** A settled compatibility status must not hide paused/incomplete research. */
 export function runStatusText(status:RunStatus,counters:RunCounters={}):string {
-  if(status==='done'&&counters.researchState==='partial')return 'Research paused';
+  if(status==='done'&&counters.researchState==='partial')return 'Finished · partial coverage';
   if(status==='done'&&counters.coverageIncomplete)return 'Finished · partial coverage';
   return {queued:'Starting',running:'Running',done:'Finished',failed:'Stopped',cancelled:'Cancelled'}[status];
 }

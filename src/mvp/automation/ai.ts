@@ -35,12 +35,12 @@ export async function qualifyBuyer(o: Opportunity): Promise<{approved:boolean;re
   const productEvidenceIds=quotes.filter(q=>buyerPageCandidate(q.quote,o.product_id)).map(q=>q.id);
   if(!productEvidenceIds.length)return {approved:false,reason:"The original product evidence does not establish buying-compatible work for the exact searched product. No email sent."};
   const schema=z.object({approved:z.boolean(),confidence:z.number().min(0).max(1).catch(0),reason:z.string().min(1).max(1500),
-    companyEvidenceId:z.string(),productEvidenceId:z.string(),companyQuote:z.string().optional(),productQuote:z.string().optional()}).strict();
+    companyEvidenceId:z.string().nullish(),productEvidenceId:z.string().nullish(),companyQuote:z.string().optional(),productQuote:z.string().optional()}).strict();
   const answer=schema.parse(await ask(`Decide whether this company is a potential BUYER of the exact searched product. Awarded/ongoing relevant work OR documented company services demonstrating compatible installation/construction/procurement can qualify. An award is not mandatory for company-level prospects. Exclude project owners, open bids, supplier-only sellers and competitors. A potential need is not a confirmed order.
     Select the supplied evidence IDs connecting THIS company to buying-compatible work and to a plausible use of THIS exact product (material/type matters). The application will cite and validate the ORIGINAL stored quotes itself; do not rewrite or return quote text. Do not borrow a different company's scope. Do not require a current purchase order, but do require concrete product-application evidence.
     productEvidenceId MUST be one of productEvidenceIds: other supplied quotes may establish identity or location but not product-consuming work. If evidence is insufficient, approved=false. Return only {approved,confidence,reason,companyEvidenceId,productEvidenceId}.`,{company:o.name,product:o.product_name,keyword:o.keyword,reason:o.buying_reason,productEvidenceIds,evidence:quotes}));
   if(!answer.approved)return {approved:false,reason:answer.reason};
-  const company=quotes.find(q=>q.id===answer.companyEvidenceId.trim());const product=quotes.find(q=>q.id===answer.productEvidenceId.trim());
+  const company=quotes.find(q=>q.id===answer.companyEvidenceId?.trim());const product=quotes.find(q=>q.id===answer.productEvidenceId?.trim());
   if(!company || !product)return {approved:false,reason:"AI cited an evidence ID outside this opportunity. No email sent."};
   // Match against the original evidence, tolerating typography/whitespace only.
   // A short literal product phrase is not invalid merely because it is under 15 characters.

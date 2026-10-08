@@ -10,6 +10,8 @@ import { PageHeader } from "@/components/mvp/page-header";
 import { RecentRuns } from "@/components/mvp/recent-runs";
 import { SavedSearchesList } from "@/components/mvp/saved-searches-list";
 import { catalogueOptions } from "@/components/mvp/search/page-data";
+import {funnelStatus} from '@/mvp/automation/config';
+import {AutomationReadiness} from '@/components/mvp/outreach/automation-readiness';
 
 interface FindPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -34,12 +36,13 @@ export default async function FindPage({ searchParams }: FindPageProps) {
     );
   }
 
-  const [runs, saved, selectedRun] = await Promise.all([listRecentRuns(10), listSavedSearches(), runParam ? getRun(runParam) : Promise.resolve(null)]);
+  const [runs, saved, selectedRun,automation] = await Promise.all([listRecentRuns(10), listSavedSearches(), runParam ? getRun(runParam) : Promise.resolve(null),funnelStatus()]);
   const suggestions = catalogueOptions().slice(0, 8).map(product => product.name);
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader title="Find buyers" subtitle="Choose the material and countries. Explore companies and available contacts; contact role is optional." />
+      <AutomationReadiness status={automation}/>
       <FindForm
         products={catalogueOptions()}
         markets={profile.markets.map((code) => ({ code, name: marketName(code) }))}

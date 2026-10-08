@@ -32,10 +32,11 @@ import { statusLabel } from "./time-ago";
 import { ToastProvider } from "./toast";
 
 /** Menu (docs/mvp/14 §10): Overview · SuperSearch · Lead lists · Pipeline · Settings · Help. */
-const NAV = [
+export const NAV = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard, tour: "nav-overview", also: [] as string[] },
   { href: "/find", label: "New search", icon: Compass, tour: "nav-find", also: [] as string[] },
-  { href: "/crm", label: "Leads", icon: ListChecks, tour: "nav-crm", also: ["/opportunities","/search","/buyers","/lists","/pipeline"] },
+  { href: "/crm", label: "Leads", icon: ListChecks, tour: "nav-crm", also: ["/opportunities","/buyers","/pipeline"] },
+  { href: "/search", label: "SuperSearch", icon: Search, tour: "nav-search", also: ["/lists"] },
   { href: "/outreach", label: "Email automation", icon: Mail, tour: "nav-outreach", also: [] as string[] },
   { href: "/settings", label: "Settings", icon: Settings, tour: "nav-settings", also: [] as string[] },
 ] as const;

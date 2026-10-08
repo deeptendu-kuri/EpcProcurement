@@ -13,6 +13,14 @@ afterAll(async()=>{setDbForTests(undefined);await db?.close();});
 beforeEach(()=>{name="groq";complete.mockReset();opportunity.evidence_ids=[evidenceId];});
 afterEach(()=>vi.unstubAllEnvs());
 describe("grounded Groq sales decisions",()=>{
+  it('handles a negative decision with null citations without a schema error; positive decisions still require real IDs',async()=>{
+    complete.mockResolvedValue({text:JSON.stringify({approved:false,confidence:.8,reason:'No buyer-compatible scope established.',companyEvidenceId:null,productEvidenceId:null})});
+    expect(await qualifyBuyer(opportunity)).toEqual({approved:false,reason:'No buyer-compatible scope established.'});
+    complete.mockResolvedValue({text:JSON.stringify({approved:true,confidence:1,reason:'Example unsupported approval',companyEvidenceId:null,productEvidenceId:null})});
+    expect((await qualifyBuyer(opportunity)).approved).toBe(false);
+    complete.mockResolvedValue({text:JSON.stringify({approved:true,confidence:1,reason:'Example missing citations'})});
+    expect((await qualifyBuyer(opportunity)).approved).toBe(false);
+  });
   it('accepts separately corroborated original company pages but never another company, domain or search',async()=>{
     const identity='Bundle EPC';const scope='Our services include carbon steel process pipe installation.';
     const run=(await db.query<{id:string}>("insert into runs(status) values('done') returning id")).rows[0].id;
