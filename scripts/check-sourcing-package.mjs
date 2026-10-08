@@ -6,8 +6,10 @@ import path from 'node:path';
 
 const root=fileURLToPath(new URL('..',import.meta.url));
 const require=createRequire(import.meta.url);
+const dist=process.env.MVP_CHECK_DIST_DIR||'.next-hybrid';
+if(!/^\.next-[a-z0-9-]+$/.test(dist))throw new Error('Validation output must be an isolated .next-* directory.');
 const env={...process.env,DATABASE_URL:'',MIGRATION_DATABASE_URL:'',RENDER:'',VERCEL:'',
-  MVP_NEXT_DIST_DIR:'.next-hybrid',MVP_DATA_DIR:path.join(root,'tmp','hybrid-validation-db'),
+  MVP_NEXT_DIST_DIR:dist,MVP_DATA_DIR:path.join(root,'tmp','hybrid-validation-db'),
   MVP_SCHEDULER:'off',MVP_DURABLE_RESEARCH:'off',MVP_FUNNEL_WORKER:'off',MVP_OUTREACH_WORKER:'off',
   DEMO_EMAIL_ENABLED:'0',NEXT_TELEMETRY_DISABLED:'1'};
 for(const key of ['RESEND_API_KEY','GROQ_API_KEY','TAVILY_API_KEY','HUNTER_API_KEY','EMAILABLE_API_KEY',

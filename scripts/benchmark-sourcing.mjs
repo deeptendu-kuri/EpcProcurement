@@ -50,7 +50,7 @@ export function costMetrics(reservations,cache,usage){
 }
 export function releaseGate(runs){
   const rows=runs.flatMap(r=>r.rows??[]).filter(r=>!r.isSample),dated=rows.filter(r=>r.trigger&&r.trigger.kind!=='capability'&&r.trigger.date).length;
-  const junk=rows.filter(r=>/^(?:United Arab Emirates|Key Players & More|World Nuclear Association)$|Norconsult|VALDEL EC|market (?:report|size)|top \d+|cable laying in UAE:/i.test(r.name));
+  const junk=rows.filter(r=>/^(?:United Arab Emirates|Key Players & More|World Nuclear Association|Hindustan Times|Gulf News|Reuters|Arab News|Khaleej Times|The HinduBusinessLine)$|Norconsult|VALDEL EC|market (?:report|size)|top \d+|cable laying in UAE:/i.test(r.name));
   const hits=benchmarkHits(rows,runs.flatMap(r=>r.evidence??[]));
   const checks={allThreeCompleted:runs.length===3&&runs.every(r=>r.status==='done'&&!r.error),savedBuyers:rows.length>=15,datedTriggerShare:rows.length>0&&dated/rows.length>=.6,
     benchmarkGroups:Object.values(hits).filter(Boolean).length>=7,noJunk:junk.length===0,

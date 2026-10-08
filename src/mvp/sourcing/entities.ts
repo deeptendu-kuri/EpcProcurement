@@ -8,7 +8,12 @@ export function junkCompanyReason(name:string):string|null {
   if(/\b(?:awards?|awarded|wins?|secured|bags|essential services|how to|top \d+|market size|market outlook)\b/i.test(n))return 'article or list title';
   return null;
 }
-const PUBLISHERS=['saudigulfprojects.com','reuters.com','thehindubusinessline.com','business-standard.com','constructionweekonline.com','gulfnews.com','offshore-energy.biz','economictimes.indiatimes.com','revenuebase.ai','indiamart.com'];
+const NEWS_PUBLISHERS=['saudigulfprojects.com','reuters.com','thehindubusinessline.com','business-standard.com','constructionweekonline.com','gulfnews.com','offshore-energy.biz','economictimes.indiatimes.com',
+  'hindustantimes.com','livemint.com','indiatimes.com','thenationalnews.com','zawya.com','meed.com','arabnews.com','khaleejtimes.com'];
+export function newsPublisher(domain:string):boolean {
+  const host=domain.toLowerCase();return NEWS_PUBLISHERS.some(d=>host===d||host.endsWith('.'+d));
+}
+const PUBLISHERS=[...NEWS_PUBLISHERS,'revenuebase.ai','indiamart.com'];
 export function nonCompanyDomain(domain:string):boolean {
   return [...PUBLISHERS,'weebly.com','wordpress.com','blogspot.com','medium.com','github.io','linkedin.com','facebook.com','world-nuclear.org','mordorintelligence.com','sphericalinsights.com','wikipedia.org'].some(d=>domain===d||domain.endsWith('.'+d));
 }
