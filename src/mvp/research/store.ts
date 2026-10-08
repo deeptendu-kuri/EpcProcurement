@@ -44,6 +44,17 @@ export async function createResearchRun(input:RunInput,db:Db=getDb()):Promise<st
     return run.id;
   });
 }
+/** Bridge old in-process searches/resume to the same durable hybrid stages.
+ * The pages are already stored originals; no source is recollected or searched here.
+ */
+export async function attachStoredHybridRun(runId:string,input:RunInput,docs:RawDoc[],db:Db=getDb()) {
+  const budget=researchBudget(input);
+  await db.tx(async tx=>{
+    await tx.query("insert into research_sessions(run_id,budget) values($1,$2::jsonb) on conflict(run_id) do nothing",[runId,JSON.stringify(budget)]);
+    for(const raw of docs)await addJob(tx,runId,'read',raw.url,{raw},35);
+    await tx.query("insert into run_events(run_id,stage,message,counters) values($1,'collect','Hybrid research: award and capability analysis share this run and budget.','{}')",[runId]);
+  });
+}
 /** Atomic per-run reservations survive retries. Unknown acceptance is never silently recharged. */
 export async function reserveBudget(db:Db,runId:string,kind:string,key:string,units:number,limit:number):Promise<'reserved'|'existing'|'exhausted'> {
   if(!Number.isInteger(units)||units<0||!Number.isFinite(limit)||limit<0)throw new Error('Invalid research budget.');
@@ -121,8 +132,11 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   const usage=(await db.query<{kind:string;units:number}>("select kind,sum(units)::int as units from research_budget_reservations where run_id=$1 group by kind",[runId])).rows;
   const incompleteReads=(await db.query<{count:number}>("select count(*)::int as count from research_jobs where run_id=$1 and (result->>'truncated'='true' or result->>'paginationLimited'='true')",[runId])).rows[0].count;
   const units=(kind:string)=>usage.find(u=>u.kind===kind)?.units??0;
+  const facts=(await db.query<{kept:number;dropped:number}>(`select coalesce(sum((result->>'factsKept')::int),0)::int as kept,
+    coalesce(sum((result->>'factsDropped')::int),0)::int as dropped from research_jobs where run_id=$1 and state='done'`,[runId])).rows[0];
   const counters:RunCounters={sourcesTotal:counts.filter(c=>c.stage==='collect').reduce((n,c)=>n+c.count,0),sourcesDone:count('collect','done'),sourcesFailed:count('collect','failed'),itemsRead:read,unreadablePages:count('read','done')-read+count('read','failed'),relevant:counts.filter(c=>c.stage==='analyse').reduce((n,c)=>n+c.count,0),buyerPagesChecked:count('analyse','done'),buyerAnalysisFailed:count('analyse','failed'),deferredPages:count('analyse','queued')+count('analyse','paused'),deferredUrls,scopedProspects:prospects,newLeads:prospects,coverageIncomplete:limited>0||session?.state==='partial'||counts.some(c=>c.state==='failed'||c.state==='paused'),researchState:session?.state as RunCounters['researchState'],researchStopReason:session?.stop_reason??null};
   counters.researchCandidates=candidates.count;counters.investigatedCompanies=candidates.investigated;
+  counters.factsKept=facts.kept;counters.factsDropped=facts.dropped;
   counters.readFailures=Object.fromEntries(failures.map(f=>[f.reason??'unknown',f.count]));
   counters.researchUsage={search:units('search'),reads:units('read'),aiCalls:units('ai_pages'),estimatedAiTokens:units('ai_tokens'),pdfPages:units('pdf_pages')};
   if(session)counters.researchLimits={search:session.budget.searchQueries,reads:session.budget.maxPages,aiCalls:session.budget.maxAiPages,estimatedAiTokens:session.budget.maxAiTokens};

@@ -37,7 +37,9 @@
     ".next-reliability/types/**/*.ts",
     ".next-reliability/dev/types/**/*.ts",
     ".next-discovery/types/**/*.ts",
-    ".next-discovery/dev/types/**/*.ts"
+    ".next-discovery/dev/types/**/*.ts",
+    ".next-hybrid/types/**/*.ts",
+    ".next-hybrid/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

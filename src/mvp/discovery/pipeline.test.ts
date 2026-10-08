@@ -27,9 +27,12 @@ describe("real-mode product pipeline wiring (providers mocked; isolated database
     const b=await run();expect(b.counters.scopedProspects).toBe(1);expect(complete).toHaveBeenCalledTimes(1);
     expect((await listOpportunities(b.id))[0].id).not.toBe((await listOpportunities(a.id))[0].id);
   });
-  it("does not convert an all-analysis failure into a successful empty search",async()=>{
+  it("reports provider quota exhaustion as explicit partial coverage, not a clean zero-buyer success (doc 16)",async()=>{
     vi.mocked(liveSources()[0].collect).mockResolvedValue([{sourceKey:"unit",sourceName:"Failing",tier:"C",url:"https://atlas.example/failing-page",title:"Atlas Works gas pipeline construction",text:quote+" Fresh page.",publishedAt:null,isSample:false}]);
-    complete.mockRejectedValue(new Error("quota unavailable"));const result=await run();expect(result.status).toBe("failed");expect(result.error).toContain("Buyer analysis failed");
+    complete.mockRejectedValue(new Error("quota unavailable"));const result=await run();
+    expect(result.status).toBe("done");expect(result.error).toBeNull();
+    expect(result.counters).toMatchObject({researchState:'partial',coverageIncomplete:true});
+    expect(result.counters.researchStopReason).toContain('quota');
     expect(await listOpportunities(result.id)).toEqual([]);
   });
   it("continues cached original pages without repeating searches, duplicating buyers or consuming AI",async()=>{

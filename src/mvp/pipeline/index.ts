@@ -18,10 +18,9 @@ import { tedSource } from "./sources/ted";
 import { tavilySource } from "./sources/tavily";
 import { publisherKeyFor } from "./text";
 import { captureOpportunities } from "@/mvp/opportunities";
-import { buyerPageCandidate,buyerResearchPriority } from "@/mvp/discovery/plan";
-import { discoverBuyers, saveBuyer,DISCOVERY_VERSION } from "@/mvp/discovery";
 import { requirePersistentWorker } from "@/mvp/runtime";
-import { createResearchRun,sessionFor,resumeResearchRun } from "@/mvp/research/store";
+import { attachStoredHybridRun,createResearchRun,sessionFor,resumeResearchRun } from "@/mvp/research/store";
+import { processResearchTick,productionResearchDeps } from "@/mvp/research/engine";
 import { startResearchWorker,waitForResearchRun } from "@/mvp/research/worker";
 import { resolveMaterial } from "@/mvp/discovery/material";
 
@@ -95,7 +94,12 @@ export async function waitForRun(runId: string): Promise<void> {
 /** Reuse original pages and cached extraction; never collect sources again. Atomic run claim prevents duplicates. */
 export async function continueBuyerRun(runId:string):Promise<string> {
   requirePersistentWorker();const db=getDb();
-  if(await sessionFor(db,runId)){await resumeResearchRun(runId,db);startResearchWorker();return runId;}
+  const research=await sessionFor(db,runId);
+  if(research){
+    // A settled complete search is an idempotent replay, not permission to charge again.
+    if(research.state==='done')return runId;
+    await resumeResearchRun(runId,db);startResearchWorker();return runId;
+  }
   const run=await db.tx(async tx=>{
     await tx.query("select pg_advisory_xact_lock(78240324)");
     const row=(await tx.query<RunRow>("select * from runs where id=$1 for update",[runId])).rows[0];
@@ -236,31 +240,15 @@ function safeBuyerAnalysisError(error:unknown):string {
   return "Buyer analysis could not complete; no unsupported result was saved. Check the provider/database setup.";
 }
 async function analyseBuyerPages(runId:string,input:RunInput,readable:BuyerPage[],db:Db,progress:Progress) {
-  const candidates=readable.filter(item=>buyerPageCandidate(item.stored.text,input.productId!));
-  progress.counters.relevant=candidates.length;
-  const cachedIds=new Set((await db.query<{document_id:string}>(`select distinct cache.document_id from buyer_discovery_cache cache join source_documents d on d.id=cache.document_id and d.content_hash=cache.content_hash
-    where cache.document_id=any($1::uuid[]) and cache.product_id=$2 and cache.version=$3`,[candidates.map(c=>c.stored.id),input.productId,DISCOVERY_VERSION])).rows.map(row=>row.document_id));
-  const ranked=[...candidates].sort((a,b)=>buyerResearchPriority(b.raw,b.stored.text,input)-buyerResearchPriority(a.raw,a.stored.text,input));
-  const selected=[...ranked.filter(item=>cachedIds.has(item.stored.id)),...ranked.filter(item=>!cachedIds.has(item.stored.id)).slice(0,maxAiDocsPerRun())];
-  progress.counters.buyerPagesChecked=selected.length;progress.counters.deferredPages=candidates.length-selected.length;
-  await progress.emit("extract",`Checking ${selected.length} buying-work pages; ${candidates.length-selected.length} deferred by the AI budget. Scores rank results only; original product and company evidence is required.`);
-  let failed=0;
-  for(const item of selected){
+  // Old in-process callers and saved-page continuation use the same hybrid jobs,
+  // not a capability-only bypass. The normal request path already creates these jobs.
+  await attachStoredHybridRun(runId,input,readable.map(item=>({...item.raw,text:item.stored.text})),db);
+  await progress.emit('extract','Checking award signals and company capabilities in one evidence-linked search.');
+  while((await sessionFor(db,runId))?.state==='active') {
     if(await isCancelled(db,runId))return;
-    try{
-      const result=await discoverBuyers(db,runId,input,item.stored,item.raw);
-      progress.counters.factsDropped+=result.invalid;
-      for(const buyer of result.buyers){if(await saveBuyer(db,runId,input,item.stored.id,item.raw,buyer))progress.counters.factsKept++;}
-      await progress.emit("check",`${result.buyers.length} evidence-supported potential buyers in ${item.raw.title??'page'}${result.cached?' (cached; no extra AI call)':''}`);
-      for(const reason of result.rejections.slice(0,5))await progress.emit("info",`Not saved: ${reason}`);
-    }catch(error){failed++;await progress.emit("error",safeBuyerAnalysisError(error));}
+    const tick=await processResearchTick(db,productionResearchDeps,runId);
+    if(!tick.processed)break;
   }
-  progress.counters.buyerAnalysisFailed=failed;
-  progress.counters.scopedProspects=(await db.query<{count:number}>("select count(*)::int as count from search_opportunities where run_id=$1",[runId])).rows[0].count;
-  if(selected.length&&failed===selected.length)throw new Error("Buyer analysis failed for every selected page. This is not a completed zero-buyer search.");
-  await progress.emit("score","Reference scores assigned for sorting only. Email eligibility uses evidence and contact validation, not a minimum score.");
-  await progress.emit("done",`${progress.counters.scopedProspects} buyer prospects saved. ${failed?'Some analysis failed; coverage is incomplete.':progress.counters.scopedProspects?'Open results to see evidence and demo outreach.':'No companies met the evidence checks within this research budget; continue saved pages to check more.'}`);
-  await db.query("update runs set status='done',finished_at=now(),counters=$2::jsonb where id=$1 and status<>'cancelled'",[runId,JSON.stringify(progress.counters)]);
 }
 
 // ───────────────────────── the run ─────────────────────────
@@ -367,8 +355,8 @@ export async function executeRun(runId: string, input: RunInput, db: Db = getDb(
     );
     if (await isCancelled(db, runId)) return;
 
-    // Product-scoped live research is company-first, not the legacy award/news lead builder.
-    // One extraction per selected page; known documents use a product/version/content-aware cache.
+    // Product-scoped research runs both award and capability extractors durably.
+    // Original documents, budgets and events stay attached to this run.
     if(!offline && input.productId && readable.length) {
       await analyseBuyerPages(runId,input,readable,db,progress);
       return;

@@ -12,17 +12,25 @@ import { gdeltSource } from '@/mvp/pipeline/sources/gdelt';
 import { rssSource } from '@/mvp/pipeline/sources/rss';
 import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tavily';
 import { collectBingQuery,collectRssFeed } from './sources';
-import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
+import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
 import { candidateForPage, extendInvestigation, seedInvestigations, domainOf, queueRead } from './investigation';
 import { RESEARCH_SOURCES } from './registry';
 import { bundlePromptText,discoverCompanyBundle,loadCompanyBundle } from '@/mvp/discovery/bundle';
 import { z } from 'zod';
 import {groundedCompanyBuyer} from '@/mvp/discovery/grounded';
+import { extractDocument } from '@/mvp/pipeline/extract';
+import { resolveDocument } from '@/mvp/pipeline/resolve';
+import { detectMarkets } from '@/mvp/pipeline/filter';
+import { buildSignalsAndScore } from '@/mvp/scoring';
+import { captureOpportunities } from '@/mvp/opportunities';
+import { awardTriggerSnapshots, budgetedAwardProviders, capabilityTriggerSnapshots, needsAwardAnalysis } from '@/mvp/sourcing/hybrid';
 
 export interface ResearchDeps {
   collect(source:string,ctx:SourceContext,payload:Record<string,unknown>):Promise<RawDoc[]>;
   read:typeof fetchPageText; discover:typeof discoverBuyers; save:typeof saveBuyer;
   discoverBundle?:typeof discoverCompanyBundle;
+  /** Injectable for fixture proofs; production still uses the existing P1/P2/P3 extractor. */
+  extractAward?:typeof extractDocument;
 }
 export const productionResearchDeps:ResearchDeps={
   async collect(source,ctx,payload){
@@ -87,8 +95,9 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       const original=(await db.query<{url:string;title:string|null;source_key:string;source_name:string;tier:RawDoc['tier'];published_at:string|null;is_sample:boolean}>('select url,title,source_key,source_name,tier,published_at,is_sample from source_documents where id=$1',[stored.id])).rows[0];
       const grounded:RawDoc={...raw,url:original.url,title:original.title,text:stored.text,publishedAt:original.published_at,sourceKey:original.source_key,sourceName:original.source_name,tier:original.tier,isSample:original.is_sample};
       const candidate=buyerPageCandidate(stored.text,input.productId!)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
-      let associated=await candidateForPage(db,job.run_id,grounded);
-      if(!associated){
+      const award=needsAwardAnalysis(grounded,stored.text,input);
+      let associated=award?null:await candidateForPage(db,job.run_id,grounded);
+      if(!award&&!associated){
         const seeded=await seedInvestigations(db,job.run_id,input,stored.id,grounded,stored.text,title,session.budget);
         if(seeded.seeds)await researchProgress(db,job.run_id,'info',`${seeded.seeds} company research seeds; ${seeded.queued} website investigations. Seeds are not qualified buyers.`);
         if(seeded.ownName)associated=await candidateForPage(db,job.run_id,grounded);
@@ -107,10 +116,40 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         }else if(hasMore)paginationLimited=true;
         if(paginationLimited)await researchProgress(db,job.run_id,'info','Directory coverage incomplete: its next page is unavailable or beyond the declared limit. Parsed rows are retained; no fake pagination.');
       }
-      await completeJob(db,job,{documentId:stored.id,candidate,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:buyerResearchPriority(grounded,stored.text,input)}]:[]);
+      // The persisted stage stays 'analyse' for compatibility with migration 019;
+      // the explicit subtype is analyse:award. WP5 adds the trigger table, not a second run.
+      const next:Parameters<typeof completeJob>[3]=award?
+        [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:80}]:
+        candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:buyerResearchPriority(grounded,stored.text,input)}]:[];
+      await completeJob(db,job,{documentId:stored.id,candidate,award,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},next);
       await markBudget(db,job.run_id,'read',job.key,'completed');
       await researchProgress(db,job.run_id,'read',`Original page saved${candidate?' for company/material analysis':''}.`);
     }else if(job.stage==='analyse'){
+      if(job.payload.kind==='analyse:award'){
+        const id=String(job.payload.documentId),raw=job.payload.raw as RawDoc;
+        const doc=(await db.query<{text:string;url:string;published_at:string|null}>('select text,url,published_at from source_documents where id=$1',[id])).rows[0];
+        if(!doc?.text||doc.url!==raw.url)throw new Error('Saved award original is unavailable.');
+        // A stored response is a recovery checkpoint: resolution can be replayed without another paid call.
+        const previous=(await db.query<{result:{extracted?:Awaited<ReturnType<typeof extractDocument>>}|null}>('select result from research_jobs where id=$1',[job.id])).rows[0]?.result;
+        const providers=budgetedAwardProviders(db,job.run_id,id,session.budget);
+        const extracted=previous?.extracted??await (deps.extractAward??extractDocument)(
+          {text:doc.text,url:doc.url,publishedAt:doc.published_at,structured:raw.structured},
+          {db,runId:job.run_id,provider:providers.provider,singleAttempt:true,onNote:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)});
+        await db.query('update research_jobs set result=$3::jsonb where id=$1 and lease_token=$2',[job.id,job.lease_token,JSON.stringify({extracted})]);
+        const resolved=await db.tx(async tx=>{
+          if(!await owned(tx,job))return false;
+          await resolveDocument(tx,{documentId:id,url:doc.url,tier:raw.tier,publisherKey:raw.publisherKey??publisherKeyFor(doc.url),
+            market:raw.market??detectMarkets(doc.text).find(m=>input.markets.includes(m))??null,publishedAt:doc.published_at,text:doc.text},extracted);
+          return true;
+        });
+        if(!resolved)return {processed:true,stale:true};
+        await buildSignalsAndScore(job.run_id,{db});
+        await captureOpportunities(job.run_id,input,db);
+        const triggers=await awardTriggerSnapshots(db,id);
+        await completeJob(db,job,{extracted,triggers,factsKept:extracted.stats.kept,factsDropped:extracted.stats.dropped,budgetLimited:providers.limited});
+        await researchProgress(db,job.run_id,'check',`Award analysis: ${triggers.length} verified triggers; ${extracted.stats.kept} facts kept, ${extracted.stats.dropped} quotes dropped.${providers.limited?' Shared AI coverage limit; rules-only facts retained.':''}`);
+        await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};
+      }
       if(job.payload.candidateId){
         const bundle=await loadCompanyBundle(db,job.run_id,String(job.payload.candidateId));
         if(!bundle){await completeJob(db,job,{invalid:1,saved:0});return {processed:true};}
@@ -133,7 +172,8 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
           if(await deps.save(db,job.run_id,input,anchor.id,raw,buyer,bundle,grounded?'rule:company-application':undefined))saved++;
         }
         await db.query('update research_candidates set state=$2,reason=$3,updated_at=now() where id=$1',[bundle.candidate.id,result.buyers.length?'qualified':'review',result.rejections[0]??(result.buyers.length?'Source-backed consuming work; purchasing and contacts are separate.':'No material-consuming work established in the read pages.')]);
-        await completeJob(db,job,{saved,invalid:result.invalid,cached:result.cached,deterministic:Boolean(grounded)});
+        const triggers=await capabilityTriggerSnapshots(db,job.run_id,input.productId!,bundle.documents.map(d=>d.id));
+        await completeJob(db,job,{saved,invalid:result.invalid,cached:result.cached,deterministic:Boolean(grounded),triggers});
         await researchProgress(db,job.run_id,'check',`${result.buyers.length} company bundles qualified; ${saved} newly saved.`);
         for(const reason of result.rejections.slice(0,3))await researchProgress(db,job.run_id,'info',`Company review: ${reason}`);
         await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};
@@ -151,7 +191,8 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       const result=await deps.discover(db,job.run_id,input,doc,raw);let saved=0;
       if(!cached){await markBudget(db,job.run_id,'ai_pages',id,'completed');await markBudget(db,job.run_id,'ai_tokens',id,'completed');}
       for(const buyer of result.buyers){const current=(await db.query<{status:string}>('select status from runs where id=$1',[job.run_id])).rows[0];if(current.status==='cancelled')break;if(await deps.save(db,job.run_id,input,id,raw,buyer))saved++;}
-      await completeJob(db,job,{saved,invalid:result.invalid,cached:result.cached});
+      const triggers=await capabilityTriggerSnapshots(db,job.run_id,input.productId!,[id]);
+      await completeJob(db,job,{saved,invalid:result.invalid,cached:result.cached,triggers});
       await researchProgress(db,job.run_id,'check',`${result.buyers.length} grounded company candidates; ${saved} newly saved.`);
       for(const reason of result.rejections.slice(0,5))await researchProgress(db,job.run_id,'info',`Not saved: ${reason}`);
     }else await completeJob(db,job,{});
@@ -181,7 +222,7 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
   const sessions=(await db.query<{run_id:string}>(`select s.run_id from research_sessions s where s.state='active' and ($1::uuid is null or s.run_id=$1)
     and not exists(select 1 from research_jobs j where j.run_id=s.run_id and j.state in ('queued','running'))`,[runId??null])).rows;
   for(const s of sessions){
-    const jobs=(await db.query<{stage:string;state:string;error:string|null;payload:{source?:string};result:{deferred?:number;documentId?:string;unreadable?:boolean}|null}>('select stage,state,error,payload,result from research_jobs where run_id=$1',[s.run_id])).rows;
+    const jobs=(await db.query<{stage:string;state:string;error:string|null;payload:{source?:string};result:{deferred?:number;documentId?:string;unreadable?:boolean;budgetLimited?:boolean}|null}>('select stage,state,error,payload,result from research_jobs where run_id=$1',[s.run_id])).rows;
     const collections=jobs.filter(j=>j.stage==='collect');
     const remoteCollections=collections.filter(j=>j.payload.source!=='directory-seed');
     const reads=jobs.filter(j=>j.stage==='read');
@@ -190,11 +231,11 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
     // Likewise, an all-unreadable run is a failure, not a completed zero-buyer search.
     const noReachableOriginal=!originalRead&&(remoteCollections.length>0&&remoteCollections.every(j=>j.state==='failed')||
       reads.length>0&&reads.every(j=>j.state==='failed'||j.result?.unreadable));
-    const failed=jobs.some(j=>j.state==='failed'),allSourcesFailed=collections.every(j=>j.state==='failed')||noReachableOriginal;
+    const failed=jobs.some(j=>j.state==='failed'),allSourcesFailed=collections.length>0&&collections.every(j=>j.state==='failed')||noReachableOriginal;
     // A settled optional source/read failure is a coverage warning, not a permanent funnel barrier.
     // A supervised review may resume one bundle while other jobs remain parked.
     // Once runnable work settles, those jobs mean partial, not running forever.
-    const partial=jobs.some(j=>j.state==='paused'||j.stage==='analyse'&&j.state==='failed')||jobs.some(j=>(j.result?.deferred??0)>0);
+    const partial=jobs.some(j=>j.state==='paused'||j.stage==='analyse'&&j.state==='failed')||jobs.some(j=>(j.result?.deferred??0)>0||j.result?.budgetLimited);
     const state=allSourcesFailed?'failed':partial?'partial':'done';
     const stopReason=partial?(jobs.find(j=>j.state==='paused')?.error||'Some sources/pages could not be processed within the budget.'):null;
     await db.tx(async tx=>{

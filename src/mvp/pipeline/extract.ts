@@ -10,7 +10,7 @@
  * - Structured sources (TED) skip the models: their facts arrive pre-built and are labelled `rule`.
  * - A fact whose quote fails the check, or that model B disputes, is dropped (never stored).
  */
-import { EXTRACT_PASS_MODELS, getLLM, setMockExtractor, type LLMProvider, type LLMRequest } from "@/mvp/llm";
+import { EXTRACT_PASS_MODELS, getLLM, setMockExtractor, type LLMProvider, type LLMRequest, type LLMRole } from "@/mvp/llm";
 import type { Queryable } from "@/mvp/db";
 import type { Discipline, PartyRole, ProcurementRoute, ProjectStage } from "@/mvp/types";
 import { DISCIPLINES, PARTY_ROLES } from "@/mvp/types";
@@ -189,9 +189,9 @@ export function relevanceChunks(text: string, size = CHUNK_CHARS, max = 2): stri
 
 // ───────────────────────── running passes ─────────────────────────
 
-async function runPass<T>(llm: LLMProvider, pass: Exclude<PassName, "P0">, chunk: string, url: string, runId?: string): Promise<T | null> {
+async function runPass<T>(llm: LLMProvider, pass: Exclude<PassName, "P0">, chunk: string, url: string, runId?: string, singleAttempt = false): Promise<T | null> {
   const schema = pass === "P1" ? P1Schema : pass === "P2" ? P2Schema : P3Schema;
-  const response = await llm.complete({ ...buildPrompt(pass, chunk, url), runId });
+  const response = await llm.complete({ ...buildPrompt(pass, chunk, url), runId, ...(singleAttempt ? { singleAttempt: true } : {}) });
   const parsed = schema.safeParse(parseJsonLoose(response.text) ?? {});
   return parsed.success ? (parsed.data as T) : null;
 }
@@ -248,17 +248,18 @@ interface PassResults {
   extractedBy: string;
 }
 
-async function runModels(text: string, url: string, db: Queryable | undefined, runId: string | undefined, onNote?: (msg: string) => Promise<void>, forceRules = false): Promise<PassResults> {
+async function runModels(text: string, url: string, db: Queryable | undefined, runId: string | undefined, onNote?: (msg: string) => Promise<void>, forceRules = false, provider?: ExtractionOptions['provider'], singleAttempt = false): Promise<PassResults> {
   ensureMockExtractor();
-  const llmA = getLLM("extract_a", db);
-  const llmB = getLLM("extract_b", db);
+  const pickProvider = provider ?? ((role: LLMRole, model?: string) => getLLM(role, db, model));
+  const llmA = pickProvider("extract_a");
+  const llmB = pickProvider("extract_b");
   const rulesMode = forceRules || llmA.name === "mock";
   const chunks = rulesMode ? relevanceChunks(text) : relevanceChunks(text, LIVE_CHUNK_CHARS, 1);
   const wantP2 = SCOPE_HINT.test(text);
   const wantP3 = PERSON_HINT.test(text);
 
   // Model A on Groq uses one model per pass so the passes run in parallel on separate rate limits.
-  const passLLM = (pass: "P1" | "P2" | "P3"): LLMProvider => (llmA.name === "groq" ? getLLM("extract_a", db, EXTRACT_PASS_MODELS[pass]) : llmA);
+  const passLLM = (pass: "P1" | "P2" | "P3"): LLMProvider => (llmA.name === "groq" ? pickProvider("extract_a", EXTRACT_PASS_MODELS[pass]) : llmA);
 
   const runAll = async (pick: (pass: "P1" | "P2" | "P3") => LLMProvider) => {
     const p1s: P1Output[] = [];
@@ -266,9 +267,9 @@ async function runModels(text: string, url: string, db: Queryable | undefined, r
     const p3s: P3Output[] = [];
     for (const chunk of chunks) {
       const [p1, p2, p3] = await Promise.all([
-        runPass<P1Output>(pick("P1"), "P1", chunk, url, runId),
-        wantP2 ? runPass<P2Output>(pick("P2"), "P2", chunk, url, runId) : Promise.resolve(null),
-        wantP3 ? runPass<P3Output>(pick("P3"), "P3", chunk, url, runId) : Promise.resolve(null),
+        runPass<P1Output>(pick("P1"), "P1", chunk, url, runId, singleAttempt),
+        wantP2 ? runPass<P2Output>(pick("P2"), "P2", chunk, url, runId, singleAttempt) : Promise.resolve(null),
+        wantP3 ? runPass<P3Output>(pick("P3"), "P3", chunk, url, runId, singleAttempt) : Promise.resolve(null),
       ]);
       p1s.push(p1 ?? EMPTY_P1);
       if (wantP2) p2s.push(p2 ?? EMPTY_P2);
@@ -819,15 +820,22 @@ function withRuleSpecs(results: PassResults, text: string): PassResults {
  * @param text the stored (cleaned) document text; all quotes are checked against it.
  * @param structured pre-built facts from a structured source (TED) – no model is called.
  */
+export interface ExtractionOptions {
+  db?: Queryable; runId?: string; onNote?: (message: string) => Promise<void>; rulesOnly?: boolean;
+  /** Durable callers wrap every actual provider pass in the shared run budget. */
+  provider?: (role: LLMRole, model?: string) => LLMProvider;
+  singleAttempt?: boolean;
+}
+
 export async function extractDocument(
   doc: { text: string; url: string; structured?: StructuredFacts | null; /** The article's own publication date (names orders by month). */ publishedAt?: string | null },
-  options: { db?: Queryable; runId?: string; onNote?: (message: string) => Promise<void>; /** Rules extractor only (sample-data runs). */ rulesOnly?: boolean } = {},
+  options: ExtractionOptions = {},
 ): Promise<ExtractedDoc> {
   if (doc.structured) {
     const s = doc.structured;
     return checkAndAgree(doc.text, { a: { p1: s.p1, p2: s.p2, p3: s.p3 ?? EMPTY_P3 }, b: null, mode: "rule", extractedBy: s.extractedBy });
   }
-  const results = await runModels(doc.text, doc.url, options.db, options.runId, options.onNote, options.rulesOnly === true);
+  const results = await runModels(doc.text, doc.url, options.db, options.runId, options.onNote, options.rulesOnly === true, options.provider, options.singleAttempt);
   // Live models: facts the rules extractor also finds count as two-extractor agreement (`both`);
   // what only the rules extractor finds is added as `rule` (rules first, 06 §1).
   const published = doc.publishedAt ?? null;

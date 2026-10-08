@@ -1,6 +1,15 @@
 // Data contract for buyers (doc 14 §9). Shared by server (buyers domain) and UI.
 // Keep this file free of runtime imports so client components can import it.
 
+// Doc 16: additive hybrid-source contracts. WP5 materialises these snapshots in SQL.
+export type TriggerKind = 'award' | 'order' | 'tender' | 'subcontract' | 'capability';
+export interface Trigger {
+  id: string; kind: TriggerKind; role: 'contractor'|'subcontractor'|'supplier'|'owner'; title: string;
+  date: string | null; datePrecision: 'day'|'month'|'year'|'unknown'; valueUsd: number | null;
+  valueText: string | null; country: string | null; projectId: string | null; projectName: string | null;
+  ownerName: string | null; strength: 'confirmed'|'likely'|'possible'; evidenceIds: string[];
+}
+
 export type BuyerRole = 'owner' | 'epc_contractor' | 'subcontractor' | 'manufacturer' | 'fabricator' | 'distributor';
 export type BuyerStage = 'ready' | 'check' | 'early' | 'not_buyer'; // from class
 export type FitLevel = 'good' | 'possible' | 'competitor';
