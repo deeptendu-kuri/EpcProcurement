@@ -9,6 +9,27 @@ export interface Trigger {
   valueText: string | null; country: string | null; projectId: string | null; projectName: string | null;
   ownerName: string | null; strength: 'confirmed'|'likely'|'possible'; evidenceIds: string[];
 }
+export interface SourceCard {
+  documentId: string; url: string; domain: string; title: string; publishedAt: string | null;
+  kind: 'news'|'tender_notice'|'filing'|'company_site'|'directory'|'roundup';
+  quotes: { evidenceId: string; sentence: string; highlight: string; proves: 'award'|'project'|'value'|'date'|'role'|'material'|'country'|'people' }[];
+}
+export interface LeadRow {
+  opportunityId: string; companyId: string; name: string; whatTheyDo: string; trigger: Trigger | null;
+  operatingCountry: string | null; hqCountry: string | null; sellSummary: string; fitScore: number;
+  howSure: 'high'|'medium'|'low'; stage: 'ready'|'check'|'early'|'not_buyer'; contactsFound: number;
+  contactsTotal: number; sourceCount: number; status: string; isSample: boolean;
+}
+export interface ContractorRow extends LeadRow { role: 'main_contractor'|'epc'|'subcontractor'; projectName: string | null; ownerName: string | null }
+export interface SubcontractorRow {
+  companyId: string; name: string; supplies: string; linkedToCompanyId: string; linkedToName: string;
+  link: 'confirmed'|'likely'|'possible'; country: string | null; sellSummary: string;
+  contactsFound: number; contactsTotal: number; sourceCount: number;
+}
+export interface EvidenceDrawerView {
+  header: LeadRow; why: string; sources: SourceCard[]; related: { above: SubcontractorRow[]; below: SubcontractorRow[] };
+  contacts: ContactSlot[]; activity: { at: string; text: string }[];
+}
 
 export type BuyerRole = 'owner' | 'epc_contractor' | 'subcontractor' | 'manufacturer' | 'fabricator' | 'distributor';
 export type BuyerStage = 'ready' | 'check' | 'early' | 'not_buyer'; // from class

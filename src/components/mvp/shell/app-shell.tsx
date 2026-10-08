@@ -35,7 +35,7 @@ import { ToastProvider } from "./toast";
 const NAV = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard, tour: "nav-overview", also: [] as string[] },
   { href: "/find", label: "New search", icon: Compass, tour: "nav-find", also: [] as string[] },
-  { href: "/crm", label: "My leads", icon: ListChecks, tour: "nav-crm", also: ["/opportunities","/search","/buyers","/lists","/pipeline"] },
+  { href: "/crm", label: "Leads", icon: ListChecks, tour: "nav-crm", also: ["/opportunities","/search","/buyers","/lists","/pipeline"] },
   { href: "/outreach", label: "Email automation", icon: Mail, tour: "nav-outreach", also: [] as string[] },
   { href: "/settings", label: "Settings", icon: Settings, tour: "nav-settings", also: [] as string[] },
 ] as const;
