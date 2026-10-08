@@ -135,6 +135,7 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   const failures=(await db.query<{reason:string;count:number}>("select result->>'failureReason' as reason,count(*)::int as count from research_jobs where run_id=$1 and result->>'unreadable'='true' group by result->>'failureReason'",[runId])).rows;
   const usage=(await db.query<{kind:string;units:number}>("select kind,sum(units)::int as units from research_budget_reservations where run_id=$1 group by kind",[runId])).rows;
   const incompleteReads=(await db.query<{count:number}>("select count(*)::int as count from research_jobs where run_id=$1 and (result->>'truncated'='true' or result->>'paginationLimited'='true')",[runId])).rows[0].count;
+  const sourceGaps=(await db.query<{count:number}>("select count(*)::int as count from research_jobs where run_id=$1 and result->>'coverageWarning'='true'",[runId])).rows[0].count;
   const units=(kind:string)=>usage.find(u=>u.kind===kind)?.units??0;
   const facts=(await db.query<{kept:number;dropped:number}>(`select coalesce(sum((result->>'factsKept')::int),0)::int as kept,
     coalesce(sum((result->>'factsDropped')::int),0)::int as dropped from research_jobs where run_id=$1 and state='done'`,[runId])).rows[0];
@@ -147,8 +148,8 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   if(session)counters.researchLimits={search:session.budget.searchQueries,reads:session.budget.maxPages,aiCalls:session.budget.maxAiPages,estimatedAiTokens:session.budget.maxAiTokens};
   if(session)counters.researchLimits!.bingSearches=session.budget.bingQueries;
   const skipped=(await db.query<{count:number}>("select coalesce(sum(coalesce((result->>'skippedCount')::int,0)),0)::int+count(*) filter(where stage='read' and result ? 'skipped')::int as count from research_jobs where run_id=$1",[runId])).rows[0].count;
-  counters.coverage={readsSkipped:limited+skipped+count('read','failed'),deferred:deferredUrls+count('analyse','paused'),reason:session?.stop_reason??null};
-  counters.coverageIncomplete=Boolean(counters.coverageIncomplete||session?.stop_reason||failures.length||deferredUrls||incompleteReads||candidates.count>candidates.investigated);
+  counters.coverage={readsSkipped:limited+skipped+count('read','failed'),deferred:deferredUrls+count('analyse','paused'),reason:session?.stop_reason??(sourceGaps?'Some sources omit required contractor/award details.':null)};
+  counters.coverageIncomplete=Boolean(counters.coverageIncomplete||sourceGaps||session?.stop_reason||failures.length||deferredUrls||incompleteReads||candidates.count>candidates.investigated);
   await db.tx(async tx=>{
     await tx.query('update runs set counters=$2::jsonb where id=$1',[runId,JSON.stringify(counters)]);
     await tx.query('insert into run_events(run_id,stage,message,counters) values($1,$2,$3,$4::jsonb)',[runId,stage,message.slice(0,1000),JSON.stringify(counters)]);

@@ -27,6 +27,7 @@ import { buildSignalsAndScore } from '@/mvp/scoring';
 import { captureOpportunities } from '@/mvp/opportunities';
 import { awardTriggerSnapshots, budgetedAwardProviders, capabilityTriggerSnapshots } from '@/mvp/sourcing/hybrid';
 import { tedSource } from '@/mvp/pipeline/sources/ted';
+import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@/mvp/sourcing/roundup';
 
 export interface ResearchDeps {
   collect(source:string,ctx:SourceContext,payload:Record<string,unknown>):Promise<RawDoc[]>;
@@ -34,6 +35,8 @@ export interface ResearchDeps {
   discoverBundle?:typeof discoverCompanyBundle;
   /** Injectable for fixture proofs; production still uses the existing P1/P2/P3 extractor. */
   extractAward?:typeof extractDocument;
+  extractRoundup?:typeof extractRoundup;
+  lookupWebsite?:typeof collectTavilyQuery;
 }
 export const productionResearchDeps:ResearchDeps={
   async collect(source,ctx,payload){
@@ -57,6 +60,11 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
     if(job.stage==='collect'){
       const ctx:SourceContext={db,runId:job.run_id,input,profile:getClientProfile(),terms:queryTerms(input.query),log:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)};
       const source=String(job.payload.source);let docs:RawDoc[];
+      if(source==='roundup-website'){
+        const result=await lookupRoundupWebsite(db,job.run_id,input,String(job.payload.candidateId),session.budget,
+          deps.lookupWebsite??((ctx,query)=>deps.collect('tavily',ctx,{query})));
+        await completeJob(db,job,result);await finishIdleResearch(db,job.run_id);return {processed:true};
+      }
       if(job.payload.sourcingLane==='capability'){
         const saved=(await db.query<{count:number}>("select count(*)::int as count from search_opportunities where run_id=$1 and qualification<>'rejected'",[job.run_id])).rows[0].count;
         if(saved>=session.budget.targetCompanies){await completeJob(db,job,{skipped:'capability fallback not needed'});return {processed:true};}
@@ -121,8 +129,8 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       const list=pageKind==='roundup'||pageKind==='directory';
       const candidate=pageKind!=='junk'&&!list&&buyerPageCandidate(stored.text,input.productId!)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
       const award=Boolean(raw.structured)||candidate&&['article','tender_notice','filing'].includes(pageKind);
-      let associated=award?null:await candidateForPage(db,job.run_id,grounded);
-      if(pageKind!=='junk'&&!award&&!associated){
+      let associated=award||list?null:await candidateForPage(db,job.run_id,grounded);
+      if(pageKind!=='junk'&&!list&&!award&&!associated){
         const seeded=await seedInvestigations(db,job.run_id,input,stored.id,grounded,stored.text,title,session.budget);
         if(seeded.seeds)await researchProgress(db,job.run_id,'info',`${seeded.seeds} company research seeds; ${seeded.queued} website investigations. Seeds are not qualified buyers.`);
         if(seeded.ownName)associated=await candidateForPage(db,job.run_id,grounded);
@@ -143,13 +151,29 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       }
       // The persisted stage stays 'analyse' for compatibility with migration 019;
       // the explicit subtype is analyse:award. WP5 adds the trigger table, not a second run.
-      const next:Parameters<typeof completeJob>[3]=award?
+      const next:Parameters<typeof completeJob>[3]=list?
+        [{stage:'analyse',key:`roundup:${stored.id}`,payload:{kind:'analyse:roundup',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY[pageKind]}]:award?
         [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY[pageKind]}]:
         candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:buyerResearchPriority(grounded,stored.text,input)}]:[];
       await completeJob(db,job,{documentId:stored.id,candidate,award,pageKind,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},next);
       await markBudget(db,job.run_id,'read',job.key,'completed');
       await researchProgress(db,job.run_id,'read',`Original page saved${candidate?' for company/material analysis':''}.`);
     }else if(job.stage==='analyse'){
+      if(job.payload.kind==='analyse:roundup'){
+        const id=String(job.payload.documentId);
+        const doc=(await db.query<{id:string;text:string}>('select id,text from source_documents where id=$1',[id])).rows[0];
+        if(!doc?.text)throw new Error('Saved roundup original unavailable.');
+        const previous=(await db.query<{result:{roundup?:Awaited<ReturnType<typeof extractRoundup>>}|null}>('select result from research_jobs where id=$1',[job.id])).rows[0]?.result?.roundup;
+        const providers=budgetedAwardProviders(db,job.run_id,id,session.budget);
+        const roundup=previous?verifyRoundup(previous,doc.text,id):await (deps.extractRoundup??extractRoundup)(doc,providers.provider('extract_a','openai/gpt-oss-120b'));
+        if(!await db.tx(tx=>owned(tx,job)))return {processed:true,stale:true};
+        await db.query('update research_jobs set result=$3::jsonb where id=$1 and lease_token=$2',[job.id,job.lease_token,JSON.stringify({roundup})]);
+        const seeded=await seedRoundup(db,job.run_id,input,roundup,session.budget);
+        await completeJob(db,job,{roundup,...seeded,budgetLimited:providers.limited,coverageWarning:roundup.warnings.length>0});
+        await researchProgress(db,job.run_id,'check',`Roundup: ${seeded.seeded} verified identity candidates; ${seeded.queued} website reads and ${seeded.lookups} bounded lookup tasks. Candidates are not confirmed buyers.`);
+        for(const warning of roundup.warnings)await researchProgress(db,job.run_id,'info',warning);
+        await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};
+      }
       if(job.payload.kind==='analyse:award'){
         const id=String(job.payload.documentId),raw=job.payload.raw as RawDoc;
         const doc=(await db.query<{text:string;url:string;published_at:string|null}>('select text,url,published_at from source_documents where id=$1',[id])).rows[0];
@@ -224,6 +248,10 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
     await finishIdleResearch(db,job.run_id);
     return {processed:true,runId:job.run_id};
   }catch(error){
+    if(job.stage==='analyse'&&error instanceof Error&&/budget exhausted/i.test(error.message)){
+      await completeJob(db,job,{budgetLimited:true,skipped:'Shared AI budget exhausted; saved original retained.'});
+      await finishIdleResearch(db,job.run_id);return {processed:true,budgetLimited:true};
+    }
     const quota=error instanceof Error&&/quota|rate.?limit|429|budget/i.test(error.message);
     if(quota&&job.stage==='analyse'){await parkJob(db,job,'AI provider quota/rate limit: saved research is retained.');return {processed:true,paused:true};}
     const message=error instanceof Error?error.message:'';

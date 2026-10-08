@@ -49,7 +49,7 @@ export function pageCompany(text:string,title:string|null,url:string):string|nul
 export async function registerCandidate(tx:Queryable,runId:string,company:string,domain:string|null,documentId:string,quote:string|null) {
   const key=createHash('sha256').update(normalized(company)).digest('hex');
   const candidate=(await tx.query<ResearchCandidate>(`insert into research_candidates(run_id,key,company,domain_hint,identity_document_id,identity_quote)
-    values($1,$2,$3,$4,$5,$6) on conflict(run_id,key) do update set updated_at=now() returning *`,[runId,key,company,domain,documentId,quote])).rows[0];
+    values($1,$2,$3,$4,$5,$6) on conflict(run_id,key) do update set domain_hint=coalesce(research_candidates.domain_hint,excluded.domain_hint),updated_at=now() returning *`,[runId,key,company,domain,documentId,quote])).rows[0];
   return candidate;
 }
 /** One shared queue admission contract for initial sources, directory pagination and follow-ups. */
