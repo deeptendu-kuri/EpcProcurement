@@ -17,17 +17,8 @@ type Limits = Pick<ResearchBudget, 'searchQueries' | 'bingQueries' | 'maxPages' 
 export type ExtendableBudget = ResearchBudget & { extensions?: number; base?: Limits };
 const LIMIT_KEYS = ['searchQueries', 'bingQueries', 'maxPages', 'maxAiPages', 'maxAiTokens'] as const;
 
-const intEnv = (name: string, fallback: number, max: number) => {
-  const raw = process.env[name]?.trim();
-  const n = Number(raw);
-  return raw && Number.isInteger(n) && n >= 0 ? Math.min(n, max) : fallback;
-};
-/** Saved buyers wanted before a search may stop early (0 turns extension off). */
-export const minimumBuyers = () => intEnv('MVP_MIN_BUYERS', 2, 10);
-/** Extra rounds allowed after the first pass. */
-export const maxExtensionRounds = () => intEnv('MVP_RESEARCH_EXTENSION_ROUNDS', 3, 5);
-/** AI tokens always left for email reply analysis on the same day. */
-export const emailAiReserve = () => intEnv('MVP_EMAIL_AI_RESERVE', 30_000, 150_000);
+import { emailAiReserve, maxExtensionRounds, minimumBuyers } from './limits';
+export { emailAiReserve, maxExtensionRounds, minimumBuyers };
 
 /** Next round's limits: the original budget added once more, capped at the deep-mode ceiling. */
 export function extendedBudget(budget: ExtendableBudget, aiTokenAllowance = Number.POSITIVE_INFINITY): ExtendableBudget {
@@ -96,6 +87,10 @@ export async function extendResearchIfShort(db: Db, runId: string): Promise<bool
     await tx.query('update research_sessions set budget=$2::jsonb,stop_reason=null,updated_at=now() where run_id=$1', [runId, JSON.stringify(next)]);
     await tx.query(`update research_jobs set state='queued',result=null,error=null,attempts=0,lease_token=null,lease_until=null,available_at=now(),updated_at=now()
       where ${runnable}`, [runId]);
+    // Buyers come from checking companies already named, then from direct company searches;
+    // more news and list queries mostly add names. Spend the extra searches in that order.
+    await tx.query(`update research_jobs set priority=case when key like 'official:%' then 2300 when payload->>'sourcingLane'='capability' then 2200 else priority end
+      where run_id=$1 and state='queued' and stage='collect'`, [runId]);
   });
   // Companies parked by a reading limit get their website read again (imported lazily: found.ts uses this module).
   if (parked) await (await import('./found')).requeueDeferredCandidates(db, runId, next);

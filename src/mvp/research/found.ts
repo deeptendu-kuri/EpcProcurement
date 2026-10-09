@@ -9,7 +9,7 @@ import { MODE_BUDGETS } from '@/mvp/discovery/plan';
 import { addJob, researchProgress } from './store';
 import { queueRead } from './investigation';
 import { researchAiAllowance, type ExtendableBudget } from './extend';
-import { junkCompanyReason, nonCompanyDomain } from '@/mvp/sourcing/entities';
+import { looksLikeSupplier, relevantFound } from '@/mvp/sourcing/names';
 
 export type FoundStatus = 'saved' | 'checking' | 'not_checked' | 'no_website' | 'no_match' | 'unreadable';
 export interface FoundCompany {
@@ -21,7 +21,7 @@ export interface FoundCompany {
   /** A hint from the source wording only; never a verified role. */
   likelyRole: LikelyRole | null;
 }
-export type LikelyRole = 'owner' | 'contractor' | 'pipe_maker';
+export type LikelyRole = 'owner' | 'contractor' | 'pipe_maker' | 'supplier';
 // "GASCO, Abu Dhabi" and "GASCO" are one company: the place after a comma is not part of the name.
 // "(KPIL)" is a short form, not part of the name, so "… Ltd (KPIL)" and "… Limited" match.
 const key = (name: string) => name.split(',')[0].replace(/\([^)]*\)/g, ' ').toLowerCase().replace(/\b(?:ltd|limited|llc|l\.l\.c|pvt|private|inc|plc|co|company|corporation|corp)\b\.?/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
@@ -34,6 +34,7 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function likelyRole(name: string, quote: string | null): LikelyRole | null {
   const q = quote ?? '';
   const short = name.split(/\s*[,(]/)[0].trim();
+  if (looksLikeSupplier(q)) return 'supplier';
   if (/\b(?:pipes?|tubulars?|tubes?)\b/i.test(name) || /\b(?:pipe|tube)s?\b[^.]{0,30}\b(?:order|maker|manufactur\w*|mills?)\b/i.test(q)) return 'pipe_maker';
   const owner = [name, short].filter((n) => n.length >= 3).some((n) =>
     new RegExp(`\\b(?:projects?|pipelines?|contracts?|orders?|network)\\b[^.]{0,80}?\\b(?:for|of|with|from|by)\\s+(?:the\\s+)?${escapeRe(n)}`, 'i').test(q));
@@ -47,23 +48,7 @@ interface CandidateRow {
   pages: number; title: string | null; url: string | null; pending: boolean;
 }
 const LIMIT_REASON = /budget|deferred|limit/i;
-// Words showing the company is named for project, construction or material work.
-const WORK = /\b(?:pipes?|pipelines?|tub(?:e|ular)s?|construct\w*|contract\w*|EPC|engineer\w*|infrastructure|projects?|refin\w*|petroleum|oil|gas|steel|fabricat\w*|mechanical|civil|build\w*|develop\w*|energy|power|water|utilit\w*|plants?|terminal|onshore|offshore|cables?)\b/i;
-// Market-news furniture: share prices, results and advice boxes beside an article.
-const NOT_WORK = /\b(?:share price|stock price|investment advice|dividend|earnings|results? today|q[1-4] results?|according to [A-Z][a-z]+ data|subscribe|newsletter)\b/i;
-// Headline wording inside a "name": verbs, amounts and list words ("… Secures A $300M Vessel Contract", "UAE Construction Companies Overview").
-const HEADLINE = /(?:\$|€|₹)\s?\d|\b\d+(?:\.\d+)?\s?(?:m|bn|mn|million|billion|crore)\b|\b(?:secures?|signs?|drives?|wins?|bags|awards?|launch\w*|announces?|overview|activity|record|list|top|best|guide|how|why|what|across|amid)\b/i;
-const MEDIA_OR_BODY = /\b(?:monitor|tracker|observatory|excellence|magazine|journal|digest|times|herald|guardian|gazette|weekly|daily|news|media|wiki\w*|blog)\b/i;
-/** A listed name counts as a work-related company when its own source line is about work, not page furniture. */
-export function relevantFound(name: string, quote: string | null, website: string | null, saved: boolean): boolean {
-  if (saved) return true;
-  if (junkCompanyReason(name) || (website && nonCompanyDomain(website))) return false;
-  if (!/[a-z]/i.test(name)) return false; // garbled or non-name text
-  if (HEADLINE.test(name)) return false; // an article title, not a company
-  if (MEDIA_OR_BODY.test(name)) return false; // publishers, trackers and industry bodies are not buyers
-  const line = `${name} ${quote ?? ''}`;
-  return WORK.test(line) && !NOT_WORK.test(quote ?? '');
-}
+export { relevantFound };
 
 export async function listFoundCompanies(db: Queryable, runId: string): Promise<FoundCompany[]> {
   const rows = (await db.query<CandidateRow>(`select c.id,c.company,c.domain_hint,c.state,c.reason,c.identity_quote,cardinality(c.document_ids)::int as pages,d.title,d.url,
@@ -93,7 +78,10 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
       : r.state === 'qualified' ? ['no_match', 'Matched, but not saved for this product or country']
       : ['not_checked', 'Not checked yet'];
     result.push({ id: r.id, name: r.company, website: r.domain_hint, status, statusText, source: r.url ? { title: r.title, url: r.url } : null,
-      quote: r.identity_quote, pagesRead: r.pages, opportunityId, relevant: relevantFound(r.company, r.identity_quote, r.domain_hint, Boolean(opportunityId)), likelyRole: likelyRole(r.company, r.identity_quote) });
+      quote: r.identity_quote, pagesRead: r.pages, opportunityId,
+      // Suppliers of the material are competitors, not buyers: folded with the other non-buyer names.
+      relevant: relevantFound(r.company, r.identity_quote, r.domain_hint, Boolean(opportunityId), r.title) && (Boolean(opportunityId) || !looksLikeSupplier(r.identity_quote)),
+      likelyRole: likelyRole(r.company, r.identity_quote) });
   }
   return result;
 }

@@ -9,8 +9,8 @@ const EMPTY=<span className="text-[var(--muted)]" aria-label="Not found yet">—
 const statusClass:Record<FoundCompany['status'],string>={saved:'bg-green-50 text-green-900 border-green-200',checking:'bg-blue-50 text-blue-900 border-blue-200',
   not_checked:'bg-[var(--subtle)] text-[var(--text-2)] border-[var(--line)]',no_website:'bg-amber-50 text-amber-900 border-amber-200',
   no_match:'bg-[var(--subtle)] text-[var(--muted)] border-[var(--line)]',unreadable:'bg-amber-50 text-amber-900 border-amber-200'};
-const roleLabel:Record<LikelyRole,string>={owner:'Project owner',contractor:'Contractor',pipe_maker:'Pipe maker'};
-const roleHint:Record<LikelyRole,string>={owner:'Named as the owner of a project; owners often buy material directly.',contractor:'Described as a construction, engineering or EPC company.',pipe_maker:'Makes or supplies pipe; may compete with you for this product.'};
+const roleLabel:Record<LikelyRole,string>={owner:'Project owner',contractor:'Contractor',pipe_maker:'Pipe maker',supplier:'Supplier · competitor'};
+const roleHint:Record<LikelyRole,string>={owner:'Named as the owner of a project; owners often buy material directly.',contractor:'Described as a construction, engineering or EPC company.',pipe_maker:'Makes or supplies pipe; may compete with you for this product.',supplier:'Says it supplies this kind of material; a competitor rather than a buyer.'};
 const order:Record<FoundCompany['status'],number>={saved:0,checking:1,not_checked:2,no_website:3,unreadable:4,no_match:5};
 const CHECKABLE:FoundCompany['status'][]=['not_checked','no_website','unreadable'];
 const host=(url:string)=>{try{return new URL(url).hostname.replace(/^www\./,'');}catch{return '';}};

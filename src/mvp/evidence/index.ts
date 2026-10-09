@@ -7,6 +7,7 @@ import {namesCompany,originalQuote} from '@/mvp/discovery/evidence';
 import {companyIdentityReason} from '@/mvp/sourcing/entities';
 import {sentenceFor} from '@/mvp/buyers/load';
 import {buildTeam} from '@/mvp/buyers/team';
+import {applicationSentence} from '@/mvp/discovery/application';
 import type {EvidenceDrawerView,SourceCard,LeadRow} from '@/mvp/buyers/types';
 
 interface SourceSql {id:string;document_id:string;quote:string;text:string;url:string;title:string|null;published_at:string|null;source_key:string;fields:string[];}
@@ -26,6 +27,11 @@ export function proofGroups(fields:string[],quote:string):Proves[]{
   if(!groups.size)groups.add('material');
   return [...groups];
 }
+/** Short title-like text with a title separator and no statement: "Products – Example Engineering Ltd". */
+export function titleOnly(quote:string):boolean {
+  const words=quote.trim().split(/\s+/).length;
+  return words<=10&&/\s[–—|-]\s/.test(quote)&&!/\b(?:is|are|was|were|has|have|had|will|won|wins|secured|supplies|provides|manufactures|builds|fabricates|delivered|awarded)\b/i.test(quote);
+}
 export async function sourceCards(db:Queryable,ids:string[]):Promise<SourceCard[]>{
   if(!ids.length)return [];
   const rows=(await db.query<SourceSql>(`select e.id,e.document_id,e.quote,d.text,d.url,d.title,d.published_at::text as published_at,d.source_key,
@@ -36,6 +42,8 @@ export async function sourceCards(db:Queryable,ids:string[]):Promise<SourceCard[
   const cards=new Map<string,SourceCard>();
   for(const r of rows){
     const quote=originalQuote(r.text,r.quote);if(!quote)continue;
+    // A page title ("Product & Services – Example Ltd") only names the company; it proves no work.
+    if(titleOnly(quote))continue;
     let domain:string;try{const u=new URL(r.url);if(!['https:','http:'].includes(u.protocol))continue;domain=u.hostname;}catch{continue;}
     const classified=classifyPage({url:r.url,title:r.title,text:r.text});
     if(classified==='junk')continue;
@@ -67,11 +75,12 @@ async function drawerView(db:Queryable,data:TableDataset,companyId:string,compan
   }
   const sources=await sourceCards(db,ids);if(!sources.length)return null;
   const why=header.trigger?.title??sources.flatMap(c=>c.quotes).find(q=>namesCompany(q.highlight,[header!.name]))?.highlight??'';
+  const application=company?applicationSentence(company.refProduct,[why,...sources.flatMap(c=>c.quotes.map(q=>q.sentence))]):null;
   const notes=company?(await db.query<{at:string;text:string}>("select created_at::text as at,'Workspace note/status: '||body as text from opportunity_events where opportunity_id=$1 order by created_at desc limit 30",[header.opportunityId])).rows:[];
   const emails=company?(await db.query<{at:string;text:string}>(`select m.created_at::text as at,
     case when m.direction='out' then 'Demo email to configured approved inbox' else 'Approved-inbox reply' end||' · '||m.kind||' · '||m.state as text
     from funnel_messages m join funnel_threads t on t.id=m.thread_id where t.opportunity_id=$1 order by m.created_at desc limit 30`,[header.opportunityId])).rows:[];
-  return {header:{...header,sourceCount:sources.length},why,sources,
+  return {header:{...header,sourceCount:sources.length},why,application,sources,
     related:{above:data.chain.filter(c=>c.row.companyId===companyId).map(c=>c.row),below:data.chain.filter(c=>c.row.linkedToCompanyId===companyId).map(c=>c.row)},
     contacts:company?.team??buildTeam('subcontractor',header.name,[]),activity:[...notes,...emails].sort((a,b)=>b.at.localeCompare(a.at))};
 }

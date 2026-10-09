@@ -327,7 +327,10 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
     const partial=jobs.some(j=>j.state==='paused'&&!budgetStop(j)||j.stage==='analyse'&&j.state==='failed');
     const coverageLimited=jobs.some(j=>budgetStop(j)||(j.result?.deferred??0)>0||j.result?.budgetLimited);
     // Fewer buyers than wanted: re-run the work that stopped only at a limit, under a larger budget.
-    if(!allSourcesFailed&&!partial&&await extendResearchIfShort(db,s.run_id))continue;
+    // A failed AI answer (e.g. malformed JSON) is a gap, not a reason to stop looking; only paused,
+    // uncertain paid requests block another round.
+    const blocking=jobs.some(j=>j.state==='paused'&&!budgetStop(j));
+    if(!allSourcesFailed&&!blocking&&await extendResearchIfShort(db,s.run_id))continue;
     const state=allSourcesFailed?'failed':partial?'partial':'done';
     const stopReason=partial||coverageLimited?(jobs.find(j=>j.state==='paused')?.error||'Some sources/pages could not be processed within the budget.'):null;
     await db.tx(async tx=>{

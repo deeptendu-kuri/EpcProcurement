@@ -32,7 +32,8 @@ export interface SubcontractorRow {
   contactsFound: number; contactsTotal: number; sourceCount: number;
 }
 export interface EvidenceDrawerView {
-  header: LeadRow; why: string; sources: SourceCard[]; related: { above: SubcontractorRow[]; below: SubcontractorRow[] };
+  header: LeadRow; why: string; /** Why this work needs the searched product, when the source wording supports it. */ application?: string | null;
+  sources: SourceCard[]; related: { above: SubcontractorRow[]; below: SubcontractorRow[] };
   contacts: ContactSlot[]; activity: { at: string; text: string }[];
 }
 

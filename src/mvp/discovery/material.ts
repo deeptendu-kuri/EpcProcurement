@@ -29,7 +29,7 @@ export const MATERIAL_ACTIVITIES: Readonly<Record<string, readonly string[]>> = 
   "welding-consumables": ["steel fabrication", "pipeline welding", "structural welding"],
   abrasives: ["abrasive blasting", "surface preparation", "metal fabrication"],
   "structural-steel": ["structural steel fabrication", "steel structure erection", "steel fabrication"],
-  plates: ["pressure vessel fabrication", "storage tank fabrication", "steel plate fabrication"],
+  plates: ["pressure vessel fabrication", "shipbuilding", "storage tank fabrication", "pressure vessel manufacturing", "vessel construction", "ship repair", "boiler manufacturing", "heavy fabrication", "steel plate fabrication"],
   rebar: ["reinforced concrete construction", "rebar installation", "reinforcement fixing"],
   "gratings-handrails": ["industrial platform construction", "steel structure erection", "pipe support installation"],
   cables: ["power cable installation", "electrical contracting", "power distribution construction", "cable laying", "electrical installation", "HV cable installation", "EHV cable installation", "HVDC cable installation", "11kV to 400kV cable installation", "substation cabling", "underground cabling"],

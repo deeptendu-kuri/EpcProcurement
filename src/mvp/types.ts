@@ -170,6 +170,11 @@ export interface RunCounters {
   readFailures?: Record<string,number>;
   researchUsage?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;pdfPages:number;bingSearches?:number};
   researchLimits?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;bingSearches?:number};
+  /** Extra research rounds taken because fewer buyers than wanted were saved. */
+  researchRounds?: number;
+  researchRoundsMax?: number;
+  /** Saved buyers a search aims for before it may stop. */
+  minimumBuyers?: number;
   coverage?: {readsSkipped:number;deferred:number;reason:string|null};
   sourcingLanes?: {awardArticles:number;roundups:number;roundupCompanies:number;companySites:number;pending:number};
   updatedLeads?: number;

@@ -10,6 +10,7 @@ import { feedUrls } from '@/mvp/pipeline/sources/rss';
 import { readLaneLimits } from './registry';
 import { queueRead } from './investigation';
 import { prioritiseDiscoveryDocs } from './routing';
+import { maxExtensionRounds, minimumBuyers } from './limits';
 import { sourcePlan,tavilyTask } from '@/mvp/sourcing/plan';
 import { junkReason } from '@/mvp/sourcing/junk';
 import {SOURCING_REGISTRY} from '@/mvp/sourcing/registry';
@@ -157,6 +158,9 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   counters.researchUsage.bingSearches=units('bing_search');
   if(session)counters.researchLimits={search:session.budget.searchQueries,reads:session.budget.maxPages,aiCalls:session.budget.maxAiPages,estimatedAiTokens:session.budget.maxAiTokens};
   if(session)counters.researchLimits!.bingSearches=session.budget.bingQueries;
+  // Extra rounds taken because fewer buyers than wanted were saved (see extend.ts).
+  if(session)counters.researchRounds=(session.budget as {extensions?:number}).extensions??0;
+  counters.researchRoundsMax=maxExtensionRounds();counters.minimumBuyers=minimumBuyers();
   const skipped=(await db.query<{count:number}>("select coalesce(sum(coalesce((result->>'skippedCount')::int,0)),0)::int+count(*) filter(where stage='read' and result ? 'skipped')::int as count from research_jobs where run_id=$1",[runId])).rows[0].count;
   counters.coverage={readsSkipped:limited+skipped+count('read','failed'),deferred:deferredUrls+count('analyse','paused'),reason:session?.stop_reason??(sourceGaps?'Some sources omit required contractor/award details.':null)};
   counters.coverageIncomplete=Boolean(counters.coverageIncomplete||sourceGaps||session?.stop_reason||failures.length||deferredUrls||incompleteReads||candidates.count>candidates.investigated);

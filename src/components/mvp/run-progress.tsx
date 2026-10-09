@@ -112,6 +112,16 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
             <div className="rounded-lg bg-[#f2f4f7] p-3"><dt className="text-xs text-[#475467]">Pages read</dt><dd className="text-xl font-bold tabular-nums text-[#101828]">{counters.itemsRead ?? 0}</dd></div>
           </dl>
         ) : null}
+        {run?.adhoc_query?.productId && (counters.researchRounds ?? 0) > 0 ? (
+          <p className="rounded-lg bg-[#eff8ff] p-2 text-xs text-[#175cd3]">
+            {finished || failed
+              ? `Took ${counters.researchRounds} extra ${counters.researchRounds === 1 ? "round" : "rounds"} to look for more buyers.`
+              : `Extra round ${counters.researchRounds} of up to ${counters.researchRoundsMax ?? 3}: searching further because fewer than ${counters.minimumBuyers ?? 2} buyers are saved.`}
+          </p>
+        ) : null}
+        {!finished && !failed && run?.adhoc_query?.productId && status !== "queued" ? (
+          <p className="text-xs text-[#667085]">Stops when {counters.minimumBuyers ?? 2} buyers are saved, after up to {counters.researchRoundsMax ?? 3} extra rounds, or when today&apos;s AI allowance is reached. On the free AI tier each round takes several minutes.</p>
+        ) : null}
         {latest ? <p className="text-[#475467]">{latest}</p> : !run ? <p className="text-[#667085]">Starting the search…</p> : null}
         {failed ? (
           <p role="alert" className="font-semibold text-[#b42318]">{run?.error || "The search stopped before it finished."}</p>

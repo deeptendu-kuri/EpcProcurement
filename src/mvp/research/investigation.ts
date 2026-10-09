@@ -7,6 +7,7 @@ import { buyerPageCandidate } from "@/mvp/discovery/plan";
 import { addJob } from "./store";
 import { readLane, readLaneLimits } from "./registry";
 import { companyIdentityReason,nonCompanyDomain } from '@/mvp/sourcing/entities';
+import { junkFoundName } from '@/mvp/sourcing/names';
 
 export interface ResearchCandidate {id:string;key:string;company:string;domain_hint:string|null;identity_document_id:string|null;identity_quote:string|null;document_ids:string[];state:string}
 export interface DirectorySeed {company:string;quote:string|null;domain:string|null;row:number}
@@ -29,6 +30,16 @@ export function directorySeeds(text:string,productId:string):DirectorySeed[] {
   }
   return [...new Map(result.map(s=>[normalized(s.company),s])).values()];
 }
+// Words that describe a service or product line, never a company's own name on their own.
+const SERVICE_WORDS=new Set(['pressure','vessel','vessels','fabrication','fabricator','fabricators','manufacturing','manufacturer','manufacturers','services','service',
+  'solutions','engineering','construction','steel','plate','plates','tank','tanks','storage','industrial','products','product','equipment','pipe','pipes','pipeline',
+  'pipelines','process','heavy','oil','gas','marine','offshore','onshore','mechanical','electrical','civil','installation','works','contractor','contractors',
+  'and','for','of','the','in','with','boiler','boilers','structural','metal','sheet','sheets','welding','repair','maintenance','supply','suppliers']);
+/** A title made only of service words ("Pressure Vessel Fabrication") is a page topic, not a company. */
+export function genericServicePhrase(name:string):boolean {
+  const words=name.toLowerCase().replace(/&/g,' and ').match(/[a-z0-9]+/g)??[];
+  return words.length>0&&words.every(w=>SERVICE_WORDS.has(w));
+}
 /** Conservative page-brand seed. A title/hint is not a purchasing or legal-verification claim. */
 export function pageCompany(text:string,title:string|null,url:string):string|null {
   if(NON_COMPANY.test(domainOf(url))||nonCompanyDomain(domainOf(url)))return null;
@@ -43,7 +54,9 @@ export function pageCompany(text:string,title:string|null,url:string):string|nul
     const domainBrand=!genericFirst.test(first)&&(first.length>=5&&domain.startsWith(first)||tokens.join('').toLowerCase()===domain);
     const declaredBrand=segments.length>1&&segment===segments.at(-1)&&tokens.length>=2&&!genericFirst.test(first);
     const namedBusiness=/\b(?:llc|ltd|limited|inc|plc|corporation)\b/i.test(name)||legal.test(name)&&first.length>=3&&!genericFirst.test(first);
-    if(name.length>=5&&name.length<=105&&(domainBrand||namedBusiness||declaredBrand)&&!companyIdentityReason(name,{confirmedDomain:domainOf(url)})&&namesCompany(text,[name])&&!/^(?:our |services|projects|electrical installation|pipeline construction|cable laying in|top \d|best \d|approved |list of|directory)|\b(?:news|awarded|wins?|secured|jobs|market|report|tender|contract award)\b/i.test(name))return name;
+    if(name.length>=5&&name.length<=105&&(domainBrand||namedBusiness||declaredBrand)&&!companyIdentityReason(name,{confirmedDomain:domainOf(url)})&&namesCompany(text,[name])
+      // "Pressure Vessel Fabrication", "We give you a clear solution", "… Secures A $300M …" are not company names.
+      &&!genericServicePhrase(name)&&!junkFoundName(name,null)&&!/^(?:our |services|projects|electrical installation|pipeline construction|cable laying in|top \d|best \d|approved |list of|directory)|\b(?:news|awarded|wins?|secured|jobs|market|report|tender|contract award)\b/i.test(name))return name;
   }
   return null;
 }

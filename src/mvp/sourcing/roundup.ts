@@ -11,6 +11,7 @@ import { queryTerms } from '@/mvp/pipeline/filter';
 import { researchProgress,reserveBudget,markBudget,addJob,type ResearchBudget } from '@/mvp/research/store';
 import { junkCompanyReason } from './entities';
 import { junkReason } from './junk';
+import { junkFoundName, looksLikeSupplier } from './names';
 
 // Company-data, directory, job and social sites describe a company but are never its own website.
 const PROFILE_SITES=['globaldata.com','zoominfo.com','crunchbase.com','dnb.com','bloomberg.com','marketscreener.com','tofler.in','zaubacorp.com','moneycontrol.com',
@@ -30,6 +31,9 @@ export function officialSite<T extends {url:string}>(company:string,results:T[])
   const words=company.toLowerCase().replace(/\(.*?\)/g,' ').split(/[^a-z0-9&]+/).filter(Boolean);
   const plain=words.flatMap(w=>w.split('&')).filter(Boolean);
   const tokens=plain.filter(w=>w.length>=4&&!GENERIC_NAME.has(w)&&!LEGAL.has(w));
+  // A leading acronym ("KRR Engineering", "A.K.K. Engineering") is the brand in its domain.
+  const acronym=(company.trim().split(/\s+/)[0]??'').replace(/[^A-Za-z0-9]/g,'');
+  if(/^[A-Z0-9]{3,6}$/.test(acronym))tokens.push(acronym.toLowerCase());
   const initials=plain.filter(w=>!LEGAL.has(w)).map(w=>w[0]).join('');
   const amp=company.includes('&')?company.toLowerCase().split('&').map(s=>s.trim()[0]??'').join('n'):'';
   return results.find(r=>{
@@ -116,13 +120,21 @@ export async function extractRoundup(document:{id:string;text:string},provider:L
 /** Candidate discovery only. A result URL is a hint; the investigation must corroborate identity. */
 export async function seedRoundup(db:Db,runId:string,input:RunInput,result:RoundupResult,budget:ResearchBudget) {
   let seeded=0,lookups=0,queued=0;
-  const original=(await db.query<{text:string}>('select text from source_documents where id=$1',[result.found_via.documentId])).rows[0];
+  const original=(await db.query<{text:string;url:string}>('select text,url from source_documents where id=$1',[result.found_via.documentId])).rows[0];
   if(!original?.text)return {seeded,lookups,queued};
   for(const company of verifyRoundup(result,original.text,result.found_via.documentId).companies){
     if(company.role==='owner'||company.role==='consultant')continue;
-    const candidate=await db.tx(tx=>registerCandidate(tx,runId,company.name,company.domain??null,result.found_via.documentId,company.quote));
+    // A company named on its own website already has its website: no search needed.
+    const own=!company.domain&&officialSite(company.name,[{url:original.url}])?domainOf(original.url):null;
+    const candidate=await db.tx(tx=>registerCandidate(tx,runId,company.name,company.domain??own,result.found_via.documentId,company.quote));
     seeded++;
     await db.query('update research_candidates set found_via=$2::jsonb where id=$1',[candidate.id,JSON.stringify(result.found_via)]);
+    // Page furniture (platforms, certifiers, site credits) and sellers of the material are listed,
+    // but never cost a website search or a page read.
+    // A bare name in a contractor list ("Petrofac") is still a lookup worth making; only furniture is skipped.
+    const skip=junkFoundName(company.name,company.quote)??(looksLikeSupplier(company.quote)?'it supplies this material':null);
+    if(skip){await db.query("update research_candidates set state='review',reason=$2 where id=$1",[candidate.id,`Not looked up: ${skip}.`]);continue;}
+    if(own)await db.query('update research_candidates set document_ids=array(select distinct unnest(document_ids || $2::uuid[])) where id=$1',[candidate.id,[result.found_via.documentId]]);
     const domain=candidate.domain_hint;
     if(!domain&&process.env.TAVILY_API_KEY?.trim()){
       // One provider request per durable job, not 40 requests inside a five-minute lease.

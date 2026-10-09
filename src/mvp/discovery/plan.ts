@@ -57,7 +57,9 @@ export function buyerQueries(input: RunInput) {
   return queries;
 }
 export type MaterialEvidenceKind="explicit"|"application"|"none";
-const WORK=/\b(?:epc|contract\w*|construct\w*|install\w*|procure\w*|fabricat\w*|drilling|erect\w*|laying|weld\w*|maintenan\w*|painting|blasting|coating|commission\w*)\b/i;
+// Shipyards and equipment makers consume material too ("shipbuilding", "pressure vessel manufacturing");
+// a matching consuming activity is still required, so a seller's catalogue page does not qualify.
+const WORK=/\b(?:epc|contract\w*|construct\w*|install\w*|procure\w*|fabricat\w*|drilling|erect\w*|laying|weld\w*|maintenan\w*|painting|blasting|coating|commission\w*|shipbuild\w*|shipyards?|ship repair\w*|manufactur\w*)\b/i;
 const AMBIGUOUS_TERMS=new Set(["steel pipe","seamless pipe","erw pipe","saw pipe","spiral welded","casing","tubing","duplex","elbow","elbows","tees","reducers","fittings","valves","trunnion","field joint","heat-shrink","anode","anodes","rectifier","paint","painting","polyurethane","bolting","fasteners","b7","flux","spool","spools","beams","channels","angles","hea","heb","ipe","plates","sheets","slab","grating","gratings","handrail","u-bolt","cable","cables","transmitter","insulation","cladding","pump","pumps"]);
 function materialSections(text:string):string[] {
   // A menu mentioning HDPE must not globally disqualify a separate oil-pipeline
