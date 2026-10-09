@@ -66,6 +66,7 @@ export async function startRun(input: RunInput): Promise<string> {
   if (input.contactRole) clean.contactRole = input.contactRole;
   if (input.researchMode) clean.researchMode = input.researchMode;
   if (input.targetCompanies) clean.targetCompanies = input.targetCompanies;
+  if (typeof input.includeResellers === "boolean") clean.includeResellers = input.includeResellers;
   if (input.lanes) clean.lanes = [...new Set(input.lanes)];
   if (!clean.leadKinds.length) clean.leadKinds = ["bid", "supply_subcontract"];
   if (!clean.markets.length) clean.markets = [...getClientProfile().markets];

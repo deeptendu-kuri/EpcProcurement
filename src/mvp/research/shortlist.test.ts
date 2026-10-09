@@ -2,14 +2,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type Db } from "@/mvp/db";
 import type { LLMProvider } from "@/mvp/llm/types";
-import { consistentRating, heuristicRating, parseRatings, rateCandidates, ratingPrompt, ruleRating } from "./shortlist";
+import { consistentRating, consistentType, heuristicRating, parseRatings, rateCandidates, ratingPrompt, ruleRating } from "./shortlist";
 import { listFoundCompanies } from "./found";
 
 describe("shortlist rating rules (docs/mvp/18 §5)", () => {
   it("rates page furniture and sellers of the material without AI", () => {
     expect(ruleRating("ASME", "ASME", "steel plates")?.rating).toBe(0);
-    expect(ruleRating("Hindustan Steel Corporation", "At Hindustan Steel Corporation, we supply high-strength steel plates", "steel plates"))
-      .toMatchObject({ rating: 3, role: "Seller of steel plates" });
+    // Without resellers a seller is a competitor by rule; with resellers the AI tells a stockist from a mill.
+    expect(ruleRating("Hindustan Steel Corporation", "At Hindustan Steel Corporation, we supply high-strength steel plates", "steel plates", { resellers: false }))
+      .toMatchObject({ rating: 3, role: "Seller of steel plates", buyerType: "competitor" });
+    expect(ruleRating("Hindustan Steel Corporation", "At Hindustan Steel Corporation, we supply high-strength steel plates", "steel plates")).toBeNull();
     expect(ruleRating("KRR Engineering", "one of India's most trusted pressure vessel manufacturers", "steel plates")).toBeNull();
   });
   it("falls back to a plain heuristic that keeps fuel traders out and fabricators in", () => {
@@ -30,8 +32,8 @@ describe("shortlist rating rules (docs/mvp/18 §5)", () => {
       { id: "c9", rating: 90 },
     ] }), rows, "plates");
     expect(parsed).toEqual([
-      { id: "a", rating: 100, role: "Pressure vessel fabricator", reason: "Rolls plates into vessel shells.", also: ["flanges"], source: "ai", raw: 100 },
-      { id: "b", rating: 2, role: "Lubricant trader", reason: "Sells lubricants.", also: [], source: "ai", raw: 2 },
+      { id: "a", rating: 100, role: "Pressure vessel fabricator", reason: "Rolls plates into vessel shells.", also: ["flanges"], source: "ai", raw: 100, buyerType: null, match: null },
+      { id: "b", rating: 2, role: "Lubricant trader", reason: "Sells lubricants.", also: [], source: "ai", raw: 2, buyerType: null, match: null },
     ]);
   });
 });
@@ -40,7 +42,12 @@ describe("ratings stay consistent with their own words (9 Oct steel plates findi
   const r = (rating: number, role: string, reason = "") => ({ rating, role, reason, also: [] });
   it("caps sellers of the material and self-declared non-buyers", () => {
     expect(consistentRating(r(90, "Steel plate manufacturer", "Produces stainless steel plates, not a buyer of steel plates."), { company: "New Castle Stainless Plate", identity_quote: "turn raw slab into plate" }, "steel plates")).toBe(5);
-    expect(consistentRating(r(70, "Steel plate supplier", "Sells SA516 plates for boilers"), { company: "Navgraha Steels INC", identity_quote: "Navgraha Steels INC" }, "steel plates")).toBe(5);
+    // A stockist is a reseller buyer (ranked below end users) when he sells wholesale, else a competitor.
+    const stockist = r(70, "Steel plate supplier", "Sells SA516 plates for boilers");
+    const navgraha = { company: "Navgraha Steels INC", identity_quote: "Navgraha Steels INC" };
+    expect([consistentRating(stockist, navgraha, "steel plates"), consistentType(stockist, navgraha, "steel plates")]).toEqual([50, "reseller"]);
+    expect([consistentRating(stockist, navgraha, "steel plates", { resellers: false }), consistentType(stockist, navgraha, "steel plates", { resellers: false })]).toEqual([5, "competitor"]);
+    expect(consistentType(r(90, "Steel plate manufacturer"), navgraha, "steel plates")).toBe("competitor");
     expect(consistentRating(r(70, "Wind farm EPC contractor", "DEME installed turbines, not line pipe buyer."), { company: "DEME", identity_quote: "DEME installed turbines" }, "line pipe")).toBe(5);
     expect(consistentRating(r(70, "Subsea contractor", "Supplies control umbilicals, not line pipe; rating low."), { company: "OneSubsea", identity_quote: "OneSubsea supplies umbilicals" }, "line pipe")).toBe(5);
   });
@@ -94,13 +101,13 @@ describe("rating a search's companies", () => {
         : { id: c.id, rating: 4, role: "Lubricant trader", reason: "Trades lubricants; does not use plates." }) }) };
     } };
     const result = await rateCandidates(db, run, { productId: "plates" }, () => provider);
-    expect(calls).toEqual(["shortlist_rating"]); // the two rule-rated names never reach the AI
+    expect(calls).toEqual(["shortlist_rating"]); // furniture is rule-rated and never reaches the AI
     expect(result.rated).toHaveLength(4);
     const found = await listFoundCompanies(db, run);
     expect(found[0]).toMatchObject({ name: "KRR Engineering Pvt. Ltd.", rating: 82, ratingRole: "Pressure vessel fabricator", relevant: true });
     expect(found[0].alsoBuys.length).toBe(2);
     expect(found.find((f) => f.name === "Lubrex FZE")).toMatchObject({ rating: 4, relevant: false });
-    expect(found.find((f) => f.name === "Hindustan Steel Corporation")).toMatchObject({ rating: 3, relevant: false });
+    expect(found.find((f) => f.name === "Hindustan Steel Corporation")).toMatchObject({ relevant: false });
     const jobs = (await db.query<{ company: string; priority: number }>(`select c.company, j.priority from research_jobs j join research_candidates c on j.key = 'official:' || c.id where j.run_id=$1 order by j.priority desc`, [run])).rows;
     expect(jobs[0]).toEqual({ company: "KRR Engineering Pvt. Ltd.", priority: 782 });
     expect(jobs.slice(1).every((j) => j.priority === 5)).toBe(true);
@@ -136,5 +143,32 @@ describe("rating a search's companies", () => {
     expect(seen).toEqual(["Bina Fabricators"]);
     const found = await listFoundCompanies(db, run);
     expect(found.find((f) => f.name === "Bina Fabricators")).toMatchObject({ rating: 78, guessed: false });
+  });
+});
+
+describe("buyer types and the exact variant (docs/mvp/19 Phase 2)", () => {
+  const rows = [{ id: "a", company: "Gulf Water Engineering", identity_quote: "builds desalination plants", title: null },
+    { id: "b", company: "Al Noor Steel Trading", identity_quote: "stockist of stainless steel pipes supplying contractors", title: null },
+    { id: "c", company: "Ratnamani Metals", identity_quote: "manufacturer of welded stainless steel pipes", title: null }];
+  it("tells the AI what exactly is sold, who uses that variant and how resellers count", () => {
+    const on = ratingPrompt("ss-duplex-pipe", rows, { query: "Welded Stainless Steel Pipes 316L A312" });
+    expect(on.system).toMatch(/sells: Welded, 316L, ASTM A312 stainless/);
+    expect(on.system).toMatch(/water treatment and desalination plants/);
+    expect(on.system).toMatch(/reseller: a stockist, trader or distributor that buys/);
+    expect(ratingPrompt("ss-duplex-pipe", rows, { resellers: false }).system).toMatch(/are competitors here/);
+  });
+  it("keeps buyer type and match, and applies the reseller setting", () => {
+    const text = JSON.stringify({ companies: [
+      { id: "c1", rating: 82, type: "end_user", match: "work", role: "Desalination plant builder", reason: "Uses welded SS pipe for RO plants." },
+      { id: "c2", rating: 75, type: "reseller", match: "product", role: "Stainless pipe stockist", reason: "Stocks SS pipe for contractors." },
+      { id: "c3", rating: 60, type: "competitor", match: "named", role: "Welded stainless pipe manufacturer", reason: "Makes the product." },
+    ] });
+    expect(parseRatings(text, rows, "ss-duplex-pipe").map((r) => [r.rating, r.buyerType, r.match])).toEqual([[82, "end_user", "work"], [65, "reseller", "product"], [5, "competitor", null]]);
+    expect(parseRatings(text, rows, "ss-duplex-pipe", { resellers: false }).map((r) => [r.rating, r.buyerType])).toEqual([[82, "end_user"], [5, "competitor"], [5, "competitor"]]);
+  });
+  it("labels plain-rule guesses with a buyer type", () => {
+    expect(heuristicRating("Al Noor Steel Trading", "stockist of stainless steel pipes", null, "stainless pipe")).toMatchObject({ buyerType: "reseller", rating: 40 });
+    expect(heuristicRating("Al Noor Steel Trading", "stockist of stainless steel pipes", null, "stainless pipe", { resellers: false })).toMatchObject({ buyerType: "competitor" });
+    expect(heuristicRating("Gulf Mech", "mechanical subcontractor", null, "stainless pipe")).toMatchObject({ buyerType: "subcontractor" });
   });
 });

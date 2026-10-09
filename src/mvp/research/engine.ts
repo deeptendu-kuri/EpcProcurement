@@ -11,7 +11,7 @@ import { bingNewsSource } from '@/mvp/pipeline/sources/bing-news';
 import { gdeltSource } from '@/mvp/pipeline/sources/gdelt';
 import { rssSource } from '@/mvp/pipeline/sources/rss';
 import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tavily';
-import { collectBingQuery,collectRssFeed } from './sources';
+import { collectBingQuery,collectRssFeed,collectLocalNews,collectGdeltCountry} from './sources';
 import type { ResearchBudget } from './store';
 import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
 import { candidateForPage, candidatePageIdentity, extendInvestigation, seedInvestigations, domainOf, queueRead } from './investigation';
@@ -55,6 +55,8 @@ export const productionResearchDeps:ResearchDeps={
     if(source==='directory-seed')return [payload.raw as RawDoc];
     if(source==='tavily')return collectTavilyQuery(ctx,payload.query as Parameters<typeof collectTavilyQuery>[1]);
     if(source==='bing-query')return collectBingQuery(ctx,String(payload.market),String(payload.query));
+    if(source==='local-news')return collectLocalNews(ctx,payload as Parameters<typeof collectLocalNews>[1]);
+    if(source==='gdelt-country')return collectGdeltCountry(ctx,payload as Parameters<typeof collectGdeltCountry>[1]);
     if(source==='rss-feed')return collectRssFeed(ctx,String(payload.feed));
     if(source==='ted')return tedSource.collect({...ctx,input:{...ctx.input,markets:[String(payload.market)]}});
     const sources:Record<string,Source>={'bing-news':bingNewsSource,gdelt:gdeltSource,rss:rssSource};
@@ -81,11 +83,13 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         const saved=(await db.query<{count:number}>("select count(*)::int as count from search_opportunities where run_id=$1 and qualification<>'rejected'",[job.run_id])).rows[0].count;
         if(saved>=session.budget.targetCompanies){await completeJob(db,job,{skipped:'capability fallback not needed'});return {processed:true};}
       }
-      if(source==='bing-query'){
+      // News queries (Bing, local-language news, GDELT country news) share the free news-search allowance.
+      const news=source==='bing-query'||source==='local-news'||source==='gdelt-country';
+      if(news){
         const reservation=await reserveBudget(db,job.run_id,'bing_search',job.key,1,session.budget.bingQueries);
         if(reservation!=='reserved'){
           await completeJob(db,job,{skipped:'Bing query budget',budgetLimited:true});
-          await researchProgress(db,job.run_id,'info','Bing coverage limit reached; remaining sources and saved pages continue.');return {processed:true};
+          await researchProgress(db,job.run_id,'info','News search allowance reached; remaining sources and saved pages continue.');return {processed:true};
         }
       }
       if(source==='tavily'){
@@ -103,7 +107,7 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
           catch(error){await markBudget(db,job.run_id,'search',job.key,'unknown');throw error;}
         }
       }else docs=await deps.collect(source,ctx,job.payload);
-      if(source==='bing-query')await markBudget(db,job.run_id,'bing_search',job.key,'completed');
+      if(news)await markBudget(db,job.run_id,'bing_search',job.key,'completed');
       if(job.payload.sourcingLane)docs=docs.map(raw=>({...raw,research:{lane:job.payload.sourcingLane==='trigger'?'news':job.payload.sourcingLane==='roundup'?'directory':'company',...raw.research,sourcingLane:job.payload.sourcingLane as 'trigger'|'roundup'|'capability'}}));
       await enqueueRawDocs(db,job,docs,session.budget.maxPages);
       await researchProgress(db,job.run_id,'collect',`${source}: ${docs.length} original-page candidates. Discovery is saved; contact validation is separate.`);

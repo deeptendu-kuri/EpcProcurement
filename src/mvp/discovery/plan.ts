@@ -23,8 +23,14 @@ export function researchBudget(input?:BudgetInput) {
     const value=process.env[name];const n=Number(value);return value!==undefined&&value.trim()!==''&&Number.isInteger(n)&&n>=0?Math.min(n,limit):limit;
   };
   const target=input?.targetCompanies;
-  return {mode,searchQueries:bounded("MVP_MAX_SEARCH_QUERIES",defaults.searchQueries),bingQueries:bounded("MVP_MAX_BING_QUERIES",defaults.bingQueries),maxPages:bounded("MVP_MAX_RESEARCH_PAGES",defaults.maxPages),
-    maxAiPages:bounded("MVP_MAX_AI_DOCS",defaults.maxAiPages),maxAiTokens:bounded("MVP_MAX_RESEARCH_AI_TOKENS",defaults.maxAiTokens),
+  // Each extra country gets its own share (doc 19), so five countries are not squeezed into one country's
+  // allowance; never beyond deep mode, and environment settings can still only reduce.
+  const extra=Math.max(0,Math.min(19,new Set(input?.markets??[]).size-1));
+  const deep=MODE_BUDGETS.deep;
+  const grow=(base:number,per:number,cap:number)=>Math.min(cap,base+per*extra);
+  return {mode,searchQueries:bounded("MVP_MAX_SEARCH_QUERIES",grow(defaults.searchQueries,2,deep.searchQueries)),bingQueries:bounded("MVP_MAX_BING_QUERIES",grow(defaults.bingQueries,4,deep.bingQueries*2)),
+    maxPages:bounded("MVP_MAX_RESEARCH_PAGES",grow(defaults.maxPages,12,deep.maxPages)),
+    maxAiPages:bounded("MVP_MAX_AI_DOCS",grow(defaults.maxAiPages,4,deep.maxAiPages)),maxAiTokens:bounded("MVP_MAX_RESEARCH_AI_TOKENS",grow(defaults.maxAiTokens,10_000,deep.maxAiTokens)),
     maxPagesPerDomain:bounded("MVP_MAX_PAGES_PER_DOMAIN",defaults.maxPagesPerDomain),maxRepairCalls:bounded("MVP_MAX_REPAIR_CALLS",defaults.maxRepairCalls),
     targetCompanies:typeof target==="number"&&Number.isInteger(target)&&target>=1&&target<=100?target:defaults.targetCompanies};
 }

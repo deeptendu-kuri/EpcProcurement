@@ -12,8 +12,13 @@ describe('any-country search is not restricted to profile markets',()=>{
     const input=runInputSchema.parse({query:'line pipe',productId:'line-pipe',markets:[code],leadKinds:['supply_subcontract']});
     const plan=sourcePlan({...input,productId:'line-pipe',mode:'preview'});
     expect(new Set(plan.map(t=>t.lane))).toEqual(new Set(['trigger','roundup','capability']));
-    expect(plan.filter(t=>t.source==='tavily')).toHaveLength(4);
+    // trigger 1 + roundup 2 (contractors, stockists) + capability 2; stockists only when he sells to them.
+    expect(plan.filter(t=>t.source==='tavily')).toHaveLength(5);
+    expect(sourcePlan({...input,productId:'line-pipe',mode:'preview',includeResellers:false}).filter(t=>t.source==='tavily')).toHaveLength(4);
     expect(plan.filter(t=>t.query).every(t=>t.query!.includes(name))).toBe(true);
+    // Every country gets local news (its own language where it has one) and GDELT country news.
+    expect(plan.some(t=>t.source==='local-news'&&t.market===code)).toBe(true);
+    expect(plan.some(t=>t.source==='gdelt-country'&&t.market===code)).toBe(true);
     expect(buildBingQueries(['line pipe'],code).length).toBeGreaterThan(0);
   });
 

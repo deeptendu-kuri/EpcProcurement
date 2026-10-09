@@ -2,46 +2,69 @@ import { getCatalogueItem } from '@/mvp/config/buyers-config';
 import { COUNTRIES } from '@/mvp/config/countries';
 import { MATERIAL_ACTIVITIES } from '@/mvp/discovery/material';
 import { whoBuys } from '@/mvp/discovery/material-catalogue';
+import { hasSpec, parseMaterialSpec, specUses } from '@/mvp/discovery/spec';
 import type { ResearchMode, PlannedBuyerQuery } from '@/mvp/discovery/plan';
 import { RESEARCH_SOURCES } from '@/mvp/research/registry';
 import { TED_COUNTRIES } from '@/mvp/pipeline/sources/ted';
 
 export type SourcingLane = 'trigger' | 'roundup' | 'capability';
 export interface SourceTask {
-  id:string;lane:SourcingLane;source:'bing-query'|'tavily'|'ted'|'registry';market:string;priority:number;
+  id:string;lane:SourcingLane;source:'bing-query'|'tavily'|'ted'|'registry'|'local-news'|'gdelt-country';market:string;priority:number;
   query?:string;url?:string;topic?:'news'|'general';days?:number;registryId?:string;includeDomains?:string[];
+  /** local-news: what to translate; gdelt-country: English words to match in any language. */
+  material?:string;work?:string;words?:string[];
 }
-export interface SourcePlanInput {productId:string;keyword?:string;markets:string[];mode:ResearchMode;lanes?:SourcingLane[]}
-/** Ordered tasks, not promises of buyers. Capability tasks are admitted only after earlier lanes settle. */
+export interface SourcePlanInput {productId:string;keyword?:string;markets:string[];mode:ResearchMode;lanes?:SourcingLane[];includeResellers?:boolean}
+const BASE_PRIORITY:Record<SourcingLane,number>={trigger:2000,roundup:1000,capability:-100};
+/**
+ * Ordered tasks, not promises of buyers (docs/mvp/19). For every country: award news (English, the
+ * country's own language and GDELT's local outlets), contractor lists, stockists when he sells to them,
+ * and direct searches for the companies whose work uses the exact material typed. Tasks of one lane
+ * alternate between countries, so every country is searched before any country gets a second search.
+ */
 export function sourcePlan(input:SourcePlanInput):SourceTask[] {
   const product=getCatalogueItem(input.productId);
   if(!product)throw new Error('Unknown sourcing product.');
   const activities=MATERIAL_ACTIVITIES[input.productId]??[product.shortName];
+  const spec=parseMaterialSpec(input.keyword??'');
+  // His own words are the best search terms ("Welded Stainless Steel Pipes 316L"); the variant they name
+  // adds searches for the work that uses it.
   const material=input.keyword?.trim()||product.shortName;
-  const markets=[...new Set(input.markets)].map(code=>({code,name:COUNTRIES.find(c=>c.code===code)?.name})).filter(c=>c.name);
-  const tasks:SourceTask[]=[];
-  const add=(lane:SourcingLane,source:SourceTask['source'],market:string,n:number,extra:Partial<SourceTask>)=>{
-    if(input.lanes&&!input.lanes.includes(lane))return;
-    tasks.push({id:`hybrid-v1:${input.productId}:${market}:${lane}:${source}:${n}`,lane,source,market,
-      priority:lane==='trigger'?2000:lane==='roundup'?1000:-100,...extra});
-  };
-  for(const {code,name} of markets){
+  // Typical uses of the variant only when the words name one ("welded …"); plain searches keep their queries.
+  const uses=hasSpec(spec)?specUses(input.productId,spec):[];
+  const segments=whoBuys(input.productId);
+  const markets=[...new Set(input.markets)].map(code=>({code,name:COUNTRIES.find(c=>c.code===code)?.name})).filter((c):c is {code:string;name:string}=>Boolean(c.name));
+  const tasks:(SourceTask&{round:number;order:number})[]=[];
+  markets.forEach(({code,name},order)=>{
+    const rounds:Record<string,number>={};
+    const add=(lane:SourcingLane,source:SourceTask['source'],n:number,extra:Partial<SourceTask>)=>{
+      if(input.lanes&&!input.lanes.includes(lane))return;
+      const round=rounds[lane]=(rounds[lane]??-1)+1;
+      tasks.push({id:`hybrid-v2:${input.productId}:${code}:${lane}:${source}:${n}`,lane,source,market:code,priority:BASE_PRIORITY[lane],round,order,...extra});
+    };
     const activity=activities[0];
-    add('trigger','bing-query',code,0,{query:`${activity} contract awarded ${name}`});
-    add('trigger','bing-query',code,1,{query:`wins ${activity} contract ${name}`});
-    add('trigger','tavily',code,0,{query:`${material} ${activity} contract awarded orders ${name}`,topic:'news',days:365});
-    if(TED_COUNTRIES[code])add('trigger','ted',code,0,{});
+    // ── trigger: awards and orders ──
+    add('trigger','bing-query',0,{query:`${activity} contract awarded ${name}`});
+    add('trigger','tavily',0,{query:`${material} ${activity} contract awarded orders ${name}`,topic:'news',days:365});
+    add('trigger','local-news',0,{query:`${material} contract ${name}`,material,work:uses[0]??activity});
+    add('trigger','gdelt-country',0,{words:[material,activity,...activities.slice(1,2)]});
+    add('trigger','bing-query',1,{query:`wins ${activity} contract ${name}`});
+    if(TED_COUNTRIES[code])add('trigger','ted',0,{});
+    // ── roundup: lists of contractors (and stockists when he sells to them) ──
     for(const [n,registry] of RESEARCH_SOURCES.filter(r=>r.country===code&&r.materials.includes(input.productId)&&r.permission==='public-listing').entries()){
-      add('roundup','registry',code,n,{url:registry.url,registryId:registry.id,priority:1950,includeDomains:[new URL(registry.url).hostname.replace(/^www\./,'')]});
+      add('roundup','registry',n,{url:registry.url,registryId:registry.id,priority:1950,includeDomains:[new URL(registry.url).hostname.replace(/^www\./,'')]});
     }
-    add('roundup','tavily',code,0,{query:`${activity} contractors ${name} list top companies`,topic:'general'});
-    // Direct company searches: one by consuming work, one by the reviewed buyer segment further down
-    // the chain ("Shipyards Malaysia", "Piping and mechanical subcontractors India").
-    const segments=whoBuys(input.productId);
-    add('capability','tavily',code,0,{query:`${activities[0]} contractor ${name} services projects`,topic:'general'});
-    add('capability','tavily',code,1,{query:segments[1]?`${segments[1]} ${name} company`:`${activities[1%activities.length]} contractor ${name} services projects`,topic:'general'});
-  }
-  return tasks.sort((a,b)=>b.priority-a.priority);
+    add('roundup','tavily',0,{query:`${uses[0]?`${uses[0]} contractors`:`${activity} contractors`} ${name} list top companies`,topic:'general'});
+    if(input.includeResellers!==false)add('roundup','tavily',1,{query:`${material} stockists suppliers ${name}`,topic:'general'});
+    // ── capability: companies whose work uses this exact material ──
+    add('capability','tavily',0,{query:`${uses[0]?`${uses[0]} contractor`:`${activities[0]} contractor`} ${name} services projects`,topic:'general'});
+    add('capability','tavily',1,{query:segments[1]?`${segments[1]} ${name} company`:`${activities[1%activities.length]} contractor ${name} services projects`,topic:'general'});
+    if(uses[1])add('capability','tavily',2,{query:`${uses[1]} contractor ${name}`,topic:'general'});
+  });
+  // Priority by lane first; within a lane, each country's first search before anyone's second.
+  return tasks.map(t=>({...t,priority:t.priority-t.round*10}))
+    .sort((a,b)=>b.priority-a.priority||a.round-b.round||a.order-b.order)
+    .map(t=>{const task:SourceTask&{round?:number;order?:number}={...t};delete task.round;delete task.order;return task as SourceTask;});
 }
 export function tavilyTask(task:SourceTask):PlannedBuyerQuery {
   if(task.source!=='tavily'||!task.query)throw new Error('Task is not a Tavily query.');

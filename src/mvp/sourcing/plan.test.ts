@@ -18,7 +18,8 @@ describe('WP2 hybrid source plan and deterministic classification',()=>{
       const tasks=plan.filter(t=>t.market===market);
       expect(tasks.filter(t=>t.source==='bing-query')).toHaveLength(2);
       expect(tasks.filter(t=>t.source==='tavily'&&t.lane==='trigger')).toHaveLength(1);
-      expect(tasks.filter(t=>t.source==='tavily'&&t.lane==='roundup')).toHaveLength(1);
+      expect(tasks.filter(t=>t.source==='tavily'&&t.lane==='roundup')).toHaveLength(2);
+      expect(tasks.find(t=>t.source==='tavily'&&t.lane==='roundup'&&/stockists/.test(t.query??''))).toBeDefined();
       expect(tasks.filter(t=>t.source==='tavily'&&t.lane==='capability')).toHaveLength(2);
       expect(tavilyTask(tasks.find(t=>t.source==='tavily'&&t.lane==='trigger')!)).toMatchObject({topic:'news',days:365});
     }

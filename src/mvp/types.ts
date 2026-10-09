@@ -26,6 +26,8 @@ export interface RunInput {
   leadKinds: LeadKind[];
   /** Search the sample documents (fixtures) for this run only, whatever MVP_OFFLINE says ("Load sample leads"). */
   offline?: boolean;
+  /** Doc 19: stockists and traders that supply contractors count as (reseller) buyers. Default true. */
+  includeResellers?: boolean;
 }
 
 export interface SubScore {

@@ -36,7 +36,8 @@ const PHASES: Record<string, string> = {
 /** Plain words for the engine's most frequent progress notes. */
 const PLAIN: [RegExp, (m: RegExpMatchArray) => string][] = [
   [/^registry: (\d+) original-page candidates/i, (m) => `Found ${m[1]} company ${m[1] === '1' ? 'page' : 'pages'} in a directory.`],
-  [/Bing coverage limit reached/i, () => 'Web search allowance for this search used up; carrying on with the pages already found.'],
+  [/Bing coverage limit reached|News search allowance reached/i, () => 'News search allowance for this search used up; carrying on with the pages already found.'],
+  [/Tavily coverage limit reached/i, () => 'Web search allowance for this search used up; carrying on with the pages already found.'],
   [/^Original page saved for company\/material analysis/i, () => 'Read a company page.'],
   [/^Original page saved/i, () => 'Read a page.'],
 ];

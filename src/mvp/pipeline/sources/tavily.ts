@@ -5,16 +5,16 @@ import type { Db } from "@/mvp/db";
 import { buyerQueries, queryBudget, type PlannedBuyerQuery } from "@/mvp/discovery/plan";
 import { researchBudget } from '@/mvp/discovery/plan';
 import { sourcePlan,tavilyTask } from '@/mvp/sourcing/plan';
+import { tavilyCountry } from '@/mvp/config/country-meta';
 
 const responseSchema=z.object({results:z.array(z.object({url:z.url(),title:z.string(),content:z.string().nullable().optional().transform(v=>v?.slice(0,1200)),published_date:z.string().nullable().optional()})).max(100),usage:z.object({credits:z.number().nonnegative()}).optional()});
-// Supported provider country boosts, not proof of the company's location. Other
-// countries still work through the query; never send an unsupported enum.
-const COUNTRY_BOOSTS:Record<string,string>={AE:'united arab emirates',IN:'india',SA:'saudi arabia',US:'united states',GB:'united kingdom',MY:'malaysia',NO:'norway',QA:'qatar',OM:'oman',KW:'kuwait',BH:'bahrain',SG:'singapore',AU:'australia',CA:'canada',DE:'germany',FR:'france',ZA:'south africa'};
+// Tavily boosts results from a country for general searches (150+ countries; docs/mvp/19). Other
+// countries still work through the country name in the query; an unsupported name is never sent.
 const EXCLUDED_DOMAINS=['facebook.com','instagram.com','youtube.com','tiktok.com','pinterest.com','researchgate.net','indeed.com','glassdoor.com'];
 function requestBody(query:PlannedBuyerQuery) {
   return {query:query.query,search_depth:'basic',max_results:20,topic:query.topic??'general',include_answer:false,include_raw_content:false,
     auto_parameters:false,include_published_date:true,include_usage:true,exclude_domains:EXCLUDED_DOMAINS,
-    ...(query.topic!=='news'&&COUNTRY_BOOSTS[query.market]?{country:COUNTRY_BOOSTS[query.market]}:{}),
+    ...(query.topic!=='news'&&tavilyCountry(query.market)?{country:tavilyCountry(query.market)}:{}),
     ...(query.timeRange?{time_range:query.timeRange}:{}),...(query.topic==='news'?{days:query.days??365}:{}),...(query.includeDomains?.length?{include_domains:query.includeDomains}:{})};
 }
 type QueryContext=SourceContext & {db?:Db};

@@ -6,7 +6,7 @@ import { SearchLiveWorkspace } from "./search-live-workspace";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const company = (over: Partial<FoundCompany>): FoundCompany => ({ id: "c", name: "Example", website: null, status: "not_checked", statusText: "Not checked yet", source: null, quote: null,
-  pagesRead: 0, opportunityId: null, relevant: true, likelyRole: null, rating: null, ratingRole: null, ratingReason: null, alsoBuys: [], guessed: false, ...over });
+  pagesRead: 0, opportunityId: null, relevant: true, likelyRole: null, rating: null, ratingRole: null, ratingReason: null, alsoBuys: [], guessed: false, buyerType: null, match: null, ...over });
 const data: SearchWorkspaceData = {
   run: { id: "11111111-1111-4111-8111-111111111111", query: "Steel plates", productId: "plates", product: "Steel plates", markets: ["IN", "MY"], status: "running", statusText: "Running",
     createdAt: "2026-10-09T14:27:00Z", finishedAt: null, error: null, stopReason: null },

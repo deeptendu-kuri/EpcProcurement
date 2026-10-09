@@ -62,8 +62,10 @@ describe("reviewed material interpretation and consuming-work planning",()=>{
     const deep={...input,researchMode:"deep" as const,targetCompanies:70};
     const plan=buyerQueries(deep);expect(plan.length).toBeGreaterThan(24);
     expect(plan.some(q=>q.activityIndex>0&&q.lane==="activity")).toBe(true);
-    expect(researchBudget(deep)).toMatchObject({mode:"deep",searchQueries:24,bingQueries:30,maxPages:200,maxAiPages:8,maxAiTokens:250_000,maxPagesPerDomain:4,maxRepairCalls:2,targetCompanies:70});
-    expect(researchBudget(input)).toMatchObject({mode:"preview",searchQueries:4,bingQueries:6,maxAiPages:8});
+    // Three countries: each extra country adds its share (doc 19), never beyond deep mode (news up to twice deep).
+    expect(researchBudget(deep)).toMatchObject({mode:"deep",searchQueries:24,bingQueries:38,maxPages:200,maxAiPages:8,maxAiTokens:250_000,maxPagesPerDomain:4,maxRepairCalls:2,targetCompanies:70});
+    expect(researchBudget(input)).toMatchObject({mode:"preview",searchQueries:8,bingQueries:14,maxAiPages:8});
+    expect(researchBudget({...input,markets:["IN"]})).toMatchObject({mode:"preview",searchQueries:4,bingQueries:6});
     expect(plan.slice(0,3).map(q=>q.key)).toEqual(buyerQueries(input).slice(0,3).map(q=>q.key));
   });
   it('uses material-specific company routes before broad consulting/directory routes in a batch',()=>{

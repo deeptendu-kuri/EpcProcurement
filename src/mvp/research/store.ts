@@ -32,13 +32,13 @@ export async function createResearchRun(input:RunInput,db:Db=getDb()):Promise<st
     const run=(await tx.query<{id:string}>(`insert into runs(adhoc_query,status,counters) values($1::jsonb,'queued','{}') returning id`,[JSON.stringify(input)])).rows[0];
     await tx.query('insert into research_sessions(run_id,budget) values($1,$2::jsonb)',[run.id,JSON.stringify(budget)]);
     const web=Boolean(process.env.TAVILY_API_KEY?.trim());
-    const plan=sourcePlan({productId:input.productId!,keyword:input.query,markets:input.markets,mode:budget.mode,lanes:input.lanes});
+    const plan=sourcePlan({productId:input.productId!,keyword:input.query,markets:input.markets,mode:budget.mode,lanes:input.lanes,includeResellers:input.includeResellers});
     for(const task of plan){
       if(task.source==='tavily'&&!web)continue;
       const payload=task.source==='registry'&&task.registryId!=='dewa-contractor-list'?{source:'registry',sourcingLane:task.lane,registryId:task.registryId,market:task.market}:
         task.source==='registry'?{source:'directory-seed',sourcingLane:task.lane,raw:{sourceKey:`directory:${task.registryId}`,sourceName:'Official contractor listing',tier:'A',url:task.url,title:null,publishedAt:null,text:null,isSample:false,research:{lane:'directory',sourcingLane:task.lane,registryId:task.registryId}}}:
         task.source==='tavily'?{source:'tavily',sourcingLane:task.lane,query:tavilyTask(task)}:
-        {source:task.source,sourcingLane:task.lane,market:task.market,query:task.query};
+        {source:task.source,sourcingLane:task.lane,market:task.market,query:task.query,...(task.material?{material:task.material,work:task.work}:{}),...(task.words?{words:task.words}:{})};
       await addJob(tx,run.id,'collect',task.id,payload,task.priority);
     }
     for(const source of SOURCING_REGISTRY.filter(s=>s.reviewRequired&&input.markets.includes(s.market)))await tx.query("insert into run_events(run_id,stage,message,counters) values($1,'info',$2,'{}')",[run.id,`Registry coverage warning (${source.id}): ${source.note}`]);

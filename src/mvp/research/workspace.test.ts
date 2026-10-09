@@ -15,7 +15,7 @@ describe("search workspace activity (docs/mvp/18 §4)", () => {
       e(3, ""),
     ]).map((x) => x.message)).toEqual([
       "Found 1 company page in a directory. ×2",
-      "Web search allowance for this search used up; carrying on with the pages already found. ×3",
+      "News search allowance for this search used up; carrying on with the pages already found. ×3",
       "Shortlist: rated 20 companies; 6 look like buyers.",
     ]);
   });

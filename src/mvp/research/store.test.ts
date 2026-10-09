@@ -33,7 +33,7 @@ describe('durable research checkpoints',()=>{
   it('creates persisted run, tasks and outbox without a provider request',async()=>{
     const id=await createResearchRun(input,db);
     const jobs=(await db.query('select id from research_jobs where run_id=$1',[id])).rows;
-    expect(jobs).toHaveLength(5); // two Bing headlines + BSE/NSE/CPPP; Tavily is unconfigured
+    expect(jobs).toHaveLength(7); // two Bing headlines, local news, GDELT country news + BSE/NSE/CPPP; Tavily is unconfigured
     expect((await db.query('select id from research_outbox where run_id=$1',[id])).rows).toHaveLength(jobs.length);
     expect((await sessionFor(db,id))?.state).toBe('active');
   });
@@ -59,10 +59,11 @@ describe('durable research checkpoints',()=>{
     const job=(await claimJob(db,id,search.id))!;
     const rows=Array.from({length:20},(_,i)=>({...doc(i),url:`https://company${i}.example/services`,research:{lane:'company' as const}}));
     await enqueueRawDocs(db,job,rows,80);
-    expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(6);
+    // Each search's share of the reading allowance shrinks as local and country news searches join the plan.
+    expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(5);
     expect(await admitDeferredDiscovery(db,id)).toBe(0); // other searches are unfinished
     await db.query("update research_jobs set state='done',result='{}',lease_token=null,lease_until=null where run_id=$1 and stage='collect' and id<>$2",[id,job.id]);
-    expect(await admitDeferredDiscovery(db,id)).toBe(14);
+    expect(await admitDeferredDiscovery(db,id)).toBe(15); // the rest of the 20 saved URLs
     expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(20);
     expect(await admitDeferredDiscovery(db,id)).toBe(0);
     expect((await db.query<{result:{deferred:number}}>("select result from research_jobs where id=$1",[job.id])).rows[0].result.deferred).toBe(0);
