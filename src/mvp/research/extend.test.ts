@@ -94,7 +94,10 @@ describe('companies found by a search',()=>{
     await db.query("update research_candidates set state='review',reason='Named in a verified roundup; official website not established. Contacts and buying activity remain unconfirmed.' where id=$1",[c.id]);
     await finishIdleResearch(db,id);
     const [found]=await listFoundCompanies(db,id);
-    expect(found).toMatchObject({name:'Example Pipeline Builders Limited',website:null,status:'no_website',opportunityId:null,source:{url:doc.url}});
+    // Doc 19: its listed work (pipeline construction) is quoted evidence, so it is saved as a lead at once;
+    // a website check can still upgrade it.
+    expect(found).toMatchObject({name:'Example Pipeline Builders Limited',website:null,status:'saved',statusText:'Lead · its listed work',verification:'listing',source:{url:doc.url}});
+    expect(found.opportunityId).not.toBeNull();
     const result=await checkFoundCompany(db,id,c.id);
     expect(result.queued).toBe(true);
     expect((await sessionFor(db,id))?.state).toBe('active');

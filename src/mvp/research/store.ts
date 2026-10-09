@@ -117,8 +117,6 @@ export async function claimJob(db:Db=getDb(),runId?:string,jobId?:string,maxRunn
       and (j.state='queued' or j.state='running' and j.lease_until<now())
       and (select count(*) from research_jobs busy where busy.run_id=j.run_id and busy.state='running' and busy.lease_until>now())<$3
       and not (j.stage='analyse' and exists(select 1 from research_jobs ai where ai.run_id=j.run_id and ai.stage='analyse' and ai.state='running' and ai.lease_until>now()))
-      and (coalesce(j.payload->>'sourcingLane','')<>'capability' or not exists(select 1 from research_jobs earlier
-        where earlier.run_id=j.run_id and earlier.id<>j.id and earlier.priority>j.priority and earlier.state in ('queued','running')))
       order by j.priority desc,j.created_at,j.id for update of j,s skip locked limit 1`,[runId??null,jobId??null,Math.max(1,maxRunning)])).rows[0];
     if(!job)return null;
     await tx.query(`update research_jobs set state='running',lease_token=$2,lease_until=now()+interval '5 minutes',attempts=attempts+1,updated_at=now() where id=$1`,[job.id,token]);
@@ -181,7 +179,7 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   if(session)counters.researchLimits!.bingSearches=session.budget.bingQueries;
   // Extra rounds taken because fewer buyers than wanted were saved (see extend.ts).
   if(session)counters.researchRounds=(session.budget as {extensions?:number}).extensions??0;
-  counters.researchRoundsMax=maxExtensionRounds();counters.minimumBuyers=minimumBuyers();
+  counters.researchRoundsMax=maxExtensionRounds();counters.minimumBuyers=minimumBuyers(session?.budget.targetCompanies);
   const skipped=(await db.query<{count:number}>("select coalesce(sum(coalesce((result->>'skippedCount')::int,0)),0)::int+count(*) filter(where stage='read' and result ? 'skipped')::int as count from research_jobs where run_id=$1",[runId])).rows[0].count;
   counters.coverage={readsSkipped:limited+skipped+count('read','failed'),deferred:deferredUrls+count('analyse','paused'),reason:session?.stop_reason??(sourceGaps?'Some sources omit required contractor/award details.':null)};
   counters.coverageIncomplete=Boolean(counters.coverageIncomplete||sourceGaps||session?.stop_reason||failures.length||deferredUrls||incompleteReads||candidates.count>candidates.investigated);

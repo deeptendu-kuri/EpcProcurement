@@ -80,12 +80,14 @@ describe('WP5 persisted original-quote triggers',()=>{
     await db.query("update source_documents set text='Example: original unavailable' where id=$1",[a.doc.id]);
     expect(await triggersForCompany(db,c.id,run,'line-pipe')).toEqual([]);
   });
-  it('Tekzone capability has no invented contract date/value and is Early at best',async()=>{
+  it('Tekzone capability has no invented contract date/value and is a regular buyer (check first, not ready)',async()=>{
     const page=baseline.documents.find(d=>d.url.includes('tekzoneme'))!;const quote=page.text.match(/Tekzone is among[^\n]+/)![0];
     const p=await proof(page.text,quote,page.url);const c=await resolveBuyerCompany(db,'Tekzone',null,'main_epc','tekzoneme.com');
     const t=await storeTrigger(db,run,c.id,'line-pipe',trigger({kind:'capability',title:quote,evidenceIds:[p.id]}));
     expect(t).toMatchObject({kind:'capability',date:null,valueUsd:null,country:'AE',strength:'possible'});
-    expect(triggerStageCap(t,'ready',new Date('2026-10-08'))).toBe('early');
+    // Doc 19: proven ongoing work is a regular buyer, never parked as "early".
+    expect(triggerStageCap(t,'ready',new Date('2026-10-08'))).toBe('check');
+    expect(triggerStageCap(t,'check',new Date('2026-10-08'))).toBe('check');
   });
   it('chooses the strongest trigger then recency; caps stale/undated work separately from fit',()=>{
     const cap={...trigger({kind:'capability'}),id:'c'};const old={...trigger({date:'2024-01-01'}),id:'a'};const recent={...trigger(),id:'b'};

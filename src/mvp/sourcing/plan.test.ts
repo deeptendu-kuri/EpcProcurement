@@ -23,8 +23,12 @@ describe('WP2 hybrid source plan and deterministic classification',()=>{
       expect(tasks.filter(t=>t.source==='tavily'&&t.lane==='capability')).toHaveLength(2);
       expect(tavilyTask(tasks.find(t=>t.source==='tavily'&&t.lane==='trigger')!)).toMatchObject({topic:'news',days:365});
     }
-    const firstFallback=plan.findIndex(t=>t.lane==='capability');
-    expect(plan.slice(firstFallback).every(t=>t.lane==='capability')).toBe(true);
+    // Award news first; regular-buyer searches share the list tier (doc 19), never after everything else.
+    expect(plan[0].lane).toBe('trigger');
+    const minTrigger=Math.min(...plan.filter(t=>t.lane==='trigger').map(t=>t.priority));
+    expect(plan.filter(t=>t.lane==='capability').every(t=>t.priority<minTrigger&&t.priority>=900)).toBe(true);
+    const listTier=plan.filter(t=>t.lane==='roundup'&&t.source==='tavily').map(t=>t.priority);
+    expect(Math.max(...plan.filter(t=>t.lane==='capability').map(t=>t.priority))).toBe(Math.max(...listTier,1000));
     if(input.markets.includes('NO'))expect(plan.some(t=>t.source==='ted'&&t.market==='NO')).toBe(true);
     expect(new Set(plan.map(t=>t.id)).size).toBe(plan.length);
   });

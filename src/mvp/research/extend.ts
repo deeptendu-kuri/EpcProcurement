@@ -49,12 +49,13 @@ const SKIPPED_FOR_LIMIT = `run_id=$1 and (
  * which case the search stays active.
  */
 export async function extendResearchIfShort(db: Db, runId: string): Promise<boolean> {
-  const minimum = minimumBuyers();
+  const session = (await db.query<{ state: string; budget: ExtendableBudget & { targetCompanies?: number } }>('select state,budget from research_sessions where run_id=$1', [runId])).rows[0];
+  const minimum = minimumBuyers(session?.budget.targetCompanies);
   if (minimum === 0) return false;
+  // Verified buyers count; likely buyers saved from the shortlist alone do not stop the search.
   const saved = (await db.query<{ count: number }>(
-    "select count(*)::int as count from search_opportunities where run_id=$1 and qualification<>'rejected'", [runId])).rows[0].count;
+    "select count(*)::int as count from search_opportunities where run_id=$1 and qualification<>'rejected' and verification<>'rating'", [runId])).rows[0].count;
   if (saved >= minimum) return false;
-  const session = (await db.query<{ state: string; budget: ExtendableBudget }>('select state,budget from research_sessions where run_id=$1', [runId])).rows[0];
   const run = (await db.query<{ status: string }>('select status from runs where id=$1', [runId])).rows[0];
   if (!session || session.state !== 'active' || !run || run.status === 'cancelled') return false;
   const rounds = session.budget.extensions ?? 0;

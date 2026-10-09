@@ -15,7 +15,9 @@ export interface SourceTask {
   material?:string;work?:string;words?:string[];
 }
 export interface SourcePlanInput {productId:string;keyword?:string;markets:string[];mode:ResearchMode;lanes?:SourcingLane[];includeResellers?:boolean}
-const BASE_PRIORITY:Record<SourcingLane,number>={trigger:2000,roundup:1000,capability:-100};
+// Companies found by the work they do share the list tier with contractor lists (doc 19): regular buyers
+// get a fair share of the search allowance instead of what is left after news and lists.
+const BASE_PRIORITY:Record<SourcingLane,number>={trigger:2000,roundup:1000,capability:1000};
 /**
  * Ordered tasks, not promises of buyers (docs/mvp/19). For every country: award news (English, the
  * country's own language and GDELT's local outlets), contractor lists, stockists when he sells to them,

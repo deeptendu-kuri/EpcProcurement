@@ -27,7 +27,9 @@ export function strongestTrigger(triggers:Trigger[]):Trigger|null {
 export function triggerStageCap(t:Trigger|null,stage:'ready'|'check'|'early'|'not_buyer',now=new Date()):typeof stage {
   if(stage==='not_buyer')return stage;
   const cutoff=new Date(now);cutoff.setUTCMonth(cutoff.getUTCMonth()-18);
-  return !t||t.kind==='capability'||!t.date||t.date<cutoff.toISOString().slice(0,10)||t.date>now.toISOString().slice(0,10)?'early':stage;
+  // Proven ongoing work (a capability trigger) is a regular buyer: at most "check first", never "early".
+  if(t?.kind==='capability')return stage==='ready'?'check':stage;
+  return !t||!t.date||t.date<cutoff.toISOString().slice(0,10)||t.date>now.toISOString().slice(0,10)?'early':stage;
 }
 interface Proof {id:string;quote:string;text:string;field?:string;document_id:string;}
 export async function triggerProofs(db:Queryable,ids:string[]):Promise<Proof[]> {

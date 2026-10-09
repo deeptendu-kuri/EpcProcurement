@@ -173,8 +173,10 @@ export function consistentRating(r: Judged, row: Pick<Row, 'company' | 'identity
   const type = consistentType(r, row, productName, opts);
   if (type === 'not_buyer' && (projectName(row.company) || placeOnlyName(row.company))) return 0;
   if (type === 'competitor') return Math.min(r.rating, 5);
+  // A source line that is only the name ("Desert Mechanical LLC.") says nothing about the work.
+  const plain = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   const own = (row.identity_quote ?? '').trim();
-  const bare = !own || own.toLowerCase() === row.company.trim().toLowerCase();
+  const bare = !own || plain(own) === plain(row.company);
   if (type === 'reseller') return Math.min(r.rating, RESELLER_CEILING, bare && !WORK_WORD.test(row.company) ? 50 : 100);
   if (NOT_BUYER.test(r.reason) || type === 'not_buyer') return Math.min(r.rating, 5);
   // Fuel, oil and lubricant traders (often a fabricator's client list) do not buy the material.

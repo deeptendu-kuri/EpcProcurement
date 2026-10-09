@@ -36,6 +36,7 @@ import { tedSource } from '@/mvp/pipeline/sources/ted';
 import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@/mvp/sourcing/roundup';
 import { rateCandidates } from './shortlist';
 import { planChainSearches } from './chain';
+import { saveLikelyBuyers } from './likely';
 import {SOURCING_REGISTRY,collectRegistry,registryPageTargets,registryReadWarning,registryRaw} from '@/mvp/sourcing/registry';
 
 export interface ResearchDeps {
@@ -213,6 +214,8 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
           where run_id=$1 and identity_document_id=$2 and id::text<>$4`,[job.run_id,id,JSON.stringify(parent),parent.candidateId]);
         const chained=await planChainSearches(db,job.run_id,input).catch(()=>0);
         if(chained)await researchProgress(db,job.run_id,'check',`Following ${chained} top ${chained===1?'contractor':'contractors'} down their supply chain: searching for their subcontractors.`);
+        const saved=await saveLikelyBuyers(db,job.run_id,input).catch(()=>({saved:0,listing:0}));
+        if(saved.saved)await researchProgress(db,job.run_id,'check',`Saved ${saved.saved} likely ${saved.saved===1?'buyer':'buyers'} as leads${saved.listing?` (${saved.listing} with their listed work as evidence)`:''}; website checks follow for the best rated.`);
         await persistRoundupAwards(db,job.run_id,input,roundup);
         await completeJob(db,job,{roundup,...seeded,budgetLimited:providers.limited,coverageWarning:roundup.warnings.length>0});
         await researchProgress(db,job.run_id,'check',`Roundup: ${seeded.seeded} verified identity candidates; ${seeded.queued} website reads and ${seeded.lookups} bounded lookup tasks. Candidates are not confirmed buyers.`);
@@ -334,6 +337,8 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
     if(rs?.input?.productId){
       const rated=await rateCandidates(db,s.run_id,rs.input,key=>budgetedAwardProviders(db,s.run_id,key,rs.budget).provider('triage')).catch(()=>null);
       if(rated?.rated.length)await researchProgress(db,s.run_id,'check',`Shortlist: rated ${rated.rated.length} more companies; ${rated.rated.filter(r=>r.rating>=45).length} look like buyers.`);
+      const likely=await saveLikelyBuyers(db,s.run_id,rs.input).catch(()=>({saved:0,listing:0}));
+      if(likely.saved)await researchProgress(db,s.run_id,'check',`Saved ${likely.saved} likely ${likely.saved===1?'buyer':'buyers'} as leads${likely.listing?` (${likely.listing} with their listed work as evidence)`:''}.`);
       // Contractors found outside list pages are followed too; new searches keep the search running.
       const chained=await planChainSearches(db,s.run_id,rs.input).catch(()=>0);
       if(chained){await researchProgress(db,s.run_id,'check',`Following ${chained} top ${chained===1?'contractor':'contractors'} down their supply chain: searching for their subcontractors.`);continue;}

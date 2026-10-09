@@ -73,7 +73,7 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
       `select o.id,c.canonical_name as name,l.buyer_type,c.country,o.fit_score,o.buying_reason,
          (select t.state from funnel_threads t where t.opportunity_id=o.id and t.mode<>'email_test' order by t.created_at desc limit 1) as state
        from search_opportunities o join companies c on c.id=o.company_id join leads l on l.id=o.lead_id
-       where o.run_id=$1 and o.qualification<>'rejected' order by o.fit_score desc,o.created_at`, [runId]).then((r) => r.rows),
+       where o.run_id=$1 and o.qualification<>'rejected' and o.verification<>'rating' order by o.fit_score desc,o.created_at`, [runId]).then((r) => r.rows),
     db.query<{ market: string; done: number; total: number }>(`select coalesce(payload->>'market',payload->'query'->>'market') as market,
         count(*) filter (where state in ('done','failed','cancelled'))::int as done, count(*)::int as total
       from research_jobs where run_id=$1 and stage='collect' and coalesce(payload->>'market',payload->'query'->>'market') is not null group by 1`, [runId]).then((r) => r.rows),

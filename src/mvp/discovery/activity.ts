@@ -26,9 +26,11 @@ export function buyerActivity(b: ActivityClaim, text: string, now = new Date(), 
 
 export function buyerPriority(fit: "explicit" | "application", activity: ActivityStatus, tier: string) {
   const components = {
-    material: fit === "explicit" ? 40 : 25,
-    consumingActivity: 20,
-    currentWork: activity === "recent" || activity === "ongoing" ? 25 : activity === "historic" ? 0 : null,
+    // A regular buyer that names the material reaches about 80 without any award (doc 19);
+    // recent or ongoing work adds a bonus, it is not the gate.
+    material: fit === "explicit" ? 45 : 30,
+    consumingActivity: 25,
+    currentWork: activity === "recent" || activity === "ongoing" ? 10 : activity === "historic" ? 0 : null,
     source: tier === "A" ? 15 : tier === "B" ? 12 : 8,
   };
   return { components, score: Object.values(components).reduce<number>((sum, value) => sum + (value ?? 0), 0) };

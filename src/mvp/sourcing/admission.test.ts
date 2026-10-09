@@ -31,14 +31,14 @@ describe('WP2 admission before provider/page costs',()=>{
     expect((await sessionFor(db,id))?.stop_reason).toContain('budget');
     expect((await db.query('select status,error from runs where id=$1',[id])).rows[0]).toEqual({status:'done',error:null});
   });
-  it('leaves capability fallback behind all trigger and roundup tasks',async()=>{
+  it('gives regular-buyer searches the same tier as contractor lists, after award news (doc 19)',async()=>{
     vi.stubEnv('TAVILY_API_KEY','fixture-key');const id=await createResearchRun(input,db);
-    const fallback=(await db.query<{id:string}>("select id from research_jobs where run_id=$1 and payload->>'sourcingLane'='capability' limit 1",[id])).rows[0];
-    expect(await claimJob(db,id,fallback.id)).toBeNull(); // out-of-order outbox delivery cannot bypass lanes
     const first=await claimJob(db,id);expect(first?.payload.sourcingLane).toBe('trigger');
-    const priorities=(await db.query<{priority:number;payload:{sourcingLane:string}}>('select priority,payload from research_jobs where run_id=$1 order by priority desc',[id])).rows;
-    expect(priorities.at(-1)?.payload.sourcingLane).toBe('capability');
-    expect(priorities.filter(j=>j.payload.sourcingLane==='capability').every(j=>j.priority<0)).toBe(true);
+    const jobs=(await db.query<{priority:number;payload:{sourcingLane:string}}>("select priority,payload from research_jobs where run_id=$1 and stage='collect'",[id])).rows;
+    const top=(lane:string)=>Math.max(...jobs.filter(j=>j.payload.sourcingLane===lane).map(j=>j.priority));
+    expect(top('capability')).toBe(top('roundup')>=1950?1000:top('roundup')); // registry lists keep their own higher priority
+    expect(top('capability')).toBeLessThan(top('trigger'));
+    expect(jobs.filter(j=>j.payload.sourcingLane==='capability').every(j=>j.priority>0)).toBe(true);
   });
   it('finishes a real queued analysis at its AI ceiling without pausing the run',async()=>{
     vi.stubEnv('MVP_MAX_AI_DOCS','0');

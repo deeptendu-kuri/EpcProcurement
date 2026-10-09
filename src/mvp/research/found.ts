@@ -38,6 +38,8 @@ export interface FoundCompany {
   match: MatchStrength | null;
   /** Doc 19: found by following this contractor down its chain ("works under McDermott"). */
   worksUnder: string | null;
+  /** Doc 19: how its lead is proven, when it is one: own website, a list entry, or only the rating. */
+  verification: 'website' | 'listing' | 'rating' | null;
 }
 export type LikelyRole = 'owner' | 'contractor' | 'pipe_maker' | 'supplier';
 // "GASCO, Abu Dhabi" and "GASCO" are one company: the place after a comma is not part of the name.
@@ -79,10 +81,11 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
         and (j.payload->>'candidateId'=c.id::text or j.payload->'raw'->'research'->>'candidateId'=c.id::text)) as running
     from research_candidates c left join source_documents d on d.id=c.identity_document_id
     where c.run_id=$1 order by c.created_at limit 300`, [runId])).rows;
-  const saved = (await db.query<{ id: string; name: string; fit_score: number }>(`select o.id,c.canonical_name as name,o.fit_score from search_opportunities o join companies c on c.id=o.company_id
+  const saved = (await db.query<{ id: string; name: string; fit_score: number; verification: 'website' | 'listing' | 'rating' }>(`select o.id,c.canonical_name as name,o.fit_score,o.verification from search_opportunities o join companies c on c.id=o.company_id
     where o.run_id=$1 and o.qualification<>'rejected'`, [runId])).rows;
   const savedBy = new Map(saved.map((s) => [key(s.name), s.id]));
   const savedFit = new Map(saved.map((s) => [s.id, Number(s.fit_score) || 0]));
+  const savedHow = new Map(saved.map((s) => [s.id, s.verification]));
   const runInput = (await db.query<{ product_id: string | null; resellers: boolean | null }>("select adhoc_query->>'productId' as product_id,(adhoc_query->>'includeResellers')::boolean as resellers from runs where id=$1", [runId])).rows[0];
   const productId = runInput?.product_id ?? null;
   const opts = { resellers: runInput?.resellers !== false };
@@ -94,7 +97,9 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
     if (!k || seen.has(k)) continue;
     seen.add(k);
     const opportunityId = savedBy.get(k) ?? null;
-    const [status, statusText]: [FoundStatus, string] = opportunityId ? ['saved', 'Saved as a buyer']
+    const how = opportunityId ? savedHow.get(opportunityId) ?? 'website' : null;
+    const [status, statusText]: [FoundStatus, string] = opportunityId && how !== 'website' && (r.running || r.pending) ? ['checking', 'Verifying its website']
+      : opportunityId ? ['saved', how === 'rating' ? 'Lead · likely, not verified' : how === 'listing' ? 'Lead · its listed work' : 'Verified buyer']
       : r.running ? ['checking', 'Checking now']
       : r.pending ? ['checking', 'Queued to check']
       : r.state === 'unreadable' ? ['unreadable', 'Website could not be read']
@@ -123,7 +128,7 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
       rating, ratingRole: r.rating_role, ratingReason: r.rating_reason,
       alsoBuys: (r.rating_also ?? []).map((id) => getCatalogueItem(id)?.shortName ?? id),
       guessed: r.rating_source === 'rules' && !ruleRating(r.company, r.identity_quote, productName, opts),
-      buyerType: opportunityId && (!buyerType || buyerType === 'not_buyer') ? null : buyerType, match: r.rating_match, worksUnder: r.works_under });
+      buyerType: opportunityId && (!buyerType || buyerType === 'not_buyer') ? null : buyerType, match: r.rating_match, worksUnder: r.works_under, verification: how });
   }
   // Saved buyers first, then by rating (best first), unrated last in the order found.
   return result.sort((a, b) => Number(Boolean(b.opportunityId)) - Number(Boolean(a.opportunityId)) || (b.rating ?? -1) - (a.rating ?? -1));
@@ -214,6 +219,8 @@ export async function rateFoundCompanies(db: Db, runId: string): Promise<{ rated
   const result = await rateCandidates(db, runId, run.input, provider ? () => provider : null, 200);
   const likely = result.rated.filter((r) => r.rating >= 45).length;
   if (result.rated.length) await researchProgress(db, runId, 'check', `Shortlist: rated ${result.rated.length} companies; ${likely} look like buyers.`);
+  // Likely buyers become leads (marked "likely, not verified" unless their listed work is evidence).
+  await (await import('./likely')).saveLikelyBuyers(db, runId, run.input).catch(() => null);
   if (!provider && !result.rated.length) return { rated: 0, likely: 0, message: "Today's AI allowance is used up. Rating with AI is available again after midnight UTC." };
   return { rated: result.rated.length, likely, message: result.rated.length
     ? `Rated ${result.rated.length} companies: ${likely} look like buyers.${provider ? '' : " Today's AI allowance is low, so plain rules rated them."}${result.warning ? ` ${result.warning}` : ''}`

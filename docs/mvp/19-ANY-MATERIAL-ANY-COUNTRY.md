@@ -90,4 +90,36 @@ Each slots into the same steps, and is measured by the same golden set:
 
 ## 5. Results
 
-_Filled in as each phase lands._
+### Baseline: the rater before this work, on the golden set
+
+| Search | Top-20 precision | Junk among "likely" | Recall |
+|---|---|---|---|
+| Steel plates | 0.90 | 13% | 90% |
+| Steel pipe | 0.70 | 48% (projects rated as companies) | 88% |
+| Welded stainless | 0: only pipe makers were found | — | — |
+| **Overall** | **0.53** | **30%** | **89%** |
+
+Welded stainless shows the gap is mostly *where* we search, not only the rating.
+
+### Built and tested (commits 75306ee, f2f6c9b)
+
+| Phase | What | Proof |
+|---|---|---|
+| 0 | Golden set: 184 companies, 19 marked unclear; scorer | `src/mvp/research/eval/*` |
+| 1 | `parseMaterialSpec`: method, grade, standard, size, finish; typical uses of the variant | 12 phrase tests |
+| 2 | Rating v2 (buyer type, variant match); reseller toggle; verification accepts stockists that supply the material | shortlist, reseller and form tests |
+| 3 | Country details for 247 countries; local-language terms (cached); local news (Bing, in its language); GDELT country news; Tavily country boost for 150+ countries | Live check (`LIVE_NEWS=1`), below |
+| 4 | Up to 4 steps per search at once, AI one at a time; budgets grow per country; countries alternate | Claim test |
+| 5 | Top contractors and owners followed down their chain ("works under") | Chain tests |
+| 6 | Variant chips and stockist toggle on Find buyers; workspace buyer-type filter, badges and per-country strip | Component tests, screenshots |
+
+**Live local-news check, 10 Oct:**
+
+- **Saudi Arabia (Arabic, `ar-SA`):**
+  - "East Pipes signs a steel pipe supply contract with the Saline Water Conversion Corporation, SAR 497m" (argaam.com)
+  - "Arabian Pipes signs a contract with Aramco to supply pipes, SAR 96m" (mubasher.info)
+  - "Contract awarded to build a pipeline in Jazan, SAR 50.98m" (argaam.com)
+
+  None of these appears in English-only searching.
+- **Germany (German):** contract news found.
+- **GDELT:** reachable but often rate-limited; when busy, the search carries on without it.

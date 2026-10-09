@@ -52,7 +52,7 @@ describe("seller identity in demo emails", () => {
 describe("plain trigger labels", () => {
   it("describes an award as a won contract, not a prize", () => {
     expect(TRIGGER_KIND_LABELS.award).toBe("Contract won");
-    expect(triggerKindLabel("capability")).toMatch(/no contract yet/);
+    expect(triggerKindLabel("capability")).toBe("Regular buyer · does this work");
     expect(triggerKindLabel(null)).toBe("Not established");
   });
 });

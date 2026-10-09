@@ -191,7 +191,7 @@ export async function enrollCompletedSearches():Promise<number> {
   const candidates=(await db.query<{id:string;company_id:string;product_id:string}>(`select id,company_id,product_id from (select o.id,o.company_id,o.product_id,o.run_id,o.created_at,
       row_number() over(partition by o.run_id order by o.fit_score desc,o.created_at,o.id) as rank
       from search_opportunities o join runs r on r.id=o.run_id join leads l on l.id=o.lead_id
-    where r.status='done' and r.created_at >= $1 and not l.is_sample and o.qualification <> 'rejected'
+    where r.status='done' and r.created_at >= $1 and not l.is_sample and o.qualification <> 'rejected' and o.verification <> 'rating'
       and not exists(select 1 from research_sessions rs where rs.run_id=o.run_id and
         (rs.state not in ('done','partial') or rs.state='partial' and not $2::boolean))
       and (not $2::boolean or exists(select 1 from evidence e join run_documents rd on rd.document_id=e.document_id

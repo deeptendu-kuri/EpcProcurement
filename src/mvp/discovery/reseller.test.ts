@@ -21,3 +21,16 @@ describe("reseller buyers in verification (docs/mvp/19 Phase 2)", () => {
     expect(buyerEvidence({ ...buyer, companyQuote: other, productQuote: other }, other, input()).buyer).toBeNull();
   });
 });
+
+describe("owners and operators as buyers (docs/mvp/19 §6)", () => {
+  const owner = "Gulf Gas Transmission Company operates and maintains 1,200 km of gas transmission pipelines in the UAE and procures line pipe for its expansion.";
+  const b: DiscoveredBuyer = { company: "Gulf Gas Transmission Company", country: null, role: "owner", companyQuote: owner, countryQuote: null, productQuote: owner, project: null, projectQuote: null, confidence: 0.5 };
+  const lineInput: RunInput = { query: "line pipe", productId: "line-pipe", markets: ["AE"], leadKinds: ["supply_subcontract"] };
+  it("accepts an operator that runs and buys for pipelines", () => {
+    expect(buyerEvidence(b, owner, lineInput).buyer?.role).toBe("owner");
+  });
+  it("rejects a contractor labelled as an owner", () => {
+    const epc = "Atlas Works is an EPC contractor operating gas transmission pipeline construction in the UAE.";
+    expect(buyerEvidence({ ...b, company: "Atlas Works", companyQuote: epc, productQuote: epc }, epc, lineInput).reason).toMatch(/owner must operate/i);
+  });
+});

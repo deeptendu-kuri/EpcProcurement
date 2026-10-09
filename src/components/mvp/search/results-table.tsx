@@ -115,7 +115,8 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
             const moreDeals = Math.max(0, (row.dealsCount ?? 1) - 1);
             const product = row.searchedProduct || row.sellSummary;
             const country = row.country ? countryName(row.country) : null;
-            const fitNote = row.trigger ? `${triggerKindLabel(row.trigger.kind)}${row.trigger.date ? ` · ${row.trigger.date}` : ""}`
+            const fitNote = row.verification === "rating" ? "Likely buyer · not verified yet"
+              : row.trigger ? `${triggerKindLabel(row.trigger.kind)}${row.trigger.date ? ` · ${row.trigger.date}` : ""}`
               : row.searchFit === "explicit" ? "Named on their own website" : row.searchFit === "potential" ? "Their work uses it" : null;
             return (
               <tr
@@ -196,7 +197,7 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                 </td>
                 <td className={TD}>
                   {product ? <div className="font-semibold text-[var(--text)]">{product}</div> : <div className="text-[var(--muted)]">Nothing matched yet</div>}
-                  {fitNote ? <div className="mt-0.5 text-[12.5px] font-medium text-[var(--accent)]">{fitNote}</div> : null}
+                  {fitNote ? <div className={`mt-0.5 text-[12.5px] font-medium ${row.verification === "rating" ? "text-[var(--warn)]" : "text-[var(--accent)]"}`}>{fitNote}</div> : null}
                   {row.buyingReason ? <p className="mt-1 line-clamp-2 text-[13px] text-[var(--text-2)]" title={row.buyingReason}>{row.buyingReason}</p>
                     : <p className="mt-1 text-[13px] text-[var(--muted)]">{tier > 1 ? "In the supply chain of this deal" : "Reason not known yet"}</p>}
                   {moreDeals ? <div className="mt-1 text-[12px] font-semibold text-[var(--text-2)]">+{moreDeals} more {moreDeals === 1 ? "deal" : "deals"}</div> : null}

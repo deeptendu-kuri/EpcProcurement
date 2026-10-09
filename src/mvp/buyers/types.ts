@@ -5,7 +5,7 @@
 export type TriggerKind = 'award' | 'order' | 'tender' | 'subcontract' | 'capability';
 /** "award" means a contract award (the company won a contract or tender), never a prize. Awards are not required to be a lead. */
 export const TRIGGER_KIND_LABELS: Record<TriggerKind, string> = {
-  award: 'Contract won', order: 'Order won', tender: 'Open tender', subcontract: 'Subcontract won', capability: 'Does this work · no contract yet',
+  award: 'Contract won', order: 'Order won', tender: 'Open tender', subcontract: 'Subcontract won', capability: 'Regular buyer · does this work',
 };
 export const triggerKindLabel = (kind?: TriggerKind | null) => (kind ? TRIGGER_KIND_LABELS[kind] ?? kind : 'Not established');
 export interface Trigger {
@@ -111,6 +111,8 @@ export interface BuyerRow { /* list row: subset of BuyerView */
   alsoSell?: string[];
   /** Doc 18: 'explicit' when its own pages name the material; 'potential' when its work uses it. */
   searchFit?: 'explicit' | 'potential' | null;
+  /** Doc 19: how the lead is proven: own website, its listed work, or only the shortlist rating. */
+  verification?: 'website' | 'listing' | 'rating' | null;
 }
 export const DERIVED_PREFIX = 'derived:';
 export function isDerivedLeadId(id: string): boolean { return id.startsWith(DERIVED_PREFIX); }
