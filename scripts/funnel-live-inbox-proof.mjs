@@ -36,7 +36,14 @@ const base = 'http://localhost:3007';
       await page.waitForTimeout(5000);
     }
     assert.ok(conversation.messages.some(m => m.kind === 'initial' && m.state === 'accepted'), 'No provider-accepted initial email yet; inspect the timeline before retrying.');
-    if (checkSellerIntro) { const message = conversation.messages.find(m => m.kind === 'seller_intro' && m.state === 'accepted'); assert.ok(message); assert.ok(message.body.includes("I'm Hritik Debnath")); assert.ok(message.body.includes('procurement options for line pipe')); assert.ok(message.body.includes('quality expectations and budget')); assert.ok(!message.body.includes('Congratulations')); }
+    if (checkSellerIntro) {
+      const message = conversation.messages.find(m => m.kind === 'seller_intro' && m.state === 'accepted');
+      assert.ok(message);assert.notEqual(data.settings.seller.name,data.settings.demoCustomer.name);
+      assert.ok(message.body.includes(`I'm ${data.settings.seller.name}`));
+      assert.ok(message.body.startsWith(`Hi ${data.settings.demoCustomer.name},`));
+      assert.ok(message.body.includes('procurement options for line pipe'));
+      assert.ok(message.body.includes('quality expectations and budget'));assert.ok(!message.body.includes('Congratulations'));
+    }
     const leads = await get('/api/mvp/leads');
     assert.ok(leads.items.every(l => !l.isSample), 'Live demo must not substitute sample buyer records.');
     await page.reload();

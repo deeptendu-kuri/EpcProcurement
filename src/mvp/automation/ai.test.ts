@@ -153,6 +153,13 @@ describe("grounded Groq sales decisions",()=>{
     await expect(analyseReply(opportunity,[],"Meet please")).rejects.toThrow("unapproved claim");
     complete.mockResolvedValue({text:"not json"});await expect(analyseReply(opportunity,[],"Hi")).rejects.toThrow("invalid decision");
   });
+  it("blocks an AI reply that impersonates the demo customer but allows addressing them",async()=>{
+    vi.stubEnv('DEMO_CUSTOMER_NAME','Hritik Debnath');vi.stubEnv('SALES_PERSON_NAME','Deeptendu Kuri');
+    complete.mockResolvedValue({text:JSON.stringify({intent:'question',confidence:0.98,summary:'Requested specifications',body:"I'm Hritik. Which grade do you require?"})});
+    await expect(analyseReply(opportunity,[],"Can we discuss pipe?")).rejects.toThrow("customer's name as the seller");
+    complete.mockResolvedValue({text:JSON.stringify({intent:'question',confidence:0.98,summary:'Requested specifications',body:'Thank you, Hritik. Which grade do you require?'})});
+    expect((await analyseReply(opportunity,[],"Can we discuss pipe?")).body).toContain('Kind regards,\nDeeptendu Kuri');
+  });
   it("uses a fixed seller opening, exact searched product and seller signature, never the recipient's identity",async()=>{
     vi.stubEnv("SALES_PERSON_NAME","Hritik Debnath");vi.stubEnv("SALES_COMPANY_NAME","");
     complete.mockResolvedValue({text:JSON.stringify({subject:"Inquiry about your line pipe offering",body:"I would like to discuss your products."})});

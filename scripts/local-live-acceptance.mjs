@@ -98,7 +98,13 @@ try{
       state.thread={id:thread.id,opportunityId:thread.opportunity_id,company:thread.company,product:thread.product,state:thread.state,reason:thread.reason,summary:thread.summary,meetingUrl:thread.meet_url};
       const conversation=await get('/api/mvp/automation/conversation/'+thread.opportunity_id);state.messages=conversation.messages;
       const intro=state.messages.find(m=>m.direction==='out'&&m.kind==='initial');
-      if(intro){assert.ok(!/^Hi Hritik/i.test(intro.body),'Greeting still confuses buyer with salesperson');assert.ok(intro.body.includes("I'm Hritik Debnath"));assert.ok(intro.body.includes(thread.company+' procurement team'));state.greetingVerified=true;}
+      if(intro){
+        const {seller,demoCustomer}=automation.settings;
+        assert.notEqual(seller.name,demoCustomer.name,'Seller and demo customer must have separate identities');
+        assert.ok(intro.body.startsWith(`Hi ${demoCustomer.name},`));
+        assert.ok(intro.body.includes(`I'm ${seller.name}`));
+        assert.ok(intro.body.includes(`Research opportunity: ${thread.company}`));state.greetingVerified=true;
+      }
       persist();
       if(state.messages.some(m=>m.direction==='out'&&m.state==='accepted')||['review','stopped','awaiting_calendar','meeting_booked'].includes(thread.state))break;
     }

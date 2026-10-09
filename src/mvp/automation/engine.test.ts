@@ -15,6 +15,7 @@ afterAll(async()=>{setDbForTests(undefined);await db?.close();});
 beforeEach(async()=>{
   vi.stubEnv("DEMO_EMAIL_ENABLED","1");vi.stubEnv("DEMO_RECIPIENT_EMAIL","deeptendukuri@gmail.com");vi.stubEnv("RESEND_API_KEY","unit");
   vi.stubEnv("RESEND_RECEIVING_DOMAIN","demo123.resend.app");vi.stubEnv("GROQ_API_KEY","unit");vi.stubEnv("HUNTER_API_KEY","unit");
+  vi.stubEnv("DEMO_CUSTOMER_NAME","Example Customer");
   for(const fn of Object.values(mocks))fn.mockReset();
   mocks.fit.mockResolvedValue({approved:true,reason:"Quoted contract and product evidence"});
   mocks.initial.mockResolvedValue({subject:"Line pipe discussion",body:"Could we discuss your line pipe requirements?"});
@@ -213,7 +214,8 @@ describe("persistent demo research-to-meeting funnel",()=>{
     vi.stubEnv("MVP_PROSPECT_DEMO_OUTREACH","on");await setFunnelEnabled(true);const s=await seed({validated:false});await attachSource(s);
     await processFunnelTick();expect(await thread(s.o)).toMatchObject({mode:"prospect_demo",state:"active",person_id:null,recipient:"deeptendukuri@gmail.com"});
     expect(mocks.contact).not.toHaveBeenCalled();expect(mocks.fit).toHaveBeenCalledTimes(1);expect(mocks.send).toHaveBeenCalledTimes(1);
-    expect(mocks.initial.mock.calls[0][1].name).toBe(`${mocks.initial.mock.calls[0][0].name} procurement team`);
+    expect(mocks.initial.mock.calls[0][1]).toEqual({name:"Example Customer",title:"Demo customer representing Unit EPC"});
+    expect(mocks.send.mock.calls[0][0].body).toContain("Demo customer: Example Customer. Seller: Deeptendu Kuri.");
     expect((await db.query("select verified_at from contact_points")).rows).toEqual([]);
     // Recipient and delivery mode are frozen: later toggles never turn this into buyer delivery.
     vi.stubEnv("MVP_PROSPECT_DEMO_OUTREACH","off");await replyTo(s.o,"Can we discuss specs?");mocks.send.mockResolvedValue({id:crypto.randomUUID(),rfcId:null});await processFunnelTick();

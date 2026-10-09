@@ -10,10 +10,20 @@ const plainEmail = (value: string | undefined) => {
   const v = value?.trim().toLowerCase() ?? "";
   return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(v) ? v : null;
 };
+/** The real approved inbox owner plays the customer, independently of the seller. */
+export const demoCustomer = () => ({
+  name: identityText(process.env.DEMO_CUSTOMER_NAME,120)
+    || (AUTOMATION_RECIPIENT==='hritikdebnath00@gmail.com'?'Hritik Debnath':'Demo customer'),
+  email: AUTOMATION_RECIPIENT,
+});
 /** The seller (our client's salesperson). The approved demo inbox plays the BUYER, so it is never the seller's identity. */
 export const seller = () => {
   const ownEmail = plainEmail(process.env.SALES_PERSON_EMAIL);
-  return { name: identityText(process.env.SALES_PERSON_NAME,120) || "Deeptendu Kuri",
+  const configuredName=identityText(process.env.SALES_PERSON_NAME,120)||"Deeptendu Kuri";
+  const key=(value:string)=>value.toLowerCase().replace(/[^\p{L}]/gu,"");
+  const customer=demoCustomer();
+  const sameIdentity=key(customer.name)===key(configuredName);
+  return { name: sameIdentity?"Procurement Sales Team":configuredName,
     email: ownEmail && ownEmail !== AUTOMATION_RECIPIENT.toLowerCase() ? ownEmail : null,
     company: identityText(process.env.SALES_COMPANY_NAME,160),
     description: "EPC procurement support for the exact searched product. Evaluate sourcing options against the buyer's technical requirements, quality expectations and budget. Certifications, stock, prices and lead times are not confirmed." };
@@ -40,7 +50,10 @@ export function requireFunnelConfig() {
   receivingDomain();
   if (!process.env.GROQ_API_KEY?.trim()) throw new Error("Groq is required for live qualification and replies; simulated AI never sends automatically.");
   if (!hunterConfigured() && !emailableConfigured()) throw new Error("Connect Emailable or Hunter before enabling the live buyer/contact funnel.");
-  return settings;
+  // Preserve the provider-authorised address; the display name must match the seller.
+  const address=settings.from.match(/<([^<>]+)>$/)?.[1]??settings.from;
+  const display=[seller().name,seller().company].filter(Boolean).join(' · ').replace(/"/g,'').slice(0,80);
+  return {...settings,from:`${display} <${address}>`};
 }
 export function calendarPreferences() {
   const timeZone = process.env.SALES_TIMEZONE?.trim() || "Asia/Kolkata";
@@ -58,7 +71,7 @@ export async function funnelStatus() {
   const calendar = (await getDb().query<{ account: string }>("select account from funnel_integrations where provider='google'")).rows[0];
   let configError: string | null = null;
   try { requireFunnelConfig(); } catch (error) { configError = error instanceof Error ? error.message : "Configuration incomplete."; }
-  return { ...control, ready: !configError, configError, recipient: AUTOMATION_RECIPIENT, seller: seller(),
+  return { ...control, ready: !configError, configError, recipient: AUTOMATION_RECIPIENT, seller: seller(),demoCustomer:demoCustomer(),
     groq: Boolean(process.env.GROQ_API_KEY?.trim()), hunter: hunterConfigured(), emailable:emailableConfigured(),
     tavily: Boolean(process.env.TAVILY_API_KEY?.trim()), receiving: (() => { try { return receivingDomain(); } catch { return null; } })(),
     calendar: calendar?.account ?? null, calendarSetup: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),

@@ -2,7 +2,7 @@ import { randomBytes,randomUUID } from "node:crypto";
 import { getCatalogue } from "@/mvp/config/buyers-config";
 import { getDb,type Queryable } from "@/mvp/db";
 import { getOpportunity,isVerified,updateOpportunity,type Opportunity } from "@/mvp/opportunities";
-import { AUTOMATION_RECIPIENT,calendarPreferences,calendarConnected,requireFunnelConfig,receivingDomain,seller,prospectDemoEnabled,prospectsPerSearch } from "./config";
+import { AUTOMATION_RECIPIENT,calendarPreferences,calendarConnected,requireFunnelConfig,receivingDomain,seller,demoCustomer,prospectDemoEnabled,prospectsPerSearch } from "./config";
 import { qualifyBuyer,initialEmail,analyseReply } from "./ai";
 import { prepareContact } from "./contacts";
 import { availableSlots,bookDemoMeeting,MeetingSlotUnavailableError } from "./calendar";
@@ -129,7 +129,7 @@ export async function sendSellerTestIntroduction(id:string) {
   if(!(await db.query<{enabled:boolean}>("select enabled from funnel_control where id=1")).rows[0]?.enabled)throw new Error("Enable the demo funnel first.");
   if((await db.query("select id from funnel_messages where thread_id=$1 and (direction='in' and analysed_at is null or direction='out' and state in ('queued','sending','review'))",[id])).rows.length)throw new Error("A reply or delivery is pending; do not interrupt that step.");
   const o=await threadContext(t);if(!o)throw new Error("Test context missing.");
-  await queueMessage(t,`seller-intro-v2-${id}`,"seller_intro",await initialEmail(o,{name:"procurement team",title:"Demo inbox owner"}));
+  await queueMessage(t,`seller-intro-v2-${id}`,"seller_intro",await initialEmail(o,{name:demoCustomer().name,title:"Approved demo customer"}));
 }
 export async function listThreadMessages(opportunityId:string) {
   return (await getDb().query<Pick<FunnelMessage,"id"|"direction"|"kind"|"subject"|"body"|"state"|"created_at"|"error">>(`select m.id,m.direction,m.kind,m.subject,m.body,m.state,m.created_at,m.error from funnel_messages m
@@ -221,7 +221,7 @@ async function queueMessage(t:FunnelThread,key:string,kind:string,text:{subject:
   const replyTo=replyAddress(t.reply_token);
   await getDb().query(`insert into funnel_messages(thread_id,direction,kind,dedup_key,subject,body,state,reply_to,in_reply_to)
     values ($1,'out',$2,$3,$4,$5,'queued',$6,$7) on conflict (dedup_key) do nothing`,
-    [t.id,kind,key,`[Demo] ${text.subject.replace(/^\[Demo\]\s*/i,"")}`,`${text.body.trim()}\n\n${t.mode==='prospect_demo'?`Research opportunity: ${(await threadContext(t))?.name??'potential company'} — this is an approved-inbox demonstration; buyer contact validation is separate.\n`:''}Demo conversation with ${seller().name}. No actual buyer is being contacted. Reply "unsubscribe" to stop.`,replyTo,messageIdSafe(inReplyTo)]);
+    [t.id,kind,key,`[Demo] ${text.subject.replace(/^\[Demo\]\s*/i,"")}`,`${text.body.trim()}\n\n${t.mode==='prospect_demo'?`Research opportunity: ${(await threadContext(t))?.name??'potential company'} — this is an approved-inbox demonstration; buyer contact validation is separate.\n`:''}Demo customer: ${demoCustomer().name}. Seller: ${seller().name}. No actual buyer is being contacted. Reply "unsubscribe" to stop.`,replyTo,messageIdSafe(inReplyTo)]);
 }
 /** Scan the entire bounded inbox before outreach; incomplete/failed polling prevents sending. */
 export async function ingestInbox():Promise<number> {
@@ -332,7 +332,7 @@ async function advanceThread(t:FunnelThread) {
     await offerMeetingSlots(t,o);return;
   }
   if(t.mode==="email_test" && t.state==="qualifying") {
-    await queueMessage(t,`initial-${t.id}`,"initial",await initialEmail(o,{name:"procurement team",title:"Demo inbox owner — role-playing a buyer"}));
+    await queueMessage(t,`initial-${t.id}`,"initial",await initialEmail(o,{name:demoCustomer().name,title:"Demo customer — role-playing a buyer"}));
     await updateState(t,"active","Live test email queued; no real buyer qualification claimed.");return;
   }
   if (t.state==="qualifying") {
@@ -346,7 +346,7 @@ async function advanceThread(t:FunnelThread) {
       const refreshed=await getOpportunity(o.id);
       if(!await approvedDemoOpportunity(refreshed)) {await updateState(t,"review","This search needs verified real-source evidence before a prospect demo can send.");return;}
       if(!refreshed)return;
-      await queueMessage(t,`initial-${t.id}`,"initial",await initialEmail(refreshed,{name:`${o.name} procurement team`,title:`Demo recipient representing ${o.name}`}));
+      await queueMessage(t,`initial-${t.id}`,"initial",await initialEmail(refreshed,{name:demoCustomer().name,title:`Demo customer representing ${o.name}`}));
       await updateState(t,"active",`Demo email queued to ${AUTOMATION_RECIPIENT} for ${o.name}. No buyer contacted; contact validation is still separate.`);
       return;
     }

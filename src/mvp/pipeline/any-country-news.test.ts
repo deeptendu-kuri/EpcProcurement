@@ -19,6 +19,12 @@ describe("news path works for countries outside the default markets", () => {
     expect(detectMarkets(kenya, ["KE"])).toEqual(["KE"]);
   });
 
+  it("normalises and deduplicates countries without admitting invalid codes", () => {
+    expect(detectMarkets(kenya, ["ke", "KE", "invalid"])).toEqual(["KE"]);
+    expect(detectMarkets("Example pipeline contract in India.", ["in", "IN"])).toEqual(["IN"]);
+    expect(detectMarkets(kenya, ["invalid"])).toEqual([]);
+  });
+
   it("treats an article about the searched country as relevant, not unclear", () => {
     const result = filter(kenya, ["KE"]);
     expect(result.verdict).toBe("relevant");

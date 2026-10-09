@@ -1,8 +1,20 @@
 import {describe,it,expect} from 'vitest';
 import path from 'node:path';
-import {benchmarkEnv,costMetrics,benchmarkHits,releaseGate,QUERIES} from './benchmark-sourcing.mjs';
+import {EventEmitter} from 'node:events';
+import {benchmarkEnv,costMetrics,benchmarkHits,releaseGate,QUERIES,stopBenchmarkServer} from './benchmark-sourcing.mjs';
 const root=path.resolve('.');
 describe('WP10 isolated benchmark',()=>{
+  it('accepts a signal-terminated owned server as stopped on Windows',async()=>{
+    // Example process fixture, no real process or provider request.
+    const server=new EventEmitter();server.exitCode=null;server.signalCode=null;
+    server.kill=()=>{server.signalCode='SIGTERM';server.emit('exit',null,'SIGTERM');return true;};
+    await expect(stopBenchmarkServer(server)).resolves.toBeUndefined();
+  });
+  it('supports an isolated rehearsal build without selecting an arbitrary path',()=>{
+    const env=benchmarkEnv({},root,path.join(root,'tmp','Example-rehearsal'),3018,'.next-any-country');
+    expect(env.MVP_NEXT_DIST_DIR).toBe('.next-any-country');
+    expect(()=>benchmarkEnv({},root,path.join(root,'tmp','Example-rehearsal'),3018,'../other')).toThrow();
+  });
   it('uses the exact three benchmark inputs',()=>{expect(QUERIES.map(q=>q.query)).toEqual(['line pipe','power and control cables','pipeline']);expect(QUERIES[2].markets).toEqual(['IN','SA','AE','NO','MY']);});
   it('excludes cloud storage, credentials and every automatic worker',()=>{const env=benchmarkEnv({DATABASE_URL:'Example',RENDER:'true',RESEND_API_KEY:'Example',GOOGLE_CLIENT_SECRET:'Example'},root,path.join(root,'tmp','Example-benchmark'));for(const key of ['DATABASE_URL','MIGRATION_DATABASE_URL','RENDER','VERCEL','RESEND_API_KEY','GOOGLE_CLIENT_SECRET'])expect(env[key]).toBe('');expect(env.DEMO_EMAIL_ENABLED).toBe('0');expect(env.MVP_DURABLE_RESEARCH).toBe('off');expect(env.MVP_FUNNEL_WORKER).toBe('off');expect(env.MVP_RESEARCH_MANUAL_DRIVER).toBe('1');});
   it('never raises existing caps or allows port 3007 / a non-tmp database',()=>{const env=benchmarkEnv({MVP_MAX_SEARCH_QUERIES:'3',MVP_MAX_AI_DOCS:'0'},root,path.join(root,'tmp','Example-benchmark'));expect(env.MVP_MAX_SEARCH_QUERIES).toBe('3');expect(env.MVP_MAX_AI_DOCS).toBe('0');expect(env.MVP_MAX_RESEARCH_AI_TOKENS).toBe('90000');expect(()=>benchmarkEnv({},root,path.join(root,'tmp','Example'),3007)).toThrow();expect(()=>benchmarkEnv({},root,root)).toThrow();});

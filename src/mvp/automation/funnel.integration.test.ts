@@ -27,7 +27,7 @@ beforeEach(async () => {
     DEMO_EMAIL_FROM: "Demo <onboarding@resend.dev>", RESEND_API_KEY: "integration-private", RESEND_RECEIVING_DOMAIN: "demo123.resend.app",
     GROQ_API_KEY: "integration-private", HUNTER_API_KEY: "integration-private", GOOGLE_CLIENT_ID: "test-client", GOOGLE_CLIENT_SECRET: "test-secret",
     SESSION_SECRET: "integration-session-secret-".repeat(3), APP_URL: "http://localhost:3007", SALES_TIMEZONE: "Asia/Kolkata",
-    SALES_START_HOUR: "10", SALES_END_HOUR: "18", MEETING_DURATION_MINUTES: "30" })) vi.stubEnv(key, value);
+    SALES_START_HOUR: "10", SALES_END_HOUR: "18", MEETING_DURATION_MINUTES: "30", DEMO_CUSTOMER_NAME:"Example Customer", SALES_PERSON_NAME:"Deeptendu Kuri" })) vi.stubEnv(key, value);
   await db.exec("delete from funnel_messages;delete from funnel_threads;delete from funnel_integrations;delete from enrichment_requests;delete from contact_verification_requests;delete from search_opportunities;delete from leads;delete from projects;delete from runs;delete from contact_points;delete from person_roles;delete from people;delete from companies;delete from evidence;delete from llm_usage;update funnel_control set enabled=false,enabled_at=null,worker_until=null,worker_lease=null,last_error=null;");
   await db.exec('delete from source_documents;');
   inbox = []; sent = []; events = []; decisions = []; receivingFails = false; groqFailure = null; fetchMock.mockReset();
@@ -115,7 +115,9 @@ describe("joined local funnel with real adapters and mocked provider HTTP", () =
     groqFailure = status;
     await processFunnelTick();
     expect(sent).toHaveLength(1); expect(sent[0].to).toEqual(['deeptendukuri@gmail.com']);
-    expect(String(sent[0].text)).toContain('Hi Unit EPC procurement team');
+    expect(String(sent[0].text)).toContain('Hi Example Customer');
+    expect(String(sent[0].text)).toContain("Demo customer: Example Customer. Seller: Deeptendu Kuri.");
+    expect(sent[0].from).toBe('Deeptendu Kuri <onboarding@resend.dev>');
     expect((await thread(o))).toMatchObject({ state: 'active', mode: 'prospect_demo', person_id: null });
     expect(isVerified((await getOpportunity(o))!)).toBe(false);
     expect((await db.query('select id from people')).rows).toHaveLength(0);
@@ -138,7 +140,7 @@ describe("joined local funnel with real adapters and mocked provider HTTP", () =
     await db.query('update evidence set document_id=$2 where id=$1',[evidenceId,doc]);await db.query('insert into run_documents(run_id,document_id) values($1,$2)',[prospect.run_id,doc]);
     await db.query("insert into research_sessions(run_id,state,budget) values($1,'partial','{}')",[prospect.run_id]);
     await processFunnelTick();
-    expect(sent).toHaveLength(1);expect(String(sent[0].text)).toContain('Hi Unit EPC procurement team');expect(String(sent[0].text)).not.toContain('Hi Deeptendu Kuri');
+    expect(sent).toHaveLength(1);expect(String(sent[0].text)).toContain('Hi Example Customer');expect(String(sent[0].text)).not.toContain('Hi Deeptendu Kuri');
     expect(isVerified((await getOpportunity(o))!)).toBe(false);expect((await thread(o)).person_id).toBeNull();
     decisions.push({intent:'question',confidence:0.96,summary:'Requested line pipe procurement support',body:'Could you share the required grade and delivery location?'});
     await incoming(o,'We need 100 metres of pipe. What details should we send?');await processFunnelTick();expect(sent).toHaveLength(2);

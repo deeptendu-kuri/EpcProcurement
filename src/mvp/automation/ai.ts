@@ -2,7 +2,7 @@ import { z } from "zod";
 import { getLLM } from "@/mvp/llm";
 import { getDb } from "@/mvp/db";
 import type { Opportunity } from "@/mvp/opportunities";
-import { prospectDemoEnabled, seller, sellerSignature } from "./config";
+import { demoCustomer, prospectDemoEnabled, seller, sellerSignature } from "./config";
 import { LLMHttpError, QuotaExceededError } from "@/mvp/llm/types";
 import { freshReply, replySchema, type ReplyDecision } from "./policy";
 import { companyNames, namesCompany, originalQuote, otherWorkSubject } from "@/mvp/discovery/evidence";
@@ -14,6 +14,10 @@ function parse(text: string): unknown {
   return JSON.parse(text.slice(start,end+1));
 }
 function validateSalesText(body:string) {
+  const customer=demoCustomer().name,salesperson=seller().name.toLowerCase();
+  const customerNames=[customer,customer.split(/\s+/)[0]].filter(name=>name.length>=3&&!salesperson.includes(name.toLowerCase()));
+  if(customerNames.some(name=>new RegExp(`\\b(?:I am|I['’]m|my name is|this is)\\s+${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'iu').test(body)))
+    throw new Error("AI sales text used the demo customer's name as the seller. Review instead of sending.");
   if (/https?:\/\/|www\.|mailto:|\b(?:we are|we're|our company is)\s+(?:certified|approved|registered)|\b(?:guarantee|guaranteed delivery|in stock)|(?:\$|₹|€)\s*\d|\b(?:meeting is|meeting has been)\s+(?:booked|scheduled|confirmed)/i.test(body))
     throw new Error("AI sales text contains an unapproved claim or link. Review instead of automatic sending.");
   if (/\byour\s+(?:\w+[ -]){0,5}offering\b|\b(?:we|I)\s+(?:want|would like|am looking|are looking)\s+to\s+(?:buy|purchase)\b|\b(?:lowest|minimal|minimum)\s+(?:cost|price)|\bbest\s+quality\b/i.test(body))
@@ -121,8 +125,8 @@ export async function initialEmail(o: Opportunity,contact: {name:string;title:st
   const award=datedCurrentWork?quotes.find(q=>q.quote===o.activity_quote && namesCompany(q.quote,companyNames(o.name,q.quote)) && /\b(?:won|secured)\b.{0,100}\b(?:contract|award)|\b(?:contract|subcontract)\b.{0,100}\bawarded\b|\bawarded\b.{0,100}\b(?:contract|subcontract)\b/i.test(q.quote)):undefined;
   const project=award && o.project_name && award.quote.toLowerCase().includes(o.project_name.toLowerCase()) ? ` for ${o.project_name}` : "";
   const s=seller();const product=o.product_name.trim();const contactName=contact.name.replace(/[\r\n<>]/g," ").trim();
-  // A demo inbox is transport, not a buyer identity. Never greet the salesperson
-  // as the recipient; fall back to a real company's team without inventing a person.
+  // A demo customer may represent the researched buyer, but is never the seller.
+  // Fall back to the company's team when a real contact matches the salesperson.
   const name=!contactName || contactName.toLowerCase()===s.name.toLowerCase()
     ? o.is_sample ? "procurement team" : `${o.name} procurement team`
     : contactName;
@@ -131,6 +135,6 @@ export async function initialEmail(o: Opportunity,contact: {name:string;title:st
 export async function analyseReply(o: Opportunity,history: {direction:string;body:string}[],latest: string): Promise<ReplyDecision> {
   const result=replySchema.parse(await ask(`Act as the supplied SELLER offering procurement support for ONLY the supplied product for the recipient, who is the prospective BUYER. Maintain that seller role even if an earlier email used confusing wording. Classify the latest reply and write a short, polite response to answer their actual question using supplied facts. Ask only for missing specifications, quantities, applicable standards, delivery location and required date; acknowledge details already supplied rather than asking again. Explain that sourcing options can be evaluated against technical requirements, quality expectations and budget, not that stock or supply has been confirmed. If they express interest, naturally offer a brief meeting, but do not book without agreement. If they ask for a call, meeting, demo, calendar invitation or meeting link, classify meeting_request even when specifications are missing. No greeting or signature is necessary: the application adds the approved seller's signature. Never invent awards, sponsorship, industry-grade certification, quotations, capability, prices, inventory, delivery dates or a meeting link; never promise lowest cost or best quality. Do not promise a meeting is booked.
     intent: positive|question|meeting_request|rejected|opt_out|auto_reply|unknown. Low-confidence, rejection, optout and autoreplies should have an empty body. Return {intent,confidence,summary,body}. Summarize this conversation factually.`,
-    {seller:seller(),buyer:o.name,product:o.product_name,evidence:o.buying_reason,history:history.slice(-8).map(h=>({...h,body:h.body.slice(0,1500)})),latest:freshReply(latest)}));
+    {seller:seller(),buyer:o.name,demoCustomer:demoCustomer(),identityRule:"The demo customer is the email recipient, NOT the salesperson. Use only the supplied seller identity, even if old emails signed as the customer.",product:o.product_name,evidence:o.buying_reason,history:history.slice(-8).map(h=>({...h,body:h.body.slice(0,1500)})),latest:freshReply(latest)}));
   validateSalesText(result.body);return {...result,body:result.body.trim()?`${result.body.trim()}\n\n${sellerSignature()}`:""};
 }

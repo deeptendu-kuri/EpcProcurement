@@ -12,12 +12,13 @@ export const QUERIES=[
   {label:'B',query:'power and control cables',productId:'cables',markets:['AE']},
   {label:'C',query:'pipeline',productId:'line-pipe',markets:['IN','SA','AE','NO','MY']},
 ];
-export function benchmarkEnv(input,root,directory,port=3018){
+export function benchmarkEnv(input,root,directory,port=3018,distDir='.next-hybrid'){
   if(!Number.isInteger(port)||port<1024||port>65535||port===3007)throw new Error('Choose an isolated port, never 3007.');
+  if(!/^\.next-[a-z0-9-]+$/.test(distDir))throw new Error('Choose a repository-local named Next build directory.');
   const allowed=path.resolve(root,'tmp')+path.sep,dir=path.resolve(directory);
   if(!dir.startsWith(allowed))throw new Error('Benchmark directory must be inside this repository tmp/.');
   const env={...input,NODE_ENV:'production',DATABASE_URL:'',MIGRATION_DATABASE_URL:'',RENDER:'',VERCEL:'',
-    APP_URL:`http://127.0.0.1:${port}`,MVP_DATA_DIR:path.join(dir,'pglite'),MVP_NEXT_DIST_DIR:'.next-hybrid',
+    APP_URL:`http://127.0.0.1:${port}`,MVP_DATA_DIR:path.join(dir,'pglite'),MVP_NEXT_DIST_DIR:distDir,
     MVP_OFFLINE:'0',MVP_SCHEDULER:'off',MVP_DURABLE_RESEARCH:'off',MVP_FUNNEL_WORKER:'off',MVP_OUTREACH_WORKER:'off',
     MVP_RESEARCH_TRANSPORT:'off',MVP_PROSPECT_DEMO_OUTREACH:'off',MVP_LOCAL_AUTO_ENABLE:'off',DEMO_EMAIL_ENABLED:'0',
     MVP_RESEARCH_MANUAL_DRIVER:'1',NEXT_TELEMETRY_DISABLED:'1',
@@ -60,15 +61,21 @@ export function releaseGate(runs){
   return {passed:Object.values(checks).every(Boolean),checks,savedBuyers:rows.length,datedTriggers:dated,datedShare:rows.length?dated/rows.length:0,hits,junk:junk.map(r=>r.name)};
 }
 async function ensurePortFree(port){await new Promise((resolve,reject)=>{const probe=net.createServer();probe.once('error',()=>reject(new Error('Benchmark port occupied; no existing process was stopped.')));probe.listen(port,'127.0.0.1',()=>probe.close(resolve));});}
-async function stop(server){if(!server||server.exitCode!==null)return;await new Promise(resolve=>{server.once('exit',resolve);server.kill();setTimeout(resolve,5000).unref();});if(server.exitCode===null)throw new Error('Owned benchmark server did not stop; database inspection refused.');}
-export async function runBenchmark(){
+export async function stopBenchmarkServer(server){
+  const exited=()=>server.exitCode!==null||server.signalCode!==null;
+  if(!server||exited())return;
+  await new Promise(resolve=>{server.once('exit',resolve);server.kill();setTimeout(resolve,5000).unref();});
+  if(!exited())throw new Error('Owned benchmark server did not stop; database inspection refused.');
+}
+export async function runBenchmark({queries=QUERIES,distDir='.next-hybrid'}={}){
+  if(!Array.isArray(queries)||!queries.length)throw new Error('At least one explicit search is required.');
   const root=fileURLToPath(new URL('..',import.meta.url)),require=createRequire(import.meta.url);process.chdir(root);
   if(existsSync('.env.funnel.local'))process.loadEnvFile('.env.funnel.local');
   createRequire(require.resolve('next/package.json'))('@next/env').loadEnvConfig(root,false,{info(){},error(){}});
   const directory=path.join(root,'tmp',`benchmark-${new Date().toISOString().slice(0,10)}-${Date.now()}`);
-  const port=Number(process.env.BENCHMARK_PORT||3018),env=benchmarkEnv(process.env,root,directory,port);
+  const port=Number(process.env.BENCHMARK_PORT||3018),env=benchmarkEnv(process.env,root,directory,port,distDir);
   if(!env.GROQ_API_KEY||!env.TAVILY_API_KEY)throw new Error('Live benchmark requires existing Groq and Tavily keys.');
-  if(!existsSync(path.join(root,'.next-hybrid','BUILD_ID')))throw new Error('Run the four safe gates before benchmarking.');
+  if(!existsSync(path.join(root,distDir,'BUILD_ID')))throw new Error('Run the four safe gates before benchmarking.');
   await ensurePortFree(port);mkdirSync(directory,{recursive:true});
   const results=[],base=env.APP_URL;let server,cookie='';
   const logFile=path.join(directory,'server.log');
@@ -87,7 +94,7 @@ export async function runBenchmark(){
   const api=async(url,options={},timeout=30000)=>{const response=await fetch(base+url,{...options,headers:{cookie,'content-type':'application/json',...options.headers},signal:AbortSignal.timeout(Math.max(1,timeout))});const json=await response.json();if(!response.ok)throw new Error(`App HTTP ${response.status}: ${json.error??'Request failed'}`);return json;};
   try{
     await start();const initial=await api('/api/mvp/runs');if(initial.runs.length)throw new Error('Refusing to benchmark a populated database.');
-    for(const query of QUERIES){
+    for(const query of queries){
       if(!server||server.exitCode!==null)await start();
       const result={...query,status:'not_run',rows:[],evidence:[]},began=Date.now(),deadline=began+600000;results.push(result);
       console.log(`Benchmark ${query.label}: ${query.query}; email and timers OFF.`);
@@ -105,11 +112,11 @@ export async function runBenchmark(){
           result.rows.push(...data.rows);if(result.rows.length>=data.total)break;
         }
         for(const row of result.rows){result.evidence.push(await api(`/api/mvp/evidence/${row.opportunityId}`));}
-      }catch(error){result.error=redact(error.message);await stop(server);server=null;}
+      }catch(error){result.error=redact(error.message);await stopBenchmarkServer(server);server=null;}
       result.elapsedMs=Date.now()-began;writeFileSync(path.join(directory,'results.partial.json'),JSON.stringify(results,null,2));
     }
   }finally{
-    await stop(server);
+    await stopBenchmarkServer(server);
     // Read only the isolated database, after its owner has released the files.
     const {PGlite}=await import('@electric-sql/pglite');
     if(existsSync(env.MVP_DATA_DIR)){
@@ -122,6 +129,10 @@ export async function runBenchmark(){
         result.budget=(await db.query('select budget from research_sessions where run_id=$1',[result.runId])).rows[0]?.budget;
       }}finally{await db.close();}
     }
+    writeBenchmarkReport(directory,results);
+  }
+}
+export function writeBenchmarkReport(directory,results){
     const gate=releaseGate(results);
     writeFileSync(path.join(directory,'results.json'),JSON.stringify({runs:results,gate},null,2));
     const lines=['# Hybrid sourcing live benchmark',`Date: ${new Date().toISOString()}`,'',
@@ -139,6 +150,5 @@ export async function runBenchmark(){
       '','## Actual saved buyers',...results.flatMap(r=>r.rows.map(x=>`- ${r.label}: ${x.name} · ${x.trigger?.kind??'no trigger'} · ${x.trigger?.date??'undated'} · ${x.operatingCountry??'country unknown'}`)),
       '','## Effective budgets',...results.map(r=>`- ${r.label}: ${JSON.stringify(r.budget??'not available')}`),''];
     writeFileSync(path.join(directory,'report.md'),lines.join('\n'));console.log(JSON.stringify({report:path.join(directory,'report.md'),gate}));
-  }
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))runBenchmark().catch(e=>{console.error(e.message);process.exitCode=1;});

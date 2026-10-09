@@ -164,15 +164,15 @@ function firstTerm(text: string, terms: readonly string[]): string | null {
  * Markets whose names appear in the text: the default markets by their aliases, plus any searched
  * country (`watched`) by its full name, so a Kenya search recognises "Kenya" in an article.
  */
-export function detectMarkets(text: string, watched: readonly string[] = []): MarketCode[] {
-  const known = (Object.keys(MARKET_TERMS) as MarketCode[]).filter((code) => MARKET_TERMS[code].some((term) => hasTerm(text, term)));
+export function detectMarkets(text: string, watched: readonly string[] = []): string[] {
+  const known: string[] = (Object.keys(MARKET_TERMS) as MarketCode[]).filter((code) => MARKET_TERMS[code].some((term) => hasTerm(text, term)));
   const named = watched
     .map((code) => code.toUpperCase())
     .filter((code) => {
       const name = COUNTRIES.find((c) => c.code === code)?.name;
-      return !known.includes(code as MarketCode) && Boolean(name) && hasTerm(text, name!);
+      return !known.includes(code) && name !== undefined && hasTerm(text, name);
     });
-  return [...known, ...(named as MarketCode[])];
+  return [...new Set([...known, ...named])];
 }
 
 /** Any country named in a location value ("Mombasa, Kenya" → KE), default-market aliases first. */
@@ -217,7 +217,7 @@ export function filterDocument(input: FilterInput): FilterResult {
   const mentioned = detectMarkets(text, watched);
   let markets = mentioned.filter((m) => watched.includes(m));
   if (!markets.length && input.sourceMarket && watched.includes(input.sourceMarket.toUpperCase())) {
-    markets = [input.sourceMarket.toUpperCase() as MarketCode];
+    markets = [input.sourceMarket.toUpperCase()];
   }
 
   let fresh: boolean | null = null;
