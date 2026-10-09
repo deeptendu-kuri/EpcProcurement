@@ -107,6 +107,10 @@ export interface BuyerRow { /* list row: subset of BuyerView */
   emailStatus?: string | null;
   /** Doc 17: the saved opportunity for the selected or latest search. */
   opportunityId?: string | null;
+  /** Doc 18: other catalogue products this company is a good fit for (besides the searched one). */
+  alsoSell?: string[];
+  /** Doc 18: 'explicit' when its own pages name the material; 'potential' when its work uses it. */
+  searchFit?: 'explicit' | 'potential' | null;
 }
 export const DERIVED_PREFIX = 'derived:';
 export function isDerivedLeadId(id: string): boolean { return id.startsWith(DERIVED_PREFIX); }

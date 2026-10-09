@@ -12,12 +12,14 @@ import { catalogueOptions } from "@/components/mvp/search/page-data";
 import { materialCatalogue } from "@/mvp/discovery/material-catalogue";
 import {funnelStatus} from '@/mvp/automation/config';
 import {AutomationReadiness} from '@/components/mvp/outreach/automation-readiness';
+import { SearchLiveWorkspace } from "@/components/mvp/research/search-live-workspace";
+import { searchWorkspace } from "@/mvp/research/workspace";
 
 interface FindPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-/** Find (docs/mvp/09 §4.1, 13 §7): Search now with live progress, saved searches and recent searches. */
+/** Find (docs/mvp/18 §4): the search form, or with ?run=… that search's live workspace. */
 export default async function FindPage({ searchParams }: FindPageProps) {
   const params = await searchParams;
   const profile = getClientProfile();
@@ -36,12 +38,16 @@ export default async function FindPage({ searchParams }: FindPageProps) {
     );
   }
 
+  if (runParam) {
+    const workspace = await searchWorkspace(runParam);
+    if (workspace) return <SearchLiveWorkspace key={runParam} runId={runParam} initial={workspace} />;
+  }
   const [saved, selectedRun,automation] = await Promise.all([listSavedSearches(), runParam ? getRun(runParam) : Promise.resolve(null),funnelStatus()]);
   const suggestions = catalogueOptions().slice(0, 8).map(product => product.name);
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title={runParam?"Research progress":"Find buyers"} subtitle={runParam?"How this search is going, and what it has found so far.":"Type what you supply, the way you would in Google. Pick the countries; we find the companies that buy it."} />
+      <PageHeader title="Find buyers" subtitle="Type what you supply, the way you would in Google. Pick the countries; we find the companies that buy it." />
       <AutomationReadiness status={automation}/>
       <FindForm
         products={catalogueOptions()}

@@ -1,92 +1,141 @@
 import Link from "next/link";
 import type { ComponentType } from "react";
-import { Activity, ArrowRight, Building2, CalendarCheck, ClipboardCheck, Layers, Mail, MessagesSquare, Search, UserPlus, CalendarClock } from "lucide-react";
-import { PageHeader } from "@/components/mvp/page-header";
+import { ArrowRight, Building2, CalendarCheck, ChevronRight, ClipboardCheck, Layers, Loader2, Mail, MessagesSquare, Search, UserPlus, Video } from "lucide-react";
 import { GuideButton } from "@/components/mvp/tour/guide-button";
-import { dashboardData } from "@/mvp/dashboard";
+import { dashboardData, type DashboardSearch } from "@/mvp/dashboard";
 import { marketName } from "@/mvp/config/markets";
 import { getCatalogueItem } from "@/mvp/config/buyers-config";
 import { formatDateTime } from "@/components/mvp/labels";
 import { runStatusText } from "@/components/mvp/run-steps";
+import { compactTokens } from "@/mvp/research/usage";
 
 export const dynamic = "force-dynamic";
-const journey = [{icon:Search,label:"Search a material"},{icon:Layers,label:"Review buyers and proof"},{icon:Mail,label:"Automatic email and replies"},{icon:CalendarCheck,label:"Meeting booked"}];
+type Icon = ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
+const journey: { icon: Icon; label: string }[] = [{ icon: Search, label: "Search a material" }, { icon: Layers, label: "Review buyers and proof" }, { icon: Mail, label: "Automatic email and replies" }, { icon: CalendarCheck, label: "Meeting booked" }];
 
-function ActionCard({icon:Icon,count,title,text,href,cta}:{icon:ComponentType<{size?:number;className?:string;"aria-hidden"?:boolean}>;count:number;title:string;text:string;href:string;cta:string}) {
-  const quiet = count === 0;
-  return <Link href={href} className={`card group flex flex-col gap-3 p-5 transition hover:border-[var(--accent)] ${quiet ? "opacity-80" : ""}`}>
-    <div className="flex items-center justify-between gap-3"><span className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ${quiet ? "bg-[var(--subtle)] text-[var(--muted)]" : "bg-[var(--accent-soft)] text-[var(--accent)]"}`}><Icon size={20} aria-hidden /></span><span className="text-3xl font-bold tabular-nums">{count}</span></div>
-    <div><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm leading-relaxed text-[var(--muted)]">{text}</p></div>
-    <span className="mt-auto inline-flex items-center gap-1 text-sm font-semibold text-[var(--accent-2)] group-hover:underline">{cta}<ArrowRight size={14} aria-hidden /></span>
-  </Link>;
+/** One row of the Today list: an icon, a plain sentence and where to go. */
+function TodayRow({ icon: Icon, tone, text, detail, href, cta }: { icon: Icon; tone: string; text: string; detail?: string; href: string; cta: string }) {
+  return (
+    <li>
+      <Link href={href} className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-[var(--hover)]">
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${tone}`}><Icon size={18} aria-hidden /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-medium text-[var(--text)]">{text}</span>
+          {detail ? <span className="block truncate text-[13px] text-[var(--muted)]">{detail}</span> : null}
+        </span>
+        <span className="flex items-center gap-1 text-[14px] font-medium text-[var(--accent)]">{cta}<ChevronRight size={16} className="transition-transform group-hover:translate-x-0.5" aria-hidden /></span>
+      </Link>
+    </li>
+  );
 }
 
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+function SearchRow({ s }: { s: DashboardSearch }) {
+  const r = s.run;
+  const query = r.adhoc_query?.query || "Product search";
+  const product = r.adhoc_query?.productId ? getCatalogueItem(r.adhoc_query.productId)?.shortName : null;
+  const markets = r.adhoc_query?.markets ?? [];
+  const running = r.status === "running" || r.status === "queued";
+  const status = runStatusText(r.status, r.counters);
+  const facts = [
+    plural(r.result_count, "buyer"),
+    s.found !== null ? `${s.found} companies found` : null,
+    s.conversations ? plural(s.conversations, "conversation") : null,
+    s.meetings ? plural(s.meetings, "meeting") : null,
+  ].filter(Boolean).join(" · ");
+  const cost = [s.minutes !== null ? `${s.minutes} min` : null, s.tokens ? `${compactTokens(s.tokens)} AI tokens` : null].filter(Boolean).join(" · ");
+  return (
+    <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={`/find?run=${r.id}`} className="text-[16px] font-semibold tracking-[-0.01em] text-[var(--text)] hover:text-[var(--accent)]">{query}</Link>
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium ${running ? "bg-[var(--info-bg)] text-[var(--info)]" : /partial/.test(status) ? "bg-[var(--warn-bg)] text-[var(--warn)]" : "bg-[var(--good-bg)] text-[var(--good)]"}`}>
+            {running ? <Loader2 size={12} className="animate-spin" aria-hidden /> : null}{running ? "Running" : /partial/.test(status) ? "Finished · partial" : status}
+          </span>
+        </div>
+        <p className="mt-0.5 text-[13px] text-[var(--muted)]">
+          {product && product.toLowerCase() !== query.toLowerCase() ? `${product} · ` : ""}{markets.slice(0, 3).map(marketName).join(", ")}{markets.length > 3 ? ` +${markets.length - 3}` : ""} · {formatDateTime(r.created_at)}
+        </p>
+        <p className="mt-1.5 text-[14px] text-[var(--text-2)]">{facts}{s.toCheck ? <span className="text-[var(--muted)]"> · {s.toCheck} to check</span> : null}</p>
+        {cost ? <p className="mt-0.5 text-[12px] text-[var(--muted)]">{cost}</p> : null}
+      </div>
+      <div className="flex shrink-0 gap-2">
+        <Link href={`/find?run=${r.id}`} className="btn btn-secondary">Open</Link>
+        <Link href={`/crm?run=${r.id}`} className="btn btn-primary">Leads<ArrowRight size={15} aria-hidden /></Link>
+      </div>
+    </li>
+  );
+}
+
+/** Dashboard (docs/mvp/18 §3): today's actions, the pipeline, every search and upcoming meetings. */
 export default async function DashboardPage() {
   const data = await dashboardData();
   const { actions, searches, pipeline } = data;
   const next = actions.nextMeeting;
   const latestLeads = data.latestSearchId ? `/crm?run=${data.latestSearchId}` : "/crm";
-  return <div className="flex flex-col gap-6">
-    <PageHeader title="Dashboard" subtitle={searches.length ? "Your action plan, every search and its progress, in one place." : "Find companies that buy the materials you supply."}
-      actions={searches.length ? <Link href="/find" className="btn btn-primary"><Search size={16} aria-hidden />Find buyers</Link> : undefined} />
-    {!searches.length ? <section className="card overflow-hidden" aria-label="Getting started" data-tour="overview-searches">
-      <div className="max-w-3xl p-6 sm:p-10">
-        <span className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]"><Search size={24} aria-hidden /></span>
-        <h2 className="text-2xl font-bold tracking-tight">Start with what you sell.</h2>
-        <p className="mt-3 max-w-xl text-base leading-relaxed text-[var(--muted)]">Type a material the way you would in Google and choose the countries. We find the contractors, subcontractors and fabrication shops that buy it, with the source that shows why.</p>
-        <div className="mt-6 flex flex-wrap gap-3"><Link href="/find" className="btn btn-primary">Find buyers<ArrowRight size={16} aria-hidden /></Link><GuideButton /></div>
+  const today = [
+    actions.running.length ? <TodayRow key="run" icon={Loader2} tone="bg-[var(--info-bg)] text-[var(--info)]" text={`${plural(actions.running.length, "search", "searches")} running now`} detail={actions.running.map((r) => r.label).join(", ")} href={`/find?run=${actions.running[0].id}`} cta="Watch" /> : null,
+    actions.review ? <TodayRow key="review" icon={ClipboardCheck} tone="bg-[var(--warn-bg)] text-[var(--warn)]" text={`${plural(actions.review, "email")} waiting for your review`} detail="The AI check held these before sending. Approve or stop them." href="/outreach" cta="Review" /> : null,
+    next?.start ? <TodayRow key="meet" icon={Video} tone="bg-[var(--good-bg)] text-[var(--good)]" text={`Next meeting: ${next.company}`} detail={`${next.product} · ${formatDateTime(next.start)}`} href={next.meetUrl ?? "/outreach"} cta={next.meetUrl ? "Join" : "Open"} /> : null,
+    actions.inProgress ? <TodayRow key="conv" icon={MessagesSquare} tone="bg-[var(--accent-soft)] text-[var(--accent)]" text={`${plural(actions.inProgress, "conversation")} running on their own`} detail="Intro emails sent; replies are handled automatically." href="/outreach" cta="Follow" /> : null,
+    actions.newBuyers ? <TodayRow key="new" icon={UserPlus} tone="bg-[var(--accent-soft)] text-[var(--accent)]" text={`${plural(actions.newBuyers, "new buyer")} this week`} detail="Saved with proof in the last 7 days." href={latestLeads} cta="Review" /> : null,
+    actions.toCheck ? <TodayRow key="check" icon={Building2} tone="bg-[var(--subtle)] text-[var(--text-2)]" text={`${plural(actions.toCheck, "company", "companies")} named but not checked yet`} detail="Found in lists and news; their own websites are not read yet." href={`${latestLeads}#found-companies`} cta="Check" /> : null,
+  ].filter(Boolean);
+  const steps: [string, number][] = [["Companies found", pipeline.found], ["Buyers saved", pipeline.buyers], ["Emailed", pipeline.emailed], ["Replied", pipeline.replied], ["Meetings", pipeline.meetings]];
+
+  return <div className="flex flex-col gap-8">
+    <header className="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 className="page-title">Dashboard</h1>
+        <p className="page-subtitle">{searches.length ? "What needs you today, and how every search is going." : "Find companies that buy the materials you supply."}</p>
       </div>
-      <ol className="grid gap-4 border-t border-[var(--line)] bg-[var(--subtle)] p-6 text-sm sm:grid-cols-4 sm:px-10">{journey.map(({icon:Icon,label},index) => <li key={label} className="flex items-center gap-2"><Icon size={16} className="shrink-0 text-[var(--accent)]" aria-hidden /><span><span className="text-[var(--muted)]">{index+1}. </span>{label}</span></li>)}</ol>
+      {searches.length ? <Link href="/find" className="btn btn-primary h-10 px-5 text-[14px]"><Search size={16} aria-hidden />Find buyers</Link> : null}
+    </header>
+
+    {!searches.length ? <section className="card overflow-hidden" aria-label="Getting started" data-tour="overview-searches">
+      <div className="max-w-3xl p-8 sm:p-12">
+        <span className="mb-6 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]"><Search size={24} aria-hidden /></span>
+        <h2 className="text-[28px] font-bold tracking-[-0.022em]">Start with what you sell.</h2>
+        <p className="mt-3 max-w-xl text-[17px] leading-relaxed text-[var(--muted)]">Type a material the way you would in Google and choose the countries. We find the contractors, subcontractors and fabrication shops that buy it, with the source that shows why.</p>
+        <div className="mt-8 flex flex-wrap gap-3"><Link href="/find" className="btn btn-primary h-10 px-5">Find buyers<ArrowRight size={16} aria-hidden /></Link><GuideButton /></div>
+      </div>
+      <ol className="grid gap-4 border-t border-[var(--line)] bg-[var(--hover)] px-8 py-6 text-[14px] sm:grid-cols-4 sm:px-12">{journey.map(({ icon: Icon, label }, index) => <li key={label} className="flex items-center gap-2"><Icon size={16} className="shrink-0 text-[var(--accent)]" aria-hidden /><span><span className="text-[var(--muted)]">{index + 1}. </span>{label}</span></li>)}</ol>
     </section> : <>
-      <section aria-labelledby="action-plan" className="flex flex-col gap-3">
-        <h2 id="action-plan" className="text-lg font-bold">Action plan</h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <ActionCard icon={ClipboardCheck} count={actions.review} title="Emails to review" text={actions.review ? "The AI check held these before sending. Approve or stop them." : "Nothing is waiting for your approval."} href="/outreach" cta="Open Email & meetings" />
-          <ActionCard icon={CalendarCheck} count={actions.meetings.length} title="Meetings booked" text={next?.start ? `Next: ${next.company}, ${formatDateTime(next.start)}.` : actions.meetings.length ? "All booked meetings are in the past." : "No meeting booked yet."} href="/outreach" cta="See meetings" />
-          <ActionCard icon={MessagesSquare} count={actions.inProgress} title="Conversations in progress" text="Intro emails sent and replies being handled automatically." href="/outreach" cta="Follow conversations" />
-          <ActionCard icon={UserPlus} count={actions.newBuyers} title="New buyers this week" text="Companies saved with proof in the last 7 days." href={latestLeads} cta="Review leads" />
-          <ActionCard icon={Building2} count={actions.toCheck} title="Companies to check" text="Named by your searches; their own websites are not checked yet." href={`${latestLeads}#found-companies`} cta="Check companies" />
-          <ActionCard icon={Activity} count={actions.running.length} title="Searches running" text={actions.running.length ? `Now: ${actions.running.map((r) => r.label).join(", ")}.` : "No search is running."} href={actions.running[0] ? `/find?run=${actions.running[0].id}` : "/find"} cta={actions.running.length ? "See progress" : "Start a search"} />
+      <section aria-labelledby="today" className="flex flex-col gap-3">
+        <h2 id="today" className="text-[20px] font-semibold tracking-[-0.015em]">Today</h2>
+        <div className="card overflow-hidden">
+          {today.length ? <ul className="divide-y divide-[var(--line)]">{today}</ul>
+            : <p className="px-5 py-6 text-[15px] text-[var(--muted)]">You are all caught up. New buyers, replies and meetings will show here.</p>}
         </div>
       </section>
 
-      <section className="card overflow-hidden" aria-label="Your searches" data-tour="overview-searches">
-        <div className="card-header"><div><h2 className="card-title">Your searches</h2><p className="mt-1 text-sm text-[var(--muted)]">Open any search to see its progress, or go straight to its leads.</p></div><span className="pill">{searches.length} {searches.length === 1 ? "search" : "searches"}</span></div>
-        <div className="overflow-x-auto"><table className="w-full min-w-[860px] text-left text-sm">
-          <thead className="bg-[var(--subtle)] text-xs text-[var(--text-2)]"><tr>{["Search","Status","Buyers saved","Companies found","Email","" ].map((h, i) => <th key={i} className="p-3 font-semibold">{h}</th>)}</tr></thead>
-          <tbody>{searches.map(({ run: r, found, toCheck, conversations, meetings }) => {
-            const product = r.adhoc_query?.productId ? getCatalogueItem(r.adhoc_query.productId)?.shortName : null;
-            const partial = r.counters.researchState === "partial";
-            const running = r.status === "running" || r.status === "queued";
-            return <tr key={r.id} className="border-t border-[var(--line)] align-top">
-              <td className="p-3"><Link href={`/crm?run=${r.id}`} className="font-semibold hover:text-[var(--accent)] hover:underline">{r.adhoc_query?.query || "Product search"}</Link>
-                <p className="mt-0.5 text-xs text-[var(--muted)]">{product && product.toLowerCase() !== (r.adhoc_query?.query ?? "").toLowerCase() ? `${product} · ` : ""}{r.adhoc_query?.markets.map(marketName).join(", ")}</p>
-                <p className="mt-0.5 text-xs text-[var(--muted)]">{formatDateTime(r.created_at)}</p></td>
-              <td className="p-3"><span className={`pill ${running ? "bg-blue-50 text-blue-800" : partial ? "bg-amber-50 text-amber-800" : ""}`}>{runStatusText(r.status, r.counters)}</span></td>
-              <td className="p-3"><span className="text-lg font-bold tabular-nums">{r.result_count}</span></td>
-              <td className="p-3">{found === null ? <span className="text-[var(--muted)]">—</span> : <><span className="text-lg font-bold tabular-nums">{found}</span>{toCheck ? <p className="text-xs text-[var(--muted)]">{toCheck} to check</p> : null}</>}</td>
-              <td className="p-3 text-sm">{conversations ? `${conversations} conversation${conversations === 1 ? "" : "s"}` : <span className="text-[var(--muted)]">Not started</span>}{meetings ? <p className="text-xs text-green-800">{meetings} meeting{meetings === 1 ? "" : "s"} booked</p> : null}</td>
-              <td className="p-3"><div className="flex flex-wrap justify-end gap-2"><Link href={`/find?run=${r.id}`} className="btn btn-secondary btn-sm"><CalendarClock size={14} aria-hidden />Progress</Link><Link href={`/crm?run=${r.id}`} className="btn btn-primary btn-sm">Leads<ArrowRight size={14} aria-hidden /></Link></div></td>
-            </tr>;
-          })}</tbody>
-        </table></div>
+      <section aria-labelledby="pipeline" className="flex flex-col gap-3">
+        <h2 id="pipeline" className="text-[20px] font-semibold tracking-[-0.015em]">Pipeline</h2>
+        <div className="card">
+          <ol className="grid grid-cols-2 divide-[var(--line)] sm:grid-cols-5 sm:divide-x">{steps.map(([label, value]) =>
+            <li key={label} className="px-5 py-5"><p className="text-[13px] text-[var(--muted)]">{label}</p><p className="mt-1 text-[30px] font-semibold leading-none tracking-[-0.02em] tabular-nums">{value}</p></li>)}</ol>
+          <p className="border-t border-[var(--line)] px-5 py-3 text-[12px] text-[var(--muted)]">Companies found counts your {Math.min(searches.length, 8)} most recent searches. A saved buyer is a likely buyer with proof, not a confirmed order. Demo emails go only to the approved inbox.</p>
+        </div>
       </section>
 
-      <section className="card p-5" aria-labelledby="pipeline">
-        <h2 id="pipeline" className="card-title">Pipeline</h2>
-        <ol className="mt-4 grid gap-3 sm:grid-cols-5">{[["Companies found",pipeline.found],["Buyers saved",pipeline.buyers],["Intro emails sent",pipeline.emailed],["Replied",pipeline.replied],["Meetings",pipeline.meetings]].map(([label,value],index) =>
-          <li key={label as string} className="rounded-lg bg-[var(--subtle)] p-4"><p className="text-xs text-[var(--muted)]">{index + 1}. {label}</p><p className="mt-1 text-2xl font-bold tabular-nums">{value}</p></li>)}</ol>
-        <p className="mt-3 text-xs text-[var(--muted)]">Companies found counts your {Math.min(searches.length, 8)} most recent searches. A saved buyer is a potential buyer with proof, not a confirmed order. Demo emails go only to the approved inbox.</p>
+      <section aria-labelledby="searches" className="flex flex-col gap-3" data-tour="overview-searches">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="searches" className="text-[20px] font-semibold tracking-[-0.015em]">Your searches</h2>
+          <span className="text-[13px] text-[var(--muted)]">{plural(searches.length, "search", "searches")}</span>
+        </div>
+        <ul className="card divide-y divide-[var(--line)] overflow-hidden">{searches.map((s) => <SearchRow key={s.run.id} s={s} />)}</ul>
       </section>
 
-      {actions.meetings.length ? <section className="card p-5" aria-labelledby="meetings">
-        <h2 id="meetings" className="card-title">Meetings</h2>
-        <ul className="mt-3 divide-y divide-[var(--line)] text-sm">{actions.meetings.map((m, i) => <li key={i} className="flex flex-wrap items-center justify-between gap-3 py-3">
-          <div><p className="font-semibold">{m.company}</p><p className="text-xs text-[var(--muted)]">{m.product}{m.start ? ` · ${formatDateTime(m.start)}` : ""}</p></div>
-          <div className="flex gap-2">{m.meetUrl ? <a href={m.meetUrl} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">Join Google Meet</a> : null}{m.opportunityId ? <Link href={`/opportunities/${m.opportunityId}?tab=conversation`} className="btn btn-secondary btn-sm">Conversation</Link> : null}</div>
+      {actions.meetings.length ? <section aria-labelledby="meetings" className="flex flex-col gap-3">
+        <h2 id="meetings" className="text-[20px] font-semibold tracking-[-0.015em]">Meetings</h2>
+        <ul className="card divide-y divide-[var(--line)] overflow-hidden">{actions.meetings.map((m, i) => <li key={i} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+          <div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--good-bg)] text-[var(--good)]"><CalendarCheck size={17} aria-hidden /></span>
+            <div><p className="text-[15px] font-medium">{m.company}</p><p className="text-[13px] text-[var(--muted)]">{m.product}{m.start ? ` · ${formatDateTime(m.start)}` : ""}</p></div></div>
+          <div className="flex gap-2">{m.meetUrl ? <a href={m.meetUrl} target="_blank" rel="noreferrer" className="btn btn-secondary">Join Google Meet</a> : null}{m.opportunityId ? <Link href={`/opportunities/${m.opportunityId}?tab=conversation`} className="btn btn-secondary">Conversation</Link> : null}</div>
         </li>)}</ul>
       </section> : null}
     </>}
-    {data.earlierSearches.length ? <details className="text-sm text-[var(--muted)]"><summary className="cursor-pointer">Earlier searches without a product</summary><ul className="mt-3 space-y-2">{data.earlierSearches.map(r => <li key={r.id}><Link className="underline" href={`/find?run=${r.id}`}>{r.adhoc_query?.query || "Earlier search"} · {formatDateTime(r.created_at)}</Link></li>)}</ul></details> : null}
+    {data.earlierSearches.length ? <details className="text-[13px] text-[var(--muted)]"><summary className="cursor-pointer">Earlier searches without a product</summary><ul className="mt-3 space-y-2">{data.earlierSearches.map(r => <li key={r.id}><Link className="underline" href={`/find?run=${r.id}`}>{r.adhoc_query?.query || "Earlier search"} · {formatDateTime(r.created_at)}</Link></li>)}</ul></details> : null}
   </div>;
 }

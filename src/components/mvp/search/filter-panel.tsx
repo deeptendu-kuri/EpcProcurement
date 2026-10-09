@@ -64,6 +64,14 @@ function countOf(facets: { value: string; count: number }[] | undefined, value: 
   return facets?.find((facet) => facet.value === value)?.count;
 }
 
+/**
+ * Once results are counted, offer only the options some company in the current scope has (plus anything
+ * already chosen), so every choice narrows the list instead of emptying it.
+ */
+export function available<T extends { value: string; count?: number }>(options: T[], selected: readonly string[], counted: boolean): T[] {
+  return counted ? options.filter((option) => (option.count ?? 0) > 0 || selected.includes(option.value)) : options;
+}
+
 function Group({
   icon,
   title,
@@ -198,9 +206,11 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
   const countryOptions: ChipOption[] = (facets?.countries??[]).map(f=>({value:f.value,label:markets.find(m=>m.code===f.value)?.name??f.label,count:f.count}));
   const roleOptions: ChipOption[] = ROLES.map((role) => ({ value: role, label: BUYER_ROLE_LABELS[role], count: countOf(facets?.roles, role) }));
 
+  const counted = facets !== null;
   const categories = [...new Set(catalogue.map((item) => item.category))];
+  const categoryCount = (category: string) => catalogue.filter((item) => item.category === category).reduce((n, item) => n + (countOf(facets?.items, item.id) ?? 0), 0);
   const sellOptions: ChipOption[] = [
-    ...categories.map((category) => ({ value: `${CATEGORY_PREFIX}${category}`, label: category })),
+    ...categories.map((category) => ({ value: `${CATEGORY_PREFIX}${category}`, label: category, count: counted ? categoryCount(category) || undefined : undefined })),
     ...catalogue.map((item) => ({ value: item.id, label: item.name, count: countOf(facets?.items, item.id) })),
   ];
   // Items the server knows but the local catalogue does not (e.g. edited catalogue).
@@ -217,7 +227,10 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--line)] px-[18px]">
-        <h2 className="text-xl font-bold text-[#111827]">Filters</h2>
+        <div>
+          <h2 className="text-[19px] font-semibold tracking-[-0.015em] text-[var(--text)]">SuperSearch</h2>
+          <p className="text-[12px] text-[var(--muted)]">Filters apply to the selected search</p>
+        </div>
         <div className="flex items-center gap-1">
           {active ? (
             <button type="button" onClick={onClear} className="btn btn-ghost btn-sm text-xs">
@@ -225,7 +238,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
             </button>
           ) : null}
           {onCollapse ? (
-            <button type="button" onClick={onCollapse} aria-label="Hide filters" title="Hide filters" className="btn btn-ghost btn-sm btn-icon text-[#94a3b8]">
+            <button type="button" onClick={onCollapse} aria-label="Hide SuperSearch" title="Hide SuperSearch" className="btn btn-ghost btn-sm btn-icon text-[#94a3b8]">
               <PanelLeftClose size={16} />
             </button>
           ) : null}
@@ -256,7 +269,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
 
         <Group icon={<MapPin size={15} />} title="Location" defaultOpen active={state.locAny.length + state.locNot.length}>
           <AnyNotChips
-            options={countryOptions}
+            options={available(countryOptions, [...state.locAny, ...state.locNot], counted)}
             any={state.locAny}
             not={state.locNot}
             freeText
@@ -274,7 +287,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
 
         <Group icon={<Home size={15} />} title="Buyer role" defaultOpen active={state.roleAny.length + state.roleNot.length}>
           <AnyNotChips
-            options={roleOptions}
+            options={available(roleOptions, [...state.roleAny, ...state.roleNot], counted)}
             any={state.roleAny}
             not={state.roleNot}
             placeholder="Exclude a role…"
@@ -284,7 +297,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
 
         <Group icon={<Network size={15} />} title="Supply chain tier" defaultOpen active={state.tiers.length}>
           <AnyNotChips
-            options={TIERS.map((tier) => ({ value: String(tier), label: TIER_OPTION_LABELS[tier] }))}
+            options={available(TIERS.map((tier) => ({ value: String(tier), label: TIER_OPTION_LABELS[tier], count: countOf(facets?.tiers, String(tier)) })), state.tiers.map(String), counted)}
             any={state.tiers.map(String)}
             anyLabel={null}
             showNot={false}
@@ -295,7 +308,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
         <Group icon={<Waypoints size={15} />} title="How we know" active={state.links.length}>
           <SubLabel>For tier 2 and 3 companies</SubLabel>
           <AnyNotChips
-            options={LINKS.map((link) => ({ value: link, label: LINK_LEGEND[link] }))}
+            options={available(LINKS.map((link) => ({ value: link, label: LINK_LEGEND[link], count: countOf(facets?.linkStatus, link) })), state.links, counted)}
             any={state.links}
             anyLabel={null}
             showNot={false}
@@ -306,7 +319,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
         <Group icon={<PackageSearch size={15} />} title="What we can sell them" defaultOpen active={state.sell.length + (state.hideCompetitors ? 0 : 1)}>
           <SubLabel>From your product catalogue</SubLabel>
           <AnyNotChips
-            options={sellOptions}
+            options={available(sellOptions, state.sell, counted)}
             any={state.sell}
             anyLabel={null}
             showNot={false}
@@ -317,12 +330,12 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
         </Group>
 
         <Group icon={<Zap size={15}/>} title="Trigger" defaultOpen active={state.triggerKinds.length+(state.triggerAge?1:0)}>
-          <label className="block text-xs">Trigger kind<select aria-label="Trigger kind" className="control mt-1 w-full" value={state.triggerKinds[0]??''} onChange={e=>onChange({triggerKinds:e.target.value?[e.target.value as import('@/mvp/buyers/types').TriggerKind]:[]})}><option value="">All triggers</option>{(['award','order','tender','subcontract','capability'] as const).map(v=><option key={v} value={v}>{TRIGGER_KIND_LABELS[v]}</option>)}</select></label>
+          <label className="block text-xs">Trigger kind<select aria-label="Trigger kind" className="control mt-1 w-full" value={state.triggerKinds[0]??''} onChange={e=>onChange({triggerKinds:e.target.value?[e.target.value as import('@/mvp/buyers/types').TriggerKind]:[]})}><option value="">All triggers</option>{(['award','order','tender','subcontract','capability'] as const).filter(v=>!counted||countOf(facets?.triggers,v)||state.triggerKinds.includes(v)).map(v=><option key={v} value={v}>{TRIGGER_KIND_LABELS[v]}{counted?` (${countOf(facets?.triggers,v)??0})`:''}</option>)}</select></label>
           <label className="mt-2 block text-xs">Trigger age<select aria-label="Trigger age" className="control mt-1 w-full" value={state.triggerAge} onChange={e=>onChange({triggerAge:e.target.value})}><option value="">Any date</option>{[30,90,365,540].map(n=><option key={n} value={n}>Last {n} days</option>)}<option value="undated">Date not established</option></select></label>
         </Group>
         <Group icon={<Zap size={15} />} title="Buying signal" active={state.signals.length + (state.withinDays ? 1 : 0)}>
           <AnyNotChips
-            options={SIGNALS.map((signal) => ({ value: signal, label: SIGNAL_LABELS[signal], count: countOf(facets?.signals, signal) }))}
+            options={available(SIGNALS.map((signal) => ({ value: signal, label: SIGNAL_LABELS[signal], count: countOf(facets?.signals, signal) })), state.signals, counted)}
             any={state.signals}
             anyLabel={null}
             showNot={false}
@@ -355,7 +368,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
         </Group>
 
         <Group icon={<Factory size={15} />} title="Industry and project type" active={state.industry.length}>
-          <AnyNotChips options={industryOptions} any={state.industry} anyLabel={null} showNot={false} onChange={({ any }) => onChange({ industry: any })} />
+          <AnyNotChips options={available(industryOptions, state.industry, counted)} any={state.industry} anyLabel={null} showNot={false} onChange={({ any }) => onChange({ industry: any })} />
         </Group>
 
         <Group icon={<CircleDollarSign size={15} />} title="Order / project value" active={(state.valueMin !== null ? 1 : 0) + (state.valueMax !== null ? 1 : 0)}>
@@ -401,7 +414,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
 
         <Group icon={<Scale size={15} />} title="Contact rules by country" active={state.reach.length}>
           <AnyNotChips
-            options={REACH.map((value) => ({ value, label: REACH_LABELS[value], count: countOf(facets?.reach, value) }))}
+            options={available(REACH.map((value) => ({ value, label: REACH_LABELS[value], count: countOf(facets?.reach, value) })), state.reach, counted)}
             any={state.reach}
             anyLabel={null}
             showNot={false}
@@ -411,14 +424,14 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
 
         <Group icon={<Gauge size={15} />} title="Buyer fit and how sure we are" active={state.stage.length + state.howSure.length + (state.minFit !== null ? 1 : 0)}>
           <AnyNotChips
-            options={STAGES.map((stage) => ({ value: stage, label: BUYER_STAGE_LABELS[stage], count: countOf(facets?.stages, stage) }))}
+            options={available(STAGES.map((stage) => ({ value: stage, label: BUYER_STAGE_LABELS[stage], count: countOf(facets?.stages, stage) })), state.stage, counted)}
             any={state.stage}
             anyLabel="Stage"
             showNot={false}
             onChange={({ any }) => onChange({ stage: any as BuyerStage[] })}
           />
           <AnyNotChips
-            options={HOW_SURE.map((value) => ({ value, label: HOW_SURE_LABELS[value], count: countOf(facets?.howSure, value) }))}
+            options={available(HOW_SURE.map((value) => ({ value, label: HOW_SURE_LABELS[value], count: countOf(facets?.howSure, value) })), state.howSure, counted)}
             any={state.howSure}
             anyLabel="How sure we are"
             showNot={false}

@@ -416,7 +416,9 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
     role,
     roleLabel: whatTheyDo,
     subRoleLabel,
-    country: hq,
+    // Where the company is: its HQ, else where its work is (companies found on their own websites often
+    // state only where they work).
+    country: hq ?? siteCountry,
     city: project?.site ?? null,
     stage,
     fitScore: Math.max(0, Math.min(100, Math.round(lead.score ?? 0))),

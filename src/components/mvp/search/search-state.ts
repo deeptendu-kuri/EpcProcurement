@@ -230,7 +230,7 @@ export function applySearchChange(state: SearchUrlState, change: Partial<SearchU
 export function activeFilterCount(state: SearchUrlState): number {
   let count = 0;
   for (const key of RESULT_KEYS) {
-    if (key === "sort") continue;
+    if (key === "sort" || key === "run") continue; // the Search picker is scope, not a filter
     const value = state[key];
     const fallback = DEFAULT_SEARCH[key];
     if (Array.isArray(value)) count += value.length ? 1 : 0;
@@ -240,7 +240,7 @@ export function activeFilterCount(state: SearchUrlState): number {
 }
 
 export function clearedSearch(state: SearchUrlState): SearchUrlState {
-  return { ...DEFAULT_SEARCH, view: state.view, sort: state.sort };
+  return { ...DEFAULT_SEARCH, run: state.run, view: state.view, sort: state.sort };
 }
 
 /** A catalogue item as far as the filter needs it. */

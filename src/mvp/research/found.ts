@@ -10,6 +10,9 @@ import { addJob, researchProgress } from './store';
 import { queueRead } from './investigation';
 import { researchAiAllowance, type ExtendableBudget } from './extend';
 import { looksLikeSupplier, relevantFound } from '@/mvp/sourcing/names';
+import { getCatalogueItem } from '@/mvp/config/buyers-config';
+import { getLLM } from '@/mvp/llm';
+import { consistentRating, rateCandidates } from './shortlist';
 
 export type FoundStatus = 'saved' | 'checking' | 'not_checked' | 'no_website' | 'no_match' | 'unreadable';
 export interface FoundCompany {
@@ -20,6 +23,13 @@ export interface FoundCompany {
   relevant: boolean;
   /** A hint from the source wording only; never a verified role. */
   likelyRole: LikelyRole | null;
+  /** Shortlist rating (doc 18 §5): 0–100 likelihood of buying the searched material; null = not rated yet. */
+  rating: number | null;
+  /** Plain role and one-line reason from the rating, e.g. "Pressure vessel fabricator". */
+  ratingRole: string | null;
+  ratingReason: string | null;
+  /** Other catalogue products it would likely buy (names). */
+  alsoBuys: string[];
 }
 export type LikelyRole = 'owner' | 'contractor' | 'pipe_maker' | 'supplier';
 // "GASCO, Abu Dhabi" and "GASCO" are one company: the place after a comma is not part of the name.
@@ -46,21 +56,26 @@ export function likelyRole(name: string, quote: string | null): LikelyRole | nul
 interface CandidateRow {
   id: string; company: string; domain_hint: string | null; state: string; reason: string | null; identity_quote: string | null;
   pages: number; title: string | null; url: string | null; pending: boolean; running: boolean;
+  rating: number | null; rating_role: string | null; rating_reason: string | null; rating_also: string[] | null; rating_source: string | null;
 }
 const LIMIT_REASON = /budget|deferred|limit/i;
 export { relevantFound };
 
 export async function listFoundCompanies(db: Queryable, runId: string): Promise<FoundCompany[]> {
   const rows = (await db.query<CandidateRow>(`select c.id,c.company,c.domain_hint,c.state,c.reason,c.identity_quote,cardinality(c.document_ids)::int as pages,d.title,d.url,
+      c.rating,c.rating_role,c.rating_reason,c.rating_also,c.rating_source,
       exists(select 1 from research_jobs j where j.run_id=c.run_id and j.state in ('queued','running')
         and (j.payload->>'candidateId'=c.id::text or j.payload->'raw'->'research'->>'candidateId'=c.id::text)) as pending,
       exists(select 1 from research_jobs j where j.run_id=c.run_id and j.state='running'
         and (j.payload->>'candidateId'=c.id::text or j.payload->'raw'->'research'->>'candidateId'=c.id::text)) as running
     from research_candidates c left join source_documents d on d.id=c.identity_document_id
     where c.run_id=$1 order by c.created_at limit 300`, [runId])).rows;
-  const saved = (await db.query<{ id: string; name: string }>(`select o.id,c.canonical_name as name from search_opportunities o join companies c on c.id=o.company_id
+  const saved = (await db.query<{ id: string; name: string; fit_score: number }>(`select o.id,c.canonical_name as name,o.fit_score from search_opportunities o join companies c on c.id=o.company_id
     where o.run_id=$1 and o.qualification<>'rejected'`, [runId])).rows;
   const savedBy = new Map(saved.map((s) => [key(s.name), s.id]));
+  const savedFit = new Map(saved.map((s) => [s.id, Number(s.fit_score) || 0]));
+  const productId = (await db.query<{ product_id: string | null }>("select adhoc_query->>'productId' as product_id from runs where id=$1", [runId])).rows[0]?.product_id ?? null;
+  const productName = productId ? getCatalogueItem(productId)?.shortName ?? productId : '';
   const seen = new Set<string>();
   const result: FoundCompany[] = [];
   for (const r of rows) {
@@ -80,13 +95,24 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
       : r.state === 'review' && !LIMIT_REASON.test(r.reason ?? '') ? ['no_match', r.reason ?? 'No matching work found on its pages']
       : r.state === 'qualified' ? ['no_match', 'Matched, but not saved for this product or country']
       : ['not_checked', 'Not checked yet'];
+    // AI ratings are re-checked against the current consistency rules, so a rule fix applies without a new AI call.
+    const shortlist = r.rating === null ? null : r.rating_source === 'ai'
+      ? consistentRating({ rating: Number(r.rating), role: r.rating_role ?? '', reason: r.rating_reason ?? '', also: [] }, { company: r.company, identity_quote: r.identity_quote }, productName)
+      : Number(r.rating);
+    // One number per company per search: a verified buyer keeps the higher of the two ratings.
+    const fit = opportunityId ? savedFit.get(opportunityId) ?? 0 : 0;
+    const rating = shortlist === null ? (fit || null) : Math.max(shortlist, fit);
     result.push({ id: r.id, name: r.company, website: r.domain_hint, status, statusText, source: r.url ? { title: r.title, url: r.url } : null,
       quote: r.identity_quote, pagesRead: r.pages, opportunityId,
       // Suppliers of the material are competitors, not buyers: folded with the other non-buyer names.
-      relevant: relevantFound(r.company, r.identity_quote, r.domain_hint, Boolean(opportunityId), r.title) && (Boolean(opportunityId) || !looksLikeSupplier(r.identity_quote)),
-      likelyRole: likelyRole(r.company, r.identity_quote) });
+      // A rated company is relevant unless the rating says it is not a buyer.
+      relevant: Boolean(opportunityId) || (rating !== null ? rating >= 10 : relevantFound(r.company, r.identity_quote, r.domain_hint, false, r.title) && !looksLikeSupplier(r.identity_quote)),
+      likelyRole: likelyRole(r.company, r.identity_quote),
+      rating, ratingRole: r.rating_role, ratingReason: r.rating_reason,
+      alsoBuys: (r.rating_also ?? []).map((id) => getCatalogueItem(id)?.shortName ?? id) });
   }
-  return result;
+  // Saved buyers first, then by rating (best first), unrated last in the order found.
+  return result.sort((a, b) => Number(Boolean(b.opportunityId)) - Number(Boolean(a.opportunityId)) || (b.rating ?? -1) - (a.rating ?? -1));
 }
 
 interface Candidate { id: string; company: string; domain_hint: string | null; document_ids: string[]; state: string; reason: string | null }
@@ -159,4 +185,22 @@ export async function checkFoundCompanies(db: Db, runId: string, candidateIds: s
     else { last = result.message; if (/allowance/i.test(result.message)) break; }
   }
   return { queued, message: queued ? `Checking ${queued} ${queued === 1 ? 'company' : 'companies'}: website, work and contacts. Results appear here as each finishes.` : last || 'Nothing left to check.' };
+}
+
+/**
+ * "Rate companies" (doc 18 §5): rate a search's unrated companies now, for searches that ran before
+ * ratings existed. Uses the shared daily AI allowance (not the search's spent budget) and records the
+ * tokens against the search.
+ */
+export async function rateFoundCompanies(db: Db, runId: string): Promise<{ rated: number; likely: number; message: string }> {
+  const run = (await db.query<{ product_id: string | null }>("select adhoc_query->>'productId' as product_id from runs where id=$1", [runId])).rows[0];
+  if (!run?.product_id) throw new Error('Search not found.');
+  const allowance = await researchAiAllowance(db);
+  const provider = allowance >= 10_000 ? getLLM('triage', db) : null;
+  const result = await rateCandidates(db, runId, { productId: run.product_id }, provider ? () => provider : null, 200);
+  const likely = result.rated.filter((r) => r.rating >= 45).length;
+  if (result.rated.length) await researchProgress(db, runId, 'check', `Shortlist: rated ${result.rated.length} companies; ${likely} look like buyers.`);
+  return { rated: result.rated.length, likely, message: result.rated.length
+    ? `Rated ${result.rated.length} companies: ${likely} look like buyers.${provider ? '' : " Today's AI allowance is low, so plain rules rated them."}${result.warning ? ` ${result.warning}` : ''}`
+    : 'Every company in this search is already rated.' };
 }

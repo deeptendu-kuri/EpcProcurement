@@ -75,6 +75,17 @@ export function lookalikeScore(record: BuyerRecord, reference: BuyerRecord): num
   return score;
 }
 
+/**
+ * The country the Location filter and its counts use: the chosen basis first (HQ or project site), then
+ * the other one when the first is not known — so a company found with only its work location still
+ * filters by country instead of disappearing.
+ */
+export function placeOf(record: BuyerRecord, basis: "hq" | "site" | undefined): { country: string | null; site: string | null } {
+  return basis === "site"
+    ? { country: record.siteCountry ?? record.hqCountry, site: record.site }
+    : { country: record.hqCountry ?? record.siteCountry, site: record.hqCountry ? null : record.site };
+}
+
 /** True when the record passes every filter except those in `omit`. */
 export function matches(record: BuyerRecord, search: BuyerSearch, now: Date, all: readonly BuyerRecord[] = [], omit: ReadonlySet<Dimension> = new Set()): boolean {
   const view = record.view;
@@ -95,7 +106,7 @@ export function matches(record: BuyerRecord, search: BuyerSearch, now: Date, all
   if (hideCompetitors(search) && record.competitorForAll && !search.stage?.includes("not_buyer")) return false;
 
   if (on("location") && search.location) {
-    const place = search.location.basis === "site" ? { country: record.siteCountry, site: record.site } : { country: record.hqCountry, site: null };
+    const place = placeOf(record, search.location.basis);
     const any = search.location.any ?? [];
     const not = search.location.not ?? [];
     if (any.length && !any.some((v) => locationMatches(v, place.country, place.site))) return false;
@@ -169,7 +180,7 @@ export function buildFacets(records: readonly BuyerRecord[], search: BuyerSearch
     triggers:count(pass('triggers').flatMap(r=>r.row.trigger?[r.row.trigger.kind]:[]),triggerKindLabel),
     roles: count(pass("roles").map((r) => r.view.role), (v) => BUYER_ROLE_LABELS[v]),
     countries: count(
-      pass("location").map((r) => (search.location?.basis === "site" ? r.siteCountry : r.hqCountry)).filter((c): c is string => Boolean(c)),
+      pass("location").map((r) => placeOf(r, search.location?.basis).country).filter((c): c is string => Boolean(c)),
       (v) => countryName(v) ?? v,
     ),
     items: count(pass("sell").flatMap((r) => sellIds(r, hide)), itemName),

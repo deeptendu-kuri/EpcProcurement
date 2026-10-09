@@ -33,6 +33,7 @@ import { REPEAT_STORY_PRIORITY,sameStory } from '@/mvp/sourcing/story';
 import { LLMHttpError,QuotaExceededError } from '@/mvp/llm/types';
 import { tedSource } from '@/mvp/pipeline/sources/ted';
 import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@/mvp/sourcing/roundup';
+import { rateCandidates } from './shortlist';
 import {SOURCING_REGISTRY,collectRegistry,registryPageTargets,registryReadWarning,registryRaw} from '@/mvp/sourcing/registry';
 
 export interface ResearchDeps {
@@ -194,6 +195,12 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         if(!await db.tx(tx=>owned(tx,job)))return {processed:true,stale:true};
         await db.query('update research_jobs set result=$3::jsonb where id=$1 and lease_token=$2',[job.id,job.lease_token,JSON.stringify({roundup})]);
         const seeded=await seedRoundup(db,job.run_id,input,roundup,session.budget);
+        // Rate the names just found so website lookups go to likely buyers first (docs/mvp/18 §5).
+        const rating=await rateCandidates(db,job.run_id,input,key=>budgetedAwardProviders(db,job.run_id,key,session.budget).provider('triage'))
+          .catch(error=>({rated:[],aiCalls:0,warning:`Shortlist rating skipped: ${error instanceof Error?error.message:'error'}`}));
+        const likely=rating.rated.filter(r=>r.rating>=45).length;
+        if(rating.rated.length)await researchProgress(db,job.run_id,'check',`Shortlist: rated ${rating.rated.length} companies; ${likely} look like buyers. Checking the best rated first.`);
+        if(rating.warning)await researchProgress(db,job.run_id,'info',rating.warning);
         await persistRoundupAwards(db,job.run_id,input,roundup);
         await completeJob(db,job,{roundup,...seeded,budgetLimited:providers.limited,coverageWarning:roundup.warnings.length>0});
         await researchProgress(db,job.run_id,'check',`Roundup: ${seeded.seeded} verified identity candidates; ${seeded.queued} website reads and ${seeded.lookups} bounded lookup tasks. Candidates are not confirmed buyers.`);

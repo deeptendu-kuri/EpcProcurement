@@ -7,6 +7,7 @@ import { recentSearches } from '@/mvp/opportunities';
 import { searchWorkflowCounts } from '@/mvp/opportunities/workspace-stats';
 import { listFoundCompanies } from '@/mvp/research/found';
 import { listFunnelThreads } from '@/mvp/automation/engine';
+import { runMinutes, runUsage } from '@/mvp/research/usage';
 import type { RunRow } from '@/mvp/types';
 
 export interface DashboardSearch {
@@ -16,6 +17,9 @@ export interface DashboardSearch {
   toCheck: number | null;
   conversations: number;
   meetings: number;
+  /** AI tokens used by the search (provider-reported) and minutes it ran. */
+  tokens: number;
+  minutes: number | null;
 }
 export interface DashboardMeeting { opportunityId: string | null; company: string; product: string; start: string | null; meetUrl: string | null }
 export interface DashboardData {
@@ -36,6 +40,7 @@ export async function dashboardData(now = new Date()): Promise<DashboardData> {
   const all = await recentSearches();
   const productSearches = all.filter((r) => r.adhoc_query?.productId);
   const workflows = await searchWorkflowCounts(productSearches.map((r) => r.id));
+  const usage = await runUsage(db, productSearches.map((r) => r.id)).catch(() => new Map());
   const searches: DashboardSearch[] = [];
   for (const [index, run] of productSearches.entries()) {
     let found: number | null = null, toCheck: number | null = null;
@@ -45,7 +50,8 @@ export async function dashboardData(now = new Date()): Promise<DashboardData> {
       toCheck = list.filter((c) => c.status !== 'saved' && c.status !== 'no_match').length;
     }
     const w = workflows.find((x) => x.run_id === run.id);
-    searches.push({ run, found, toCheck, conversations: w?.workflow_count ?? 0, meetings: w?.meeting_count ?? 0 });
+    searches.push({ run, found, toCheck, conversations: w?.workflow_count ?? 0, meetings: w?.meeting_count ?? 0,
+      tokens: usage.get(run.id)?.tokens ?? run.counters.researchUsage?.estimatedAiTokens ?? 0, minutes: runMinutes(run, now) });
   }
   const threads = (await listFunnelThreads().catch(() => [])).filter((t) => t.mode !== 'email_test');
   const newBuyers = (await db.query<{ n: number }>(`select count(*)::int as n from search_opportunities

@@ -1,23 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  /* Neutral greys + one accent (docs/mvp/13 §2). */
-  --background: #f7f7f8;
-  --foreground: #111827;
-  --muted: #6b7280;
+  /*
+   * Design foundation (docs/mvp/18 §1), after Apple's Human Interface Guidelines: one quiet neutral
+   * background, white surfaces, near-black text with two lighter levels, hairline separators, a single
+   * blue accent and soft status tints. Spacing follows an 8-point grid; corners are 16px on cards and
+   * 10px on controls.
+   */
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --text: #1d1d1f;
+  --text-2: #424245;
+  --text-3: #6e6e73;
+  --muted: #6e6e73;
   --panel: #ffffff;
-  --line: #e6e7eb;
-  --line-strong: #d4d6dc;
-  --subtle: #f3f4f6;
-  --text-2: #374151;
-  --text-3: #6b7280;
-  --accent: #2563eb;
-  --accent-2: #1d4ed8;
-  --accent-soft: #eef4ff;
-  --danger: #b42318;
-  --shadow-xs: 0 1px 2px rgb(16 24 40 / 0.05);
-  --shadow-md: 0 4px 12px rgb(16 24 40 / 0.08), 0 1px 3px rgb(16 24 40 / 0.06);
-  --shadow-lg: 0 16px 40px rgb(16 24 40 / 0.14), 0 2px 6px rgb(16 24 40 / 0.06);
+  --surface: #ffffff;
+  --line: #e5e5ea;
+  --line-strong: #d2d2d7;
+  --subtle: #f2f2f4;
+  --hover: #f7f7f9;
+  --accent: #0071e3;
+  --accent-2: #0062c4;
+  --accent-soft: #eaf3fe;
+  --good: #1b7f3b;
+  --good-bg: #e9f7ee;
+  --info: #0062c4;
+  --info-bg: #eaf3fe;
+  --warn: #9a5800;
+  --warn-bg: #fff4e2;
+  --bad: #c62828;
+  --bad-bg: #fdecec;
+  --danger: #c62828;
+  --radius-card: 16px;
+  --radius-control: 10px;
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 4px 14px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.05);
+  --shadow-lg: 0 18px 44px rgb(0 0 0 / 0.14), 0 2px 6px rgb(0 0 0 / 0.06);
   --ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -35,10 +54,10 @@ body {
   background: var(--background);
   color: var(--foreground);
   /* System font stack: no build-time font download. */
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;
   line-height: 1.5;
-  letter-spacing: 0;
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -94,10 +113,10 @@ summary:focus-visible,
 
 .surface,
 .card {
-  border: 1px solid var(--line);
+  border: 1px solid rgb(0 0 0 / 0.06);
   background: var(--panel);
-  border-radius: 12px;
-  box-shadow: var(--shadow-xs);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
 }
 
 .card-header {
@@ -110,8 +129,9 @@ summary:focus-visible,
 }
 
 .card-title {
-  font-size: 0.875rem;
-  font-weight: 650;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   color: var(--foreground);
 }
 
@@ -124,16 +144,16 @@ summary:focus-visible,
 }
 
 .page-title {
-  font-size: 1.375rem;
-  line-height: 1.3;
+  font-size: 1.75rem;
+  line-height: 1.2;
   font-weight: 700;
   color: var(--foreground);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.022em;
 }
 
 .page-subtitle {
-  margin-top: 0.125rem;
-  font-size: 0.875rem;
+  margin-top: 0.25rem;
+  font-size: 0.9375rem;
   color: var(--text-3);
 }
 
@@ -142,7 +162,7 @@ summary:focus-visible,
 .control,
 .input {
   min-height: 2.25rem;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--line-strong);
   background: #ffffff;
   color: var(--foreground);
@@ -152,14 +172,14 @@ summary:focus-visible,
 
 .control:hover,
 .input:hover {
-  border-color: #b9bdc6;
+  border-color: #aeaeb2;
 }
 
 .control:focus-visible,
 .input:focus-visible {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgb(37 99 235 / 0.18);
+  box-shadow: 0 0 0 4px rgb(0 113 227 / 0.16);
 }
 
 .btn {
@@ -168,8 +188,8 @@ summary:focus-visible,
   justify-content: center;
   gap: 0.375rem;
   height: 2.25rem;
-  padding: 0 0.75rem;
-  border-radius: 8px;
+  padding: 0 0.875rem;
+  border-radius: var(--radius-control);
   border: 1px solid transparent;
   font-size: 0.8125rem;
   font-weight: 600;
@@ -200,7 +220,7 @@ summary:focus-visible,
 }
 
 .btn-primary {
-  border: 1px solid var(--accent-2);
+  border: 1px solid var(--accent);
   background: var(--accent);
   color: #ffffff !important;
   box-shadow: var(--shadow-xs);
@@ -220,8 +240,8 @@ summary:focus-visible,
 
 .btn-quiet:hover:not(:disabled),
 .btn-secondary:hover:not(:disabled) {
-  border-color: #b9bdc6;
-  background: #f9fafb;
+  border-color: #aeaeb2;
+  background: var(--hover);
   color: var(--foreground);
 }
 
@@ -310,11 +330,11 @@ summary:focus-visible,
   height: 2.25rem;
   align-items: center;
   gap: 0.625rem;
-  border-radius: 8px;
-  padding: 0 0.625rem;
+  border-radius: var(--radius-control);
+  padding: 0 0.75rem;
   color: var(--text-2);
-  font-size: 0.8125rem;
-  font-weight: 600;
+  font-size: 0.875rem;
+  font-weight: 500;
   transition: background-color 150ms var(--ease), color 150ms var(--ease);
 }
 
@@ -324,8 +344,9 @@ summary:focus-visible,
 }
 
 .nav-item[aria-current="page"] {
-  background: var(--accent-soft);
-  color: var(--accent-2);
+  background: rgb(0 113 227 / 0.1);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* ───────── skeletons, motion ───────── */

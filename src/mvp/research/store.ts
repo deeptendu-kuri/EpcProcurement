@@ -77,13 +77,27 @@ export async function markBudget(db:Db,runId:string,kind:string,key:string,outco
   await db.query('update research_budget_reservations set outcome=$4 where run_id=$1 and kind=$2 and key=$3',[runId,kind,key,outcome]);
 }
 /** Reserve both caps together: a failed token reservation must not consume an AI-page slot. */
+/**
+ * AI tokens a search has used (doc 18 §8): calls still in flight or of unknown outcome count their
+ * reserved estimate; finished calls count the tokens the provider reported (llm_usage). Reservations
+ * alone over-counted about 2x (9 Oct steel plates: 237,775 reserved vs 109,393 used), which stopped
+ * searches at half their allowance.
+ */
+export async function aiTokensUsed(q:Queryable,runId:string):Promise<number> {
+  const row=(await q.query<{pending:number;actual:number;completed:number}>(`select
+    (select coalesce(sum(units),0) from research_budget_reservations where run_id=$1 and kind='ai_tokens' and coalesce(outcome,'')<>'completed')::int as pending,
+    (select coalesce(sum(units),0) from research_budget_reservations where run_id=$1 and kind='ai_tokens' and outcome='completed')::int as completed,
+    (select coalesce(sum(tokens_in+tokens_out),0) from llm_usage where run_id=$1)::int as actual`,[runId])).rows[0];
+  // Without provider records (mock/offline runs) the completed estimates still count.
+  return row.pending+(row.actual>0?row.actual:row.completed);
+}
 export async function reserveAnalysis(db:Db,runId:string,key:string,tokens:number,budget:ResearchBudget) {
   return db.tx(async tx=>{
     await tx.query('select run_id from research_sessions where run_id=$1 for update',[runId]);
     const existing=(await tx.query('select key from research_budget_reservations where run_id=$1 and kind=\'ai_pages\' and key=$2',[runId,key])).rows;
     if(existing.length)return 'existing' as const;
-    const used=(await tx.query<{kind:string;units:number}>('select kind,sum(units)::int as units from research_budget_reservations where run_id=$1 and kind in (\'ai_pages\',\'ai_tokens\') group by kind',[runId])).rows;
-    if((used.find(r=>r.kind==='ai_pages')?.units??0)+1>budget.maxAiPages||(used.find(r=>r.kind==='ai_tokens')?.units??0)+tokens>budget.maxAiTokens)return 'exhausted' as const;
+    const pages=(await tx.query<{units:number}>("select coalesce(sum(units),0)::int as units from research_budget_reservations where run_id=$1 and kind='ai_pages'",[runId])).rows[0].units;
+    if(pages+1>budget.maxAiPages||(await aiTokensUsed(tx,runId))+tokens>budget.maxAiTokens)return 'exhausted' as const;
     await tx.query(`insert into research_budget_reservations(run_id,kind,key,units) values($1,'ai_pages',$2,1),($1,'ai_tokens',$2,$3)`,[runId,key,tokens]);return 'reserved' as const;
   });
 }
@@ -154,7 +168,7 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   counters.researchCandidates=candidates.count;counters.investigatedCompanies=candidates.investigated;
   counters.factsKept=facts.kept;counters.factsDropped=facts.dropped;
   counters.readFailures=Object.fromEntries(failures.map(f=>[f.reason??'unknown',f.count]));
-  counters.researchUsage={search:units('search'),reads:units('read'),aiCalls:units('ai_pages'),estimatedAiTokens:units('ai_tokens'),pdfPages:units('pdf_pages')};
+  counters.researchUsage={search:units('search'),reads:units('read'),aiCalls:units('ai_pages'),estimatedAiTokens:await aiTokensUsed(db,runId),pdfPages:units('pdf_pages')};
   counters.researchUsage.bingSearches=units('bing_search');
   counters.researchUsage.websiteLookups=units('lookup');
   if(session)counters.researchLimits={search:session.budget.searchQueries,reads:session.budget.maxPages,aiCalls:session.budget.maxAiPages,estimatedAiTokens:session.budget.maxAiTokens};

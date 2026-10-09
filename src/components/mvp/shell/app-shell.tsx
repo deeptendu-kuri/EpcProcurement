@@ -167,11 +167,11 @@ function SidebarContent({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className={`flex h-16 shrink-0 items-center gap-2.5 ${collapsed ? "justify-center px-2" : "border-b border-[var(--line)] px-4"}`}>
-        <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#2563eb] to-[#7c3aed] text-white shadow-sm">
-          <Zap size={17} aria-hidden />
+      <div className={`flex h-16 shrink-0 items-center gap-2.5 ${collapsed ? "justify-center px-2" : "px-4"}`}>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-[var(--accent)] text-white">
+          <Zap size={16} aria-hidden />
         </span>
-        {!collapsed ? <span className="min-w-0 flex-1 truncate text-sm font-bold text-[#111827]">Buyer Intelligence</span> : null}
+        {!collapsed ? <span className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.01em] text-[var(--text)]">Buyer Intelligence</span> : null}
         {onToggleCollapsed && !collapsed ? (
           <button type="button" onClick={onToggleCollapsed} aria-label="Collapse sidebar" title="Collapse sidebar" className="btn btn-ghost btn-sm btn-icon">
             <PanelLeftClose size={16} />
@@ -179,7 +179,7 @@ function SidebarContent({
         ) : null}
       </div>
 
-      <nav aria-label="Main navigation" className={`flex flex-1 flex-col overflow-y-auto p-2 ${collapsed ? "items-center gap-2" : "gap-0.5"}`}>
+      <nav aria-label="Main navigation" className={`flex flex-1 flex-col overflow-y-auto px-3 py-2 ${collapsed ? "items-center gap-2" : "gap-1"}`}>
         {NAV.map((item) => {
           const active = isActive(pathname, item.href, item.also);
           const badge = item.href === "/crm" && newGenuine > 0 ? newGenuine : null;
@@ -209,7 +209,7 @@ function SidebarContent({
         })}
       </nav>
 
-      <div className="flex flex-col gap-1 border-t border-[var(--line)] p-2">
+      <div className="flex flex-col gap-1 border-t border-[var(--line)] px-3 py-3">
         {demoMode ? (
           <span
             title="No AI keys configured: facts come from the rules-based extractor and drafts from templates."
@@ -328,7 +328,7 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
           </a>
 
           <aside
-            className={`hidden shrink-0 border-r border-[var(--line)] bg-white transition-[width] duration-200 md:sticky md:top-0 md:block md:h-screen ${
+            className={`hidden shrink-0 border-r border-[var(--line)] bg-[#fbfbfd] transition-[width] duration-200 md:sticky md:top-0 md:block md:h-screen ${
               collapsed ? "md:w-16" : "md:w-60"
             }`}
           >
@@ -360,16 +360,15 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
           ) : null}
 
           <div className="flex min-w-0 flex-1 flex-col">
-            <header aria-label="Workspace header" className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-[var(--line)] bg-white/95 px-3 backdrop-blur sm:gap-3 lg:px-6">
+            <header aria-label="Workspace header" className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-[var(--line)] bg-white/80 px-3 backdrop-blur-xl backdrop-saturate-150 sm:gap-3 lg:px-8">
               {/* Wrapper carries md:hidden: the unlayered .btn display rule would beat a utility on the button itself. */}
               <span className="contents md:hidden">
                 <button type="button" onClick={() => setMobileOpen(true)} aria-label="Open menu" className="btn btn-ghost btn-icon">
                   <Menu size={18} />
                 </button>
               </span>
-              <div className="flex min-w-0 items-center gap-2 text-sm text-[var(--muted)]">
-                <span className="hidden sm:inline">Workspace</span><span className="hidden sm:inline" aria-hidden>/</span>
-                <span className="truncate font-semibold text-[var(--foreground)]">{NAV.find(item => isActive(pathname, item.href, item.also))?.label ?? "Buyer Intelligence"}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-[15px] font-semibold tracking-[-0.01em] text-[var(--foreground)]">{NAV.find(item => isActive(pathname, item.href, item.also))?.label ?? "Buyer Intelligence"}</span>
               </div>
               <div className="ml-auto flex items-center gap-2">
                 <span
@@ -390,7 +389,7 @@ export function AppShell({ demoMode, initialStatus, children }: { demoMode: bool
                   {children}
                 </div>
               ) : (
-                <div key={pathname} className="fade-in mx-auto w-full max-w-[1440px] px-4 py-5 lg:px-6">
+                <div key={pathname} className="fade-in mx-auto w-full max-w-[1280px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
                   {children}
                 </div>
               )}

@@ -478,10 +478,10 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
         toggleFilters(false);
       }}
       className="btn btn-secondary btn-sm"
-      aria-label={`Show filters${activeFilters ? ` (${activeFilters} active)` : ""}`}
+      aria-label={`Open SuperSearch filters${activeFilters ? ` (${activeFilters} active)` : ""}`}
     >
       {filtersCollapsed ? <PanelLeftOpen size={14} aria-hidden /> : <SlidersHorizontal size={14} aria-hidden />}
-      Filters
+      SuperSearch
       {activeFilters ? <span className="count-badge count-badge-accent">{activeFilters}</span> : null}
     </button>
   );

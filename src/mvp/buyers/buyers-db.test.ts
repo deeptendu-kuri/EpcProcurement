@@ -91,8 +91,8 @@ describe("buyers from the database", () => {
       [JSON.stringify({ query: "steel pipe", productId: "line-pipe", markets: ["SA"] })]);
     const run = runs[0].id;
     const { rows: opps } = await db.query<{ id: string }>(
-      `insert into search_opportunities (run_id, lead_id, company_id, keyword, product_id, product_name, buying_reason, evidence_ids)
-       values ($1, $2, $3, 'steel pipe', 'coating-materials', 'Pipe coating materials', 'Aramco order', '{}') returning id`,
+      `insert into search_opportunities (run_id, lead_id, company_id, keyword, product_id, product_name, buying_reason, evidence_ids, fit_score, material_fit_kind)
+       values ($1, $2, $3, 'steel pipe', 'coating-materials', 'Pipe coating materials', 'Aramco order', '{}', 97, 'explicit') returning id`,
       [run, leads[0].id, leads[0].company_id]);
     await db.query("insert into funnel_threads (opportunity_id, company_id, product_id, reply_token, state) values ($1, $2, 'coating-materials', 'tok-doc17', 'active')",
       [opps[0].id, leads[0].company_id]);
@@ -105,7 +105,12 @@ describe("buyers from the database", () => {
       expect(row.searchedProduct).toBe("Pipe coating materials");
       expect(row.emailStatus).toBe("Intro sent");
       expect(row.opportunityId).toBe(opps[0].id);
+      // Rated by the search's buyer fit; the searched product is not repeated under "also can sell".
+      expect(row.fitScore).toBeGreaterThanOrEqual(97);
+      expect(row.searchFit).toBe("explicit");
+      expect(row.alsoSell).not.toContain("Pipe coating materials");
     }
+    expect((await searchBuyers({ run, stage: ["ready", "check", "early"], minFit: 95 })).rows.length).toBe(scoped.rows.length);
     const other = await searchBuyers({ run: "99999999-9999-4999-8999-999999999999", stage: ["ready", "check", "early"] });
     expect(other.rows).toHaveLength(0);
     const all = await searchBuyers({ stage: ["ready", "check", "early"] });

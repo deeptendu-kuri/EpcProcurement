@@ -1,11 +1,10 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Bookmark, Check, Loader2, Search } from "lucide-react";
 import type { LeadKind, RunInput } from "@/mvp/types";
 import { apiJson } from "./api-client";
-import { RunProgress } from "./run-progress";
 import { EVENTS, emit } from "./shell/events";
 import { useToast } from "./shell/toast";
 import { COUNTRIES } from "@/mvp/config/countries";
@@ -38,7 +37,6 @@ export interface FindFormProps {
 /** Find (09 §4.1, 13 §7): what you offer + markets + lead type → Search now (queued) → live progress; Save this search. */
 export function FindForm({ markets, products, materials: givenMaterials, initialRunId = null, initialTicketId = null, initialInput = null }: FindFormProps) {
   const router = useRouter();
-  const pathname = usePathname();
   const toast = useToast();
   const [, startTransition] = useTransition();
   const [query, setQuery] = useState(initialInput?.query ?? "");
@@ -85,7 +83,7 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
         if (ticket.runId) {
           setRunId(ticket.runId);
           setTicketId(null);
-          window.history.replaceState(null, "", `${pathname}?run=${ticket.runId}`);
+          router.push(`/find?run=${ticket.runId}`);
           return;
         }
         if (ticket.state === "failed") {
@@ -107,7 +105,7 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [ticketId, runId, pathname]);
+  }, [ticketId, runId, router]);
 
   const toggleMarket = (code: string) =>
     setSelected((current) => (current.includes(code) ? current.filter((value) => value !== code) : [...current, code]));
@@ -139,8 +137,10 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
       const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), productId, contactRole, researchMode, targetCompanies, markets: selected, leadKinds: leadKinds() } });
       emit(EVENTS.refreshStatus);
       if (ticket.runId) {
+        // The search's own workspace shows its live progress and shortlist.
         setRunId(ticket.runId);
-        window.history.replaceState(null, "", `${pathname}?run=${ticket.runId}`);
+        router.push(`/find?run=${ticket.runId}`);
+        return;
       } else {
         setRunId(null);
         setTicketId(ticket.ticketId);
@@ -185,10 +185,6 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
     }
   };
 
-  const onFinished = useCallback(() => {
-    emit(EVENTS.refreshStatus);
-    startTransition(() => router.refresh());
-  }, [router]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -274,7 +270,6 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
           Waiting in line{position > 0 ? ` (number ${position})` : ""}: another search is running. Yours starts right after it.
         </section>
       ) : null}
-      {runId ? <RunProgress key={runId} runId={runId} onFinished={onFinished} /> : null}
     </div>
   );
 }

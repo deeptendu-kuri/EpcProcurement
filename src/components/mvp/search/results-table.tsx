@@ -58,26 +58,51 @@ export interface ResultsTableProps {
   saving?: ReadonlySet<string>;
 }
 
+/** Rating words for the 0–100 buyer fit: the number stays visible, the word makes it scannable. */
+export function ratingWord(score: number): { word: string; tone: string } {
+  if (score >= 70) return { word: "Strong", tone: "bg-[var(--good-bg)] text-[var(--good)]" };
+  if (score >= 45) return { word: "Good", tone: "bg-[var(--info-bg)] text-[var(--info)]" };
+  if (score > 0) return { word: "Possible", tone: "bg-[var(--subtle)] text-[var(--text-2)]" };
+  return { word: "Not rated", tone: "bg-[var(--subtle)] text-[var(--muted)]" };
+}
+
+export function RatingBadge({ score }: { score: number }) {
+  const { word, tone } = ratingWord(score);
+  return (
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-semibold ${tone}`} title="Buyer fit for this search, 0–100">
+      {score > 0 ? <span className="tabular-nums">{score}</span> : null}
+      {word}
+    </span>
+  );
+}
+
+const EMAIL_TONE = (status: string) =>
+  /Meeting/.test(status) ? "bg-[var(--good-bg)] text-[var(--good)]"
+  : /Replied|Intro/.test(status) ? "bg-[var(--info-bg)] text-[var(--info)]"
+  : /Held|Stopped|Needs/.test(status) ? "bg-[var(--warn-bg)] text-[var(--warn)]"
+  : "bg-[var(--subtle)] text-[var(--text-2)]";
+
+const TH = "px-4 py-3 text-[12px] font-medium text-[var(--muted)]";
+const TD = "px-4 py-4 align-top";
+
 /**
- * Leads table (docs/mvp/17 §4.4): Company · Role in the chain (with tier) · Why they buy · What we can
- * sell (the searched product) · Where · From search · Email · Fit · Contacts. A click opens the evidence drawer.
+ * Leads table (docs/mvp/18 §2): Company (role, country, tier) · Search it came from · Will buy (the
+ * searched product and why) · Also can sell · Rating · Email · Contacts. A click opens the evidence drawer.
  */
 export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true, onSaveDerived, saving }: ResultsTableProps) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[960px] border-collapse text-[13.5px]" aria-label="Buyers">
+      <table className="w-full min-w-[1040px] border-collapse text-[14px] leading-[1.45]" aria-label="Buyers">
         <thead>
-          <tr className="bg-[#fcfcfd] text-left text-xs uppercase tracking-[.03em] text-[#6b7280]">
-            {selectable ? <th scope="col" className="w-[34px] border border-[var(--line)] px-2.5 py-2.5 font-medium"><span className="sr-only">Select</span></th> : null}
-            <th scope="col" className="w-[17%] border border-[var(--line)] px-2.5 py-2.5 font-medium">Company</th>
-            <th scope="col" className="w-[14%] border border-[var(--line)] px-2.5 py-2.5 font-medium" title="Tier 1 won the work; tier 2 and 3 supply them">Role in the chain</th>
-            <th scope="col" className="w-[22%] border border-[var(--line)] px-2.5 py-2.5 font-medium">Why they buy</th>
-            <th scope="col" className="w-[13%] border border-[var(--line)] px-2.5 py-2.5 font-medium">What we can sell</th>
-            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">Where</th>
-            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">From search</th>
-            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">Email</th>
-            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium" title="Buyer fit (0–100) and how sure we are">Fit</th>
-            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">Contacts</th>
+          <tr className="border-b border-[var(--line)] text-left">
+            {selectable ? <th scope="col" className={`w-[44px] ${TH}`}><span className="sr-only">Select</span></th> : null}
+            <th scope="col" className={`w-[24%] ${TH}`}>Company</th>
+            <th scope="col" className={`w-[14%] ${TH}`}>Search</th>
+            <th scope="col" className={`w-[25%] ${TH}`}>Will buy</th>
+            <th scope="col" className={`w-[14%] ${TH}`}>Also can sell</th>
+            <th scope="col" className={TH} title="Buyer fit for this search, 0–100">Rating</th>
+            <th scope="col" className={TH}>Email</th>
+            <th scope="col" className={TH}>Contacts</th>
           </tr>
         </thead>
         <tbody>
@@ -88,6 +113,10 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
             const derived = isDerivedRow(row);
             const tier: ChainTier = row.tier ?? 1;
             const moreDeals = Math.max(0, (row.dealsCount ?? 1) - 1);
+            const product = row.searchedProduct || row.sellSummary;
+            const country = row.country ? countryName(row.country) : null;
+            const fitNote = row.trigger ? `${triggerKindLabel(row.trigger.kind)}${row.trigger.date ? ` · ${row.trigger.date}` : ""}`
+              : row.searchFit === "explicit" ? "Named on their own website" : row.searchFit === "potential" ? "Their work uses it" : null;
             return (
               <tr
                 key={row.leadId}
@@ -95,9 +124,9 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                 data-tour={index === 0 ? "search-first-row" : undefined}
                 onClick={() => onOpen(row.leadId)}
                 aria-selected={isOpen}
-                className={`cursor-pointer align-top ${isSelected || isOpen ? "bg-[#f5f8ff]" : "hover:bg-[#fafbfc]"}`}
+                className={`cursor-pointer border-b border-[var(--line)] transition-colors last:border-b-0 ${isSelected || isOpen ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--hover)]"}`}
               >
-                {selectable ? <td className="border border-[var(--line)] px-2.5 py-[11px]" onClick={(event) => event.stopPropagation()}>
+                {selectable ? <td className={TD} onClick={(event) => event.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={isSelected}
@@ -105,11 +134,11 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                     title={derived ? "Save as buyer first" : undefined}
                     onChange={() => onToggle(row.leadId)}
                     aria-label={`Select ${row.name}`}
-                    className="mt-0.5 h-3.5 w-3.5 accent-[#111827]"
+                    className="mt-1 h-4 w-4 accent-[var(--accent)]"
                   />
                 </td> : null}
-                <td className="border border-[var(--line)] px-2.5 py-[11px]">
-                  <div className="flex items-center gap-2.5">
+                <td className={TD}>
+                  <div className="flex items-start gap-3">
                     <Avatar name={row.name} />
                     <div className="min-w-0">
                       <button
@@ -118,11 +147,29 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                           event.stopPropagation();
                           onOpen(row.leadId);
                         }}
-                        className="text-left font-semibold text-[#111827] hover:underline"
+                        className="text-left text-[15px] font-semibold text-[var(--text)] hover:text-[var(--accent)]"
                       >
                         {row.name}
                       </button>
-                      {row.isSample ? <div className="mt-1"><SampleBadge /></div> : null}
+                      <div className="mt-0.5 text-[13px] text-[var(--text-2)]">
+                        <span>{label}</span>
+                        {country ? <span className="text-[var(--muted)]"> · {country}</span> : null}
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="tier-cell">
+                        <TierBadge tier={tier} />
+                        {tier > 1 && row.link ? (
+                          <span className={`inline-block whitespace-nowrap rounded-full px-1.5 py-px text-[11px] font-semibold ${LINK_STYLES[row.link]}`}>{LINK_LABELS[row.link]}</span>
+                        ) : null}
+                        {tier > 1 && row.foundVia ? (
+                          <span className="text-[12px] text-[var(--muted)]">
+                            Found via{" "}
+                            <a href={`/buyers/${encodeURIComponent(row.foundVia.leadId)}`} onClick={(event) => event.stopPropagation()} className="text-[var(--accent)] hover:underline">
+                              {row.foundVia.name}
+                            </a>
+                          </span>
+                        ) : null}
+                        {row.isSample ? <SampleBadge /> : null}
+                      </div>
                       {derived && onSaveDerived && row.derivedKey ? (
                         <button
                           type="button"
@@ -131,57 +178,47 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                             onSaveDerived(row);
                           }}
                           disabled={saving?.has(row.derivedKey)}
-                          className="mt-1 inline-flex items-center gap-1 rounded-md border border-[var(--line)] bg-white px-1.5 py-0.5 text-[11.5px] font-semibold text-[#111827] hover:bg-[var(--subtle)] disabled:opacity-60"
+                          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-[var(--line)] bg-[var(--surface)] px-2 py-1 text-[12px] font-semibold text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-60"
                         >
-                          {saving?.has(row.derivedKey) ? <Loader2 size={11} className="animate-spin" aria-hidden /> : <Save size={11} aria-hidden />} Save as buyer
+                          {saving?.has(row.derivedKey) ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <Save size={12} aria-hidden />} Save as buyer
                         </button>
                       ) : null}
                     </div>
                   </div>
                 </td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px]">
-                  <RolePill role={row.role} label={label} />
-                  <div className="mt-1.5" data-testid="tier-cell"><TierBadge tier={tier} />
-                  {tier > 1 && row.link ? (
-                    <span className={`ml-1 inline-block whitespace-nowrap rounded-full px-1.5 py-px text-[10.5px] font-semibold ${LINK_STYLES[row.link]}`}>{LINK_LABELS[row.link]}</span>
-                  ) : null}
-                  {tier > 1 && row.foundVia ? (
-                    <div className="mt-1 text-[11.5px] text-[var(--muted)]">
-                      Found via{" "}
-                      <a href={`/buyers/${encodeURIComponent(row.foundVia.leadId)}`} onClick={(event) => event.stopPropagation()} className="text-[var(--accent)] hover:underline">
-                        {row.foundVia.name}
-                      </a>
-                    </div>
-                  ) : null}
-                  </div>
+                <td className={TD} data-testid="search-cell">
+                  {row.searches?.length ? (
+                    <>
+                      <span className="inline-block rounded-lg bg-[var(--subtle)] px-2 py-1 text-[12.5px] font-medium text-[var(--text)]">{row.searches[0].label}</span>
+                      {row.searches.length > 1 ? <div className="mt-1 text-[12px] text-[var(--muted)]" title={row.searches.slice(1).map((s) => s.label).join("\n")}>+{row.searches.length - 1} more {row.searches.length === 2 ? "search" : "searches"}</div> : null}
+                    </>
+                  ) : <span className="text-[var(--muted)]">—</span>}
                 </td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px] text-[#1f2937]">
-                  {row.trigger?<span className="mb-1 block text-xs font-semibold text-[var(--accent-2)]">{triggerKindLabel(row.trigger.kind)}{row.trigger.date?` · ${row.trigger.date}`:''}</span>:null}
-                  {row.buyingReason ? <span className="line-clamp-3" title={row.buyingReason}>{row.buyingReason}</span> : <span className="text-[#9ca3af]">{tier > 1 ? "In the supply chain of this deal" : "Not known yet"}</span>}
-                  {moreDeals ? <div className="mt-0.5 text-[11.5px] font-semibold text-[#475569]">+{moreDeals} more {moreDeals === 1 ? "deal" : "deals"}</div> : null}
-                </td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px] text-[#1f2937]">
-                  {row.searchedProduct || row.sellSummary || <span className="text-[#9ca3af]">Nothing matched yet</span>}
+                <td className={TD}>
+                  {product ? <div className="font-semibold text-[var(--text)]">{product}</div> : <div className="text-[var(--muted)]">Nothing matched yet</div>}
+                  {fitNote ? <div className="mt-0.5 text-[12.5px] font-medium text-[var(--accent)]">{fitNote}</div> : null}
+                  {row.buyingReason ? <p className="mt-1 line-clamp-2 text-[13px] text-[var(--text-2)]" title={row.buyingReason}>{row.buyingReason}</p>
+                    : <p className="mt-1 text-[13px] text-[var(--muted)]">{tier > 1 ? "In the supply chain of this deal" : "Reason not known yet"}</p>}
+                  {moreDeals ? <div className="mt-1 text-[12px] font-semibold text-[var(--text-2)]">+{moreDeals} more {moreDeals === 1 ? "deal" : "deals"}</div> : null}
                   {row.competitorNote ? (
-                    <div className="mt-0.5 flex items-start gap-1 text-[11.5px] text-[#b91c1c]">
-                      <AlertTriangle size={12} className="mt-px shrink-0" aria-hidden />
+                    <div className="mt-1 flex items-start gap-1 text-[12px] text-[var(--bad)]">
+                      <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
                       {row.competitorNote}
                     </div>
                   ) : null}
                 </td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px]">{countryName(row.country)}</td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px] text-[12.5px]">
-                  {row.searches?.length ? <>{row.searches[0].label}{row.searches.length > 1 ? <div className="text-[11.5px] text-[var(--muted)]">+{row.searches.length - 1} more</div> : null}</> : <span className="text-[#9ca3af]">—</span>}
+                <td className={`${TD} text-[13px] text-[var(--text-2)]`}>
+                  {row.alsoSell?.length ? row.alsoSell.join(", ") : <span className="text-[var(--muted)]">—</span>}
                 </td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px] text-[12.5px]">
-                  {row.emailStatus ? <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${/Meeting/.test(row.emailStatus) ? "bg-green-50 text-green-800" : /Replied|Intro/.test(row.emailStatus) ? "bg-blue-50 text-blue-800" : /Held|Stopped/.test(row.emailStatus) ? "bg-amber-50 text-amber-800" : "bg-[var(--subtle)] text-[var(--text-2)]"}`}>{row.emailStatus}</span> : <span className="text-[#9ca3af]">—</span>}
+                <td className={TD}>
+                  <RatingBadge score={row.fitScore} />
+                  <div className={`mt-1 text-[12px] ${HOW_SURE_STYLES[row.howSure]}`} title="How sure we are">{HOW_SURE_LABELS[row.howSure]}</div>
                 </td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px]">
-                  {row.fitScore > 0 ? <span className="font-bold tabular-nums">{row.fitScore}</span> : <span className="text-[var(--muted)]">Not scored</span>}
-                  <div className={`text-[11.5px] ${HOW_SURE_STYLES[row.howSure]}`} title="How sure we are">{HOW_SURE_LABELS[row.howSure]}</div>
+                <td className={TD}>
+                  {row.emailStatus ? <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-semibold ${EMAIL_TONE(row.emailStatus)}`}>{row.emailStatus}</span> : <span className="text-[var(--muted)]">—</span>}
                 </td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px] text-[12.5px]">
-                  <b className="text-[#111827]">{row.found}</b> of {row.total} found
+                <td className={`${TD} whitespace-nowrap text-[13px] text-[var(--text-2)]`}>
+                  <b className="font-semibold text-[var(--text)]">{row.found}</b> of {row.total} found
                 </td>
               </tr>
             );
