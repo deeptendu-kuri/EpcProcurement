@@ -13,7 +13,7 @@ import { rssSource } from '@/mvp/pipeline/sources/rss';
 import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tavily';
 import { collectBingQuery,collectRssFeed } from './sources';
 import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
-import { candidateForPage, extendInvestigation, seedInvestigations, domainOf, queueRead } from './investigation';
+import { candidateForPage, candidatePageIdentity, extendInvestigation, seedInvestigations, domainOf, queueRead } from './investigation';
 import { RESEARCH_SOURCES } from './registry';
 import { bundlePromptText,discoverCompanyBundle,loadCompanyBundle } from '@/mvp/discovery/bundle';
 import { z } from 'zod';
@@ -148,6 +148,10 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         if(seeded.ownName)associated=await candidateForPage(db,job.run_id,grounded);
       }
       const scoped=associated?await extendInvestigation(db,job.run_id,associated,grounded,stored.id,stored.text,links,input,session.budget):false;
+      // A looked-up website that never names the company is not its website: clear the guess and say so.
+      if(associated&&raw.research?.candidateId&&!scoped&&pageKind!=='junk'&&!associated.document_ids.length
+        &&associated.domain_hint===domainOf(grounded.url)&&!candidatePageIdentity(associated,stored.text))
+        await db.query("update research_candidates set state='review',domain_hint=null,reason='Website not confirmed: the page read does not name this company.',updated_at=now() where id=$1 and run_id=$2",[associated.id,job.run_id]);
       let paginationLimited=false;
       if(raw.research?.registryId){
         const entry=RESEARCH_SOURCES.find(s=>s.id===raw.research?.registryId);

@@ -104,24 +104,36 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
         {finished ? partialCoverage ? "Finished · partial coverage" : "Finished" : failed ? "Stopped" : status === "queued" ? "Starting" : "Running"}: “{runTitle(run)}”
       </p>
 
-      <div aria-live="polite" className="mt-2 space-y-1 text-sm">
-        {line ? <p className="font-semibold tabular-nums text-[#344054]">{line}</p> : null}
+      <div aria-live="polite" className="mt-2 space-y-2 text-sm">
+        {run?.adhoc_query?.productId && counters.researchCandidates !== undefined ? (
+          <dl aria-label="Search results so far" className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg bg-[#ecfdf3] p-3"><dt className="text-xs text-[#067647]">Buyers saved</dt><dd className="text-xl font-bold tabular-nums text-[#054f31]">{counters.scopedProspects ?? 0}</dd></div>
+            <div className="rounded-lg bg-[#f2f4f7] p-3"><dt className="text-xs text-[#475467]">Company names collected</dt><dd className="text-xl font-bold tabular-nums text-[#101828]">{counters.researchCandidates ?? 0}</dd></div>
+            <div className="rounded-lg bg-[#f2f4f7] p-3"><dt className="text-xs text-[#475467]">Pages read</dt><dd className="text-xl font-bold tabular-nums text-[#101828]">{counters.itemsRead ?? 0}</dd></div>
+          </dl>
+        ) : null}
         {latest ? <p className="text-[#475467]">{latest}</p> : !run ? <p className="text-[#667085]">Starting the search…</p> : null}
         {failed ? (
           <p role="alert" className="font-semibold text-[#b42318]">{run?.error || "The search stopped before it finished."}</p>
         ) : null}
         {error ? <p role="alert" className="text-[#b54708]">{error}</p> : null}
+        {finished && counters.scopedProspects === 0 ? <p className="text-sm text-[#475467]">No source-backed companies saved in this batch. This does not mean no buyers exist; check coverage and research outcomes.</p> : null}
+        {finished && partialCoverage ? <p className="text-xs text-[#b54708]">Some sources or pages remain unchecked. This result does not represent the whole market.</p> : null}
+        <details className="text-xs text-[#667085]">
+          <summary className="cursor-pointer font-semibold text-[#475467]">Research details</summary>
+          <div className="mt-2 space-y-1">
+        {line ? <p className="font-semibold tabular-nums text-[#344054]">{line}</p> : null}
         {run?.adhoc_query?.productId ? <p className="text-xs text-[#667085]">Candidate pages are research inputs, not buyers. Saved companies are shown separately; contacts and emails may remain blank.</p> : null}
         {counters.researchCandidates !== undefined ? <p className="text-xs text-[#667085]">{counters.researchCandidates} company research candidates · {counters.investigatedCompanies ?? 0} investigated · {counters.scopedProspects ?? 0} saved prospects</p> : null}
         {counters.sourcingLanes?<p className="text-xs text-[#667085]">Collecting: trigger → roundup → capability · {counters.sourcingLanes.awardArticles} award/news/filing articles · {counters.sourcingLanes.roundups} roundups fanned out to {counters.sourcingLanes.roundupCompanies} identity candidates · {counters.sourcingLanes.companySites} company sites · {counters.sourcingLanes.pending} runnable jobs remaining</p>:null}
         {counters.researchUsage && counters.researchLimits ? <p className="text-xs text-[#667085]">Usage: {counters.researchUsage.search}/{counters.researchLimits.search} search requests · {counters.researchUsage.reads}/{counters.researchLimits.reads} reads · {counters.researchUsage.aiCalls}/{counters.researchLimits.aiCalls} AI calls. Research stops at its budget.</p> : null}
         {counters.readFailures && Object.keys(counters.readFailures).length ? <details className="text-xs text-[#b54708]"><summary>Why some sources were unreadable</summary><ul className="mt-1 space-y-1">{Object.entries(counters.readFailures).map(([reason,count])=><li key={reason}>{reason.replace(/_/g,' ')}: {count}</li>)}</ul></details> : null}
-        {finished && partialCoverage ? <p className="text-xs text-[#b54708]">Some sources or pages remain unchecked. This result does not represent the whole market.</p> : null}
         {counters.researchStopReason ? <p className="text-xs text-[#b54708]">Coverage / review reason: {counters.researchStopReason}</p> : null}
         {pausedResearch?<p className="text-xs text-[#b54708]">Some saved work needs review or a provider reset before resuming. We do not silently repeat uncertain charged requests.</p>:null}
         {finished?<p className="text-xs text-[#667085]">This bounded batch has settled. {counters.coverage?.reason??(partialCoverage?'Review coverage warnings before resuming.':'No runnable research remains.')} Completion is not exhaustive market coverage.</p>:null}
         {run?.adhoc_query?.targetCompanies ? <p className="text-xs text-[#667085]">Research target: {run.adhoc_query.targetCompanies} companies · not a guaranteed yield. Reaching the target skips the capability fallback; already queued work still settles. Budgets remain the hard limits.</p> : null}
-        {finished && counters.scopedProspects === 0 ? <p className="text-sm text-[#475467]">No source-backed companies saved in this batch. This does not mean no buyers exist; check coverage and research outcomes.</p> : null}
+          </div>
+        </details>
       </div>
 
       <div className="mt-3">
@@ -157,7 +169,12 @@ export function RunProgress({ runId, onFinished }: { runId: string; onFinished?:
       {(finished||failed)&&run?.adhoc_query?.productId&&!run.adhoc_query.offline&&(pausedResearch||counters.deferredPages||counters.deferredUrls||counters.buyerAnalysisFailed)?<div className="mt-3 flex flex-wrap items-center gap-3"><button className="btn btn-secondary" disabled={continuing} onClick={()=>void continueAnalysis()}>{continuing?"Resuming…":"Resume saved research"}</button><p className="text-xs text-[#667085]">Same search and saved results. No repeat web search; resumes bounded page reads and AI checks, which may use additional AI credits. Provider limits still apply.</p></div>:null}
 
       {finished || run?.adhoc_query?.productId && status !== "queued" ? (
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex flex-wrap justify-end gap-2">
+          {run?.adhoc_query?.productId && (counters.researchCandidates ?? 0) > 0 ? (
+            <Link href={`/crm?search=${runId}#found-companies`} className="btn btn-secondary focus-ring inline-flex h-9 items-center rounded-md px-3 text-sm font-semibold">
+              Review companies found
+            </Link>
+          ) : null}
           <Link
             href={run?.adhoc_query?.productId ? `/crm?search=${runId}` : "/search"}
             className="btn-primary focus-ring inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold"

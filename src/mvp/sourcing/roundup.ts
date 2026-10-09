@@ -12,6 +12,34 @@ import { researchProgress,reserveBudget,markBudget,addJob,type ResearchBudget } 
 import { junkCompanyReason } from './entities';
 import { junkReason } from './junk';
 
+// Company-data, directory, job and social sites describe a company but are never its own website.
+const PROFILE_SITES=['globaldata.com','zoominfo.com','crunchbase.com','dnb.com','bloomberg.com','marketscreener.com','tofler.in','zaubacorp.com','moneycontrol.com',
+  'screener.in','tracxn.com','owler.com','rocketreach.co','craft.co','cbinsights.com','emis.com','wikipedia.org','linkedin.com','glassdoor.com','glassdoor.co.in',
+  'ambitionbox.com','naukri.com','indeed.com','internshala.com','justdial.com','indiamart.com','tradeindia.com','kompass.com','opencorporates.com','pitchbook.com',
+  'instafinancials.com','thecompanycheck.com','economictimes.indiatimes.com','business-standard.com','livemint.com','reuters.com','youtube.com','facebook.com',
+  'instagram.com','twitter.com','x.com'];
+const GENERIC_NAME=new Set(['limited','private','india','group','company','construction','constructions','engineering','international','projects','project',
+  'infrastructure','industries','corporation','services','holdings','global','energy','pipeline','pipelines','contracts','contracting']);
+const LEGAL=new Set(['limited','ltd','pvt','private','the','llc','co','inc','plc','and']);
+/**
+ * The company's own site among search results: its domain must carry a distinctive word of the name
+ * ("larsentoubro.com"), its initials ("hccindia.com") or its ampersand form ("lntecc.com" for L&T).
+ * Profile and directory sites never qualify. No match means no website, never a guess.
+ */
+export function officialSite<T extends {url:string}>(company:string,results:T[]):T|undefined {
+  const words=company.toLowerCase().replace(/\(.*?\)/g,' ').split(/[^a-z0-9&]+/).filter(Boolean);
+  const plain=words.flatMap(w=>w.split('&')).filter(Boolean);
+  const tokens=plain.filter(w=>w.length>=4&&!GENERIC_NAME.has(w)&&!LEGAL.has(w));
+  const initials=plain.filter(w=>!LEGAL.has(w)).map(w=>w[0]).join('');
+  const amp=company.includes('&')?company.toLowerCase().split('&').map(s=>s.trim()[0]??'').join('n'):'';
+  return results.find(r=>{
+    let host:string;try{host=new URL(r.url).hostname.toLowerCase().replace(/^www\./,'');}catch{return false;}
+    if(PROFILE_SITES.some(d=>host===d||host.endsWith('.'+d)))return false;
+    const labels=host.split('.').slice(0,-1).map(l=>l.replace(/[^a-z0-9]/g,''));
+    return labels.some(label=>tokens.some(t=>label.includes(t))||initials.length>=3&&label.startsWith(initials)||amp.length>=3&&label.startsWith(amp));
+  });
+}
+
 const claim=z.object({text:z.string().max(300),quote:z.string().min(3).max(3000)});
 const entry=z.object({
   name:z.string().min(3).max(180),quote:z.string().min(3).max(3000),
@@ -121,8 +149,12 @@ export async function lookupRoundupWebsite(db:Db,runId:string,input:RunInput,can
     try{results=await collect(ctx,query);await markBudget(db,runId,'search',key,'completed');}
     catch{await markBudget(db,runId,'search',key,'unknown');return {queued:0,warning:'Official-site lookup unavailable; no guessed website.'};}
   }
-  const found=results.find(r=>!junkReason(r.url,r.title,input.markets));
-  if(!found)return {queued:0,cached};
+  const found=officialSite(candidate.company,results.filter(r=>!junkReason(r.url,r.title,input.markets)));
+  if(!found){
+    // No result whose domain carries the company's name: say so instead of guessing a profile site.
+    await db.query("update research_candidates set state='review',reason='Official website not established: no search result matched the company name. No guessed website.',updated_at=now() where id=$1",[candidate.id]);
+    return {queued:0,cached,noOfficialSite:true};
+  }
   const domain=domainOf(found.url);
   await db.query('update research_candidates set domain_hint=coalesce(domain_hint,$2) where id=$1',[candidate.id,domain]);
   const raw:RawDoc={...found,url:'https://'+domain+'/',title:null,text:null,fallbackText:null,research:{lane:'investigation',candidateId:candidate.id,sourcingLane:'roundup'}};

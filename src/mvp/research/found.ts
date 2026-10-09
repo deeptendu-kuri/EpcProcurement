@@ -18,8 +18,28 @@ export interface FoundCompany {
   opportunityId: string | null;
   /** False for names that only appear in page furniture: finance widgets, publishers, unrelated articles. */
   relevant: boolean;
+  /** A hint from the source wording only; never a verified role. */
+  likelyRole: LikelyRole | null;
 }
-const key = (name: string) => name.toLowerCase().replace(/\b(?:ltd|limited|llc|l\.l\.c|pvt|private|inc|plc|co|company|corporation|corp)\b\.?/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+export type LikelyRole = 'owner' | 'contractor' | 'pipe_maker';
+// "GASCO, Abu Dhabi" and "GASCO" are one company: the place after a comma is not part of the name.
+const key = (name: string) => name.split(',')[0].toLowerCase().replace(/\b(?:ltd|limited|llc|l\.l\.c|pvt|private|inc|plc|co|company|corporation|corp)\b\.?/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * Likely role from how the source names the company: "Pipeline Project for GAIL" (the project owner, who
+ * often buys line pipe directly), a pipe mill or pipe order (a manufacturer, possibly a competitor), or
+ * construction and EPC wording (a contractor). Unknown stays empty.
+ */
+export function likelyRole(name: string, quote: string | null): LikelyRole | null {
+  const q = quote ?? '';
+  const short = name.split(/\s*[,(]/)[0].trim();
+  if (/\b(?:pipes?|tubulars?|tubes?)\b/i.test(name) || /\b(?:pipe|tube)s?\b[^.]{0,30}\b(?:order|maker|manufactur\w*|mills?)\b/i.test(q)) return 'pipe_maker';
+  const owner = [name, short].filter((n) => n.length >= 3).some((n) =>
+    new RegExp(`\\b(?:projects?|pipelines?|contracts?|orders?|network)\\b[^.]{0,80}?\\b(?:for|of|with|from|by)\\s+(?:the\\s+)?${escapeRe(n)}`, 'i').test(q));
+  if (owner) return 'owner';
+  if (/\b(?:construct\w*|contract\w*|EPC|engineer\w*|infrastructure|builders?|projects)\b/i.test(`${name} ${q}`)) return 'contractor';
+  return null;
+}
 
 interface CandidateRow {
   id: string; company: string; domain_hint: string | null; state: string; reason: string | null; identity_quote: string | null;
@@ -58,12 +78,16 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
     const [status, statusText]: [FoundStatus, string] = opportunityId ? ['saved', 'Saved as a buyer']
       : r.pending ? ['checking', 'Checking now']
       : r.state === 'unreadable' ? ['unreadable', 'Website could not be read']
+      : r.state === 'review' && /website not confirmed/i.test(r.reason ?? '') ? ['no_website', 'Website not confirmed']
+      : r.state === 'review' && /no search result matched/i.test(r.reason ?? '') ? ['no_website', 'Own website not found']
       : r.state === 'review' && /website not established/i.test(r.reason ?? '') ? (r.domain_hint ? ['not_checked', 'Website found · not read yet'] : ['no_website', 'Website not found yet'])
+      // Check now started but nothing is queued or done any more: the last step ended without a result.
+      : r.state === 'investigating' && !r.pages && r.domain_hint ? ['unreadable', 'Website checked · no company page']
       : r.state === 'review' && !LIMIT_REASON.test(r.reason ?? '') ? ['no_match', r.reason ?? 'No matching work found on its pages']
       : r.state === 'qualified' ? ['no_match', 'Matched, but not saved for this product or country']
       : ['not_checked', 'Not checked yet'];
     result.push({ id: r.id, name: r.company, website: r.domain_hint, status, statusText, source: r.url ? { title: r.title, url: r.url } : null,
-      quote: r.identity_quote, pagesRead: r.pages, opportunityId, relevant: relevantFound(r.company, r.identity_quote, r.domain_hint, Boolean(opportunityId)) });
+      quote: r.identity_quote, pagesRead: r.pages, opportunityId, relevant: relevantFound(r.company, r.identity_quote, r.domain_hint, Boolean(opportunityId)), likelyRole: likelyRole(r.company, r.identity_quote) });
   }
   return result;
 }
@@ -74,6 +98,11 @@ export async function queueCandidateCheck(tx: Queryable, runId: string, c: Candi
   const requeue = async (where: string, params: unknown[]) => (await tx.query(`update research_jobs set state='queued',result=null,error=null,attempts=0,
       lease_token=null,lease_until=null,available_at=now(),updated_at=now() where run_id=$1 and state in ('done','paused','failed') and ${where} returning id`, [runId, ...params])).rows.length > 0;
   let queued = false;
+  if (!c.document_ids.length && c.domain_hint) {
+    // Its looked-up site was already read and gave no company page: drop that guess and search again.
+    const read = (await tx.query("select 1 from research_jobs where run_id=$1 and stage='read' and key=$2 and state='done' and not (result ? 'skipped')", [runId, `https://${c.domain_hint}/`])).rows.length > 0;
+    if (read) { await tx.query('update research_candidates set domain_hint=null where id=$1', [c.id]); c = { ...c, domain_hint: null }; }
+  }
   if (c.document_ids.length) {
     queued = Boolean(await addJob(tx, runId, 'analyse', `bundle:${c.id}`, { candidateId: c.id }, 30))
       || await requeue(`stage='analyse' and key=$2 and (result ? 'skipped' or state<>'done')`, [`bundle:${c.id}`]);
@@ -83,7 +112,8 @@ export async function queueCandidateCheck(tx: Queryable, runId: string, c: Candi
     queued = await requeue(`stage='read' and key=$2 and (result ? 'skipped' or state<>'done')`, [raw.url]) || await queueRead(tx, runId, raw, budget, 46);
   } else {
     queued = Boolean(await addJob(tx, runId, 'collect', `official:${c.id}`, { source: 'roundup-website', candidateId: c.id, sourcingLane: 'roundup' }, 760))
-      || await requeue(`stage='collect' and key=$2 and (result ? 'skipped' or state<>'done')`, [`official:${c.id}`]);
+      // A repeated lookup reuses the cached search results, so it costs no new search credit.
+      || await requeue(`stage='collect' and key=$2`, [`official:${c.id}`]);
   }
   if (queued) await tx.query("update research_candidates set state='investigating',reason=null,updated_at=now() where id=$1", [c.id]);
   return queued;
@@ -121,4 +151,15 @@ export async function checkFoundCompany(db: Db, runId: string, candidateId: stri
   });
   if (queued) await researchProgress(db, runId, 'info', `Checking ${c.company}: website, work and contacts. It is not a buyer until its own pages show matching work.`);
   return { queued, message: queued ? `Checking ${c.company}. Results appear here and in the tables when done.` : `${c.company} was already checked; see its status.` };
+}
+
+/** "Check next 5": the same per-company check for several listed companies, stopping if the AI allowance runs out. */
+export async function checkFoundCompanies(db: Db, runId: string, candidateIds: string[]): Promise<{ queued: number; message: string }> {
+  let queued = 0, last = '';
+  for (const id of candidateIds) {
+    const result = await checkFoundCompany(db, runId, id);
+    if (result.queued) queued++;
+    else { last = result.message; if (/allowance/i.test(result.message)) break; }
+  }
+  return { queued, message: queued ? `Checking ${queued} ${queued === 1 ? 'company' : 'companies'}: website, work and contacts. Results appear here as each finishes.` : last || 'Nothing left to check.' };
 }

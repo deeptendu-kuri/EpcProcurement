@@ -21,7 +21,7 @@ describe('durable discovery-only integration',()=>{
     expect((await db.query("select distinct extracted_by from evidence where document_id in (select document_id from run_documents where run_id=$1)",[id])).rows).toEqual([{extracted_by:'rule:company-application'}]);
     expect(deps.discover).not.toHaveBeenCalled();expect((await db.query('select id from contact_points')).rows).toHaveLength(0);
     expect((await db.query('select id from funnel_threads')).rows).toHaveLength(0);
-  });
+  },20000); // ~80 durable ticks against PGlite; 5 s is too tight when the suite runs in parallel
   it('saves several companies with blank optional details, dedupes source repeats and has no outreach side effects',async()=>{
     vi.stubEnv('TAVILY_API_KEY','');vi.stubEnv('MVP_RESEARCH_NEWS','off');
     const input={query:'Power and control cables',productId:'cables',markets:['IN'],leadKinds:['supply_subcontract' as const],researchMode:'batch' as const};

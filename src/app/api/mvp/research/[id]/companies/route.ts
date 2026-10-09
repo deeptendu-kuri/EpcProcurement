@@ -1,7 +1,7 @@
 import {NextResponse} from 'next/server';
 import {z} from 'zod';
 import {getDb} from '@/mvp/db';
-import {checkFoundCompany,listFoundCompanies} from '@/mvp/research/found';
+import {checkFoundCompanies,checkFoundCompany,listFoundCompanies} from '@/mvp/research/found';
 import {startResearchWorker} from '@/mvp/research/worker';
 import {NO_STORE,jsonError,readJson,serverError,uuidSchema} from '../../../_shared/http';
 
@@ -19,9 +19,9 @@ export async function GET(_request:Request,{params}:{params:Promise<{id:string}>
 /** "Check now": queue the normal website, work and contact checks for one listed company. */
 export async function POST(request:Request,{params}:{params:Promise<{id:string}>}) {
   const {id}=await params;if(!uuidSchema.safeParse(id).success)return jsonError(404,'Search not found.');
-  const body=await readJson(request,z.object({candidateId:uuidSchema}).strict());if(body.response)return body.response;
+  const body=await readJson(request,z.union([z.object({candidateId:uuidSchema}).strict(),z.object({candidateIds:z.array(uuidSchema).min(1).max(10)}).strict()]));if(body.response)return body.response;
   try{
-    const result=await checkFoundCompany(getDb(),id,body.data.candidateId);
+    const result='candidateIds' in body.data?await checkFoundCompanies(getDb(),id,body.data.candidateIds):await checkFoundCompany(getDb(),id,body.data.candidateId);
     if(result.queued)startResearchWorker();
     return NextResponse.json(result,{headers:NO_STORE});
   }catch(error){

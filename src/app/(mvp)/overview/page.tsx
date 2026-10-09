@@ -25,7 +25,7 @@ export default async function OverviewPage() {
       </div>
       <ol className="grid gap-4 border-t border-[var(--line)] bg-[var(--subtle)] p-6 text-sm sm:grid-cols-4 sm:px-10">{journey.map(({icon:Icon,label},index) => <li key={label} className="flex items-center gap-2"><Icon size={16} className="shrink-0 text-[var(--accent)]" aria-hidden /><span><span className="text-[var(--muted)]">{index+1}. </span>{label}</span></li>)}</ol>
     </section> : <section className="card overflow-hidden" aria-label="Your searches" data-tour="overview-searches">
-      <div className="card-header"><div><h2 className="card-title">Your searches</h2><p className="mt-1 text-sm text-[var(--muted)]">Each search keeps its own leads. Results are never mixed here.</p></div><span className="pill">{productSearches.length} searches</span></div>
+      <div className="card-header"><div><h2 className="card-title">Your searches</h2><p className="mt-1 text-sm text-[var(--muted)]">Each search keeps its own leads. Results are never mixed here.</p></div><span className="pill">{productSearches.length} {productSearches.length===1?'search':'searches'}</span></div>
       <ul className="divide-y divide-[var(--line)]">{productSearches.map(r => {
         const workflows = workflowCounts.find(t=>t.run_id===r.id)?.workflow_count ?? 0;
         const meetings = workflowCounts.find(t=>t.run_id===r.id)?.meeting_count ?? 0;

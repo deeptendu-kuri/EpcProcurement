@@ -168,3 +168,46 @@ describe('AI rate limits during research',()=>{
     expect((await failingAnalysis('groq 429: Rate limit reached on tokens per day (TPD)')).state).toBe('paused');
   });
 });
+
+describe('found-company role hints and duplicates',()=>{
+  it('reads a likely role from the source wording, and leaves unknown roles empty',async()=>{
+    const {likelyRole}=await import('./found');
+    expect(likelyRole('Example Gas Company','2000 km natural gas pipeline project for Example Gas Company, India')).toBe('owner');
+    expect(likelyRole('Example Refining Company (Exref)','Inter-refineries pipeline project for Example Refining Company (Exref), Abu Dhabi')).toBe('owner');
+    expect(likelyRole('Example Energy','signed a major pipeline contract with Example Energy valued at over SAR 771 million')).toBe('owner');
+    expect(likelyRole('Example Pipes Integrated Company',null)).toBe('pipe_maker');
+    expect(likelyRole('Example Corp','its subsidiary bagged its largest-ever HFIW pipe order worth ₹4,000 crore')).toBe('pipe_maker');
+    expect(likelyRole('Example Builders','one of the largest construction companies in the country')).toBe('contractor');
+    expect(likelyRole('Example Group','a major player in highways and airports')).toBeNull();
+  });
+  it('merges a name repeated with its city',async()=>{
+    const id=await settledRun(false);
+    const d=await storeDocument(db,id,doc);
+    await registerCandidate(db,id,'Example Gas',null,d.id,'Pipeline network project for Example Gas');
+    await registerCandidate(db,id,'Example Gas, Abu Dhabi',null,d.id,'Gas pipeline project for Example Gas, Abu Dhabi');
+    expect((await listFoundCompanies(db,id)).map(c=>c.name)).toEqual(['Example Gas']);
+  });
+});
+
+describe('official website lookup for listed companies',()=>{
+  it('accepts only a domain carrying the company name, initials or ampersand form',async()=>{
+    const {officialSite}=await import('@/mvp/sourcing/roundup');
+    const r=(...urls:string[])=>urls.map(url=>({url}));
+    expect(officialSite('Example & Partners Limited',r('https://www.globaldata.com/company-profile/example','https://www.examplepartners.com/'))?.url).toBe('https://www.examplepartners.com/');
+    expect(officialSite('Larsen & Toubro Limited',r('https://www.zoominfo.com/c/lt','https://www.lntecc.com/'))?.url).toBe('https://www.lntecc.com/');
+    expect(officialSite('Hindustan Example Company',r('https://hecindia.com/'))?.url).toBe('https://hecindia.com/');
+    expect(officialSite('Example Gas',r('https://www.globaldata.com/example-gas','https://en.wikipedia.org/wiki/Example_Gas'))).toBeUndefined();
+    expect(officialSite('Example Gas',r('https://news.othersite.com/example'))).toBeUndefined();
+  });
+  it('drops an already-read wrong website and searches again on a second Check now',async()=>{
+    const id=await settledRun(false);
+    const d=await storeDocument(db,id,doc);
+    const c=await registerCandidate(db,id,'Example Pipeline Builders Limited','profile-site.example',d.id,doc.text);
+    await db.query("insert into research_jobs(run_id,stage,key,state,payload,result) values($1,'read','https://profile-site.example/','done','{}'::jsonb,'{\"documentId\":null}'::jsonb)",[id]);
+    await db.query("update research_candidates set state='investigating' where id=$1",[c.id]);
+    expect((await listFoundCompanies(db,id))[0].statusText).toBe('Website checked · no company page');
+    expect((await checkFoundCompany(db,id,c.id)).queued).toBe(true);
+    expect((await db.query<{domain_hint:string|null}>('select domain_hint from research_candidates where id=$1',[c.id])).rows[0].domain_hint).toBeNull();
+    expect((await db.query("select state from research_jobs where run_id=$1 and key=$2",[id,`official:${c.id}`])).rows).toEqual([{state:'queued'}]);
+  });
+});
