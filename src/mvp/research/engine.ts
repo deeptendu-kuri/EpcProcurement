@@ -12,6 +12,7 @@ import { gdeltSource } from '@/mvp/pipeline/sources/gdelt';
 import { rssSource } from '@/mvp/pipeline/sources/rss';
 import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tavily';
 import { collectBingQuery,collectRssFeed } from './sources';
+import type { ResearchBudget } from './store';
 import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
 import { candidateForPage, candidatePageIdentity, extendInvestigation, seedInvestigations, domainOf, queueRead } from './investigation';
 import { RESEARCH_SOURCES } from './registry';
@@ -317,6 +318,12 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
   const sessions=(await db.query<{run_id:string}>(`select s.run_id from research_sessions s where s.state='active' and ($1::uuid is null or s.run_id=$1)
     and not exists(select 1 from research_jobs j where j.run_id=s.run_id and j.state in ('queued','running'))`,[runId??null])).rows;
   for(const s of sessions){
+    // Names found outside list pages (news, company sites) are rated before the search settles (docs/mvp/18 §5).
+    const rs=(await db.query<{input:RunInput|null;budget:ResearchBudget}>('select r.adhoc_query as input,s.budget from research_sessions s join runs r on r.id=s.run_id where s.run_id=$1',[s.run_id])).rows[0];
+    if(rs?.input?.productId){
+      const rated=await rateCandidates(db,s.run_id,rs.input,key=>budgetedAwardProviders(db,s.run_id,key,rs.budget).provider('triage')).catch(()=>null);
+      if(rated?.rated.length)await researchProgress(db,s.run_id,'check',`Shortlist: rated ${rated.rated.length} more companies; ${rated.rated.filter(r=>r.rating>=45).length} look like buyers.`);
+    }
     const jobs=(await db.query<{stage:string;state:string;error:string|null;payload:{source?:string;raw?:RawDoc};result:{deferred?:number;documentId?:string;unreadable?:boolean;budgetLimited?:boolean}|null}>('select stage,state,error,payload,result from research_jobs where run_id=$1',[s.run_id])).rows;
     const collections=jobs.filter(j=>j.stage==='collect');
     const remoteCollections=collections.filter(j=>!['directory-seed','registry'].includes(j.payload.source??''));

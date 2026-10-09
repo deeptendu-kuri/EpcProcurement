@@ -16,6 +16,7 @@ describe("shortlist rating rules (docs/mvp/18 §5)", () => {
     expect(heuristicRating("KRR Engineering", "pressure vessel manufacturers", null, "steel plates")).toMatchObject({ role: "Process equipment fabricator", source: "rules" });
     expect(heuristicRating("PETRO GOLD LUBRICANT AND GREASE LLC", "PETRO GOLD LUBRICANT AND GREASE LLC", null, "steel plates").rating).toBeLessThan(25);
     expect(heuristicRating("Octave", null, null, "steel plates")).toMatchObject({ rating: 30, role: "Not clear yet" });
+    expect(heuristicRating("ZenWeb", "ZenWeb is a digital marketing agency for metal fabricators in Malaysia.", null, "steel plates")).toMatchObject({ rating: 8, role: "Service company" });
   });
   it("asks only about buying, from the given words, and bounds the answer", () => {
     const rows = [{ id: "a", company: "KRR Engineering", identity_quote: "pressure vessel manufacturers", title: null }, { id: "b", company: "Lubrex FZE", identity_quote: null, title: null }];
@@ -29,8 +30,8 @@ describe("shortlist rating rules (docs/mvp/18 §5)", () => {
       { id: "c9", rating: 90 },
     ] }), rows, "plates");
     expect(parsed).toEqual([
-      { id: "a", rating: 100, role: "Pressure vessel fabricator", reason: "Rolls plates into vessel shells.", also: ["flanges"], source: "ai" },
-      { id: "b", rating: 2, role: "Lubricant trader", reason: "Sells lubricants.", also: [], source: "ai" },
+      { id: "a", rating: 100, role: "Pressure vessel fabricator", reason: "Rolls plates into vessel shells.", also: ["flanges"], source: "ai", raw: 100 },
+      { id: "b", rating: 2, role: "Lubricant trader", reason: "Sells lubricants.", also: [], source: "ai", raw: 2 },
     ]);
   });
 });
@@ -40,15 +41,24 @@ describe("ratings stay consistent with their own words (9 Oct steel plates findi
   it("caps sellers of the material and self-declared non-buyers", () => {
     expect(consistentRating(r(90, "Steel plate manufacturer", "Produces stainless steel plates, not a buyer of steel plates."), { company: "New Castle Stainless Plate", identity_quote: "turn raw slab into plate" }, "steel plates")).toBe(5);
     expect(consistentRating(r(70, "Steel plate supplier", "Sells SA516 plates for boilers"), { company: "Navgraha Steels INC", identity_quote: "Navgraha Steels INC" }, "steel plates")).toBe(5);
+    expect(consistentRating(r(70, "Wind farm EPC contractor", "DEME installed turbines, not line pipe buyer."), { company: "DEME", identity_quote: "DEME installed turbines" }, "line pipe")).toBe(5);
+    expect(consistentRating(r(70, "Subsea contractor", "Supplies control umbilicals, not line pipe; rating low."), { company: "OneSubsea", identity_quote: "OneSubsea supplies umbilicals" }, "line pipe")).toBe(5);
   });
   it("keeps a bare name without any work in it below Strong", () => {
     expect(consistentRating(r(90, "Pressure vessel fabricator"), { company: "STAR GATE ENERGY", identity_quote: "STAR GATE ENERGY" }, "steel plates")).toBe(50);
     expect(consistentRating(r(60, "Pressure vessel fabricator"), { company: "Prime Petrolium FZE", identity_quote: "Prime Petrolium FZE" }, "steel plates")).toBe(10);
+    expect(consistentRating(r(90, "Oil and gas company", "Aramco owns pipelines and buys line pipe."), { company: "Saudi Arabian Oil Company (Aramco)", identity_quote: "Aramco awarded the pipeline contract" }, "line pipe")).toBe(90);
     expect(consistentRating(r(60, "Composite pressure vessel fabricator"), { company: "Hexagon Industries", identity_quote: "Hexagon Industries" }, "steel plates")).toBe(30);
     expect(consistentRating(r(50, "Gas cylinder manufacturer", "Makes composite cylinders; steel plates may be used"), { company: "Luxfer Gas Cylinders", identity_quote: "Luxfer Gas Cylinders" }, "steel plates")).toBe(30);
     expect(consistentRating(r(50, "Vessel design verification", "Provides software for pressure vessel design"), { company: "Octave", identity_quote: "" }, "steel plates")).toBe(20);
     expect(consistentRating(r(90, "Pressure vessel fabricator"), { company: "Uni-Vessels Engineering", identity_quote: "Uni-Vessels Engineering" }, "steel plates")).toBe(90);
     expect(consistentRating(r(90, "Pressure vessel fabricator"), { company: "KRR Engineering", identity_quote: "one of India's most trusted pressure vessel manufacturers" }, "steel plates")).toBe(90);
+  });
+  it("sets project names aside: the project's owner or contractor is the buyer", () => {
+    for (const name of ["Ichthys LNG Project", "North Field Expansion Project", "Marjan Increment Project – Package 4 Offshore Gas Facilities", "Scarborough FPU", "TenneT BorWin 6 OSS", "Umm Shaif Field Development"])
+      expect(ruleRating(name, name, "line pipe")?.rating).toBe(0);
+    for (const name of ["McDermott", "Subsea 7", "Petronas", "Larsen & Toubro"]) expect(ruleRating(name, name, "line pipe")).toBeNull();
+    expect(consistentRating({ rating: 85, role: "EPC contractor", reason: "Requires line pipe.", also: [] }, { company: "Ichthys LNG Project", identity_quote: "Ichthys LNG Project" }, "line pipe")).toBe(0);
   });
   it("sets place names aside without AI", () => {
     expect(ruleRating("JURF AJMAN UAE", "JURF AJMAN UAE", "steel plates")).toMatchObject({ rating: 0, reason: "A place name, not a company." });
@@ -111,5 +121,20 @@ describe("rating a search's companies", () => {
     const result = await rateCandidates(db, run, { productId: "plates" }, () => provider);
     expect(asked).toEqual([["Kawan Engineering Sdn Bhd", "MSET Engineering Corporation Sdn Bhd"], ["MSET Engineering Corporation Sdn Bhd"]]);
     expect(result.rated.map((x) => x.source)).toEqual(["ai", "ai"]);
+  });
+
+  it("lets AI re-rate plain-rule guesses later, but keeps definite rule decisions", async () => {
+    await db.query("insert into research_candidates (run_id, key, company, identity_quote, state, rating, rating_source, rating_role) values ($1,'guess','Bina Fabricators','Bina Fabricators','review',66,'rules','Steel fabricator'),($1,'cert','DNV','DNV','review',0,'rules','Not a buyer')", [run]);
+    const seen: string[] = [];
+    const provider: LLMProvider = { name: "groq", model: "test", async complete(request) {
+      const companies = JSON.parse(request.user).companies as { id: string; name: string }[];
+      seen.push(...companies.map((c) => c.name));
+      return { tokensIn: 1, tokensOut: 1, text: JSON.stringify({ companies: companies.map((c) => ({ id: c.id, rating: 78, role: "Structural steel fabricator", reason: "Fabricates steel structures from plate." })) }) };
+    } };
+    expect((await rateCandidates(db, run, { productId: "plates" }, null)).rated).toHaveLength(0); // no AI: guesses stay
+    await rateCandidates(db, run, { productId: "plates" }, () => provider);
+    expect(seen).toEqual(["Bina Fabricators"]);
+    const found = await listFoundCompanies(db, run);
+    expect(found.find((f) => f.name === "Bina Fabricators")).toMatchObject({ rating: 78, guessed: false });
   });
 });

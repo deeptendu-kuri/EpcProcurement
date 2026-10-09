@@ -79,7 +79,7 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
     not: data.companies.filter((c) => !c.relevant),
   };
   const shown = lists[filter];
-  const unrated = relevant.filter((c) => c.rating === null).length;
+  const unrated = data.companies.filter((c) => c.rating === null || c.guessed).length;
   const nextToCheck = relevant.filter((c) => !c.opportunityId && CHECKABLE.includes(c.status) && (c.rating === null || c.rating >= 25)).slice(0, 5);
   const markets = data.run.markets.map(marketName);
   const u = data.usage;
@@ -126,7 +126,7 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
             </div>
             <div className="flex flex-wrap gap-2">
               {unrated ? <button type="button" className="btn btn-secondary" disabled={busy !== null} onClick={() => void act("rate", { action: "rate" })}>
-                {busy === "rate" ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <Sparkles size={15} aria-hidden />}Rate {unrated} {unrated === 1 ? "company" : "companies"}</button> : null}
+                {busy === "rate" ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <Sparkles size={15} aria-hidden />}Rate {unrated} with AI</button> : null}
               {nextToCheck.length > 1 ? <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => void act("bulk", { candidateIds: nextToCheck.map((c) => c.id) })}>
                 {busy === "bulk" ? "Starting…" : `Check top ${nextToCheck.length}`}</button> : null}
             </div>

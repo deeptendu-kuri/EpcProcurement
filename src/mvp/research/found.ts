@@ -12,7 +12,7 @@ import { researchAiAllowance, type ExtendableBudget } from './extend';
 import { looksLikeSupplier, relevantFound } from '@/mvp/sourcing/names';
 import { getCatalogueItem } from '@/mvp/config/buyers-config';
 import { getLLM } from '@/mvp/llm';
-import { consistentRating, rateCandidates } from './shortlist';
+import { consistentRating, rateCandidates, ruleRating } from './shortlist';
 
 export type FoundStatus = 'saved' | 'checking' | 'not_checked' | 'no_website' | 'no_match' | 'unreadable';
 export interface FoundCompany {
@@ -30,6 +30,8 @@ export interface FoundCompany {
   ratingReason: string | null;
   /** Other catalogue products it would likely buy (names). */
   alsoBuys: string[];
+  /** True when plain rules guessed the rating (no AI yet); AI can rate it again. */
+  guessed: boolean;
 }
 export type LikelyRole = 'owner' | 'contractor' | 'pipe_maker' | 'supplier';
 // "GASCO, Abu Dhabi" and "GASCO" are one company: the place after a comma is not part of the name.
@@ -109,7 +111,8 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
       relevant: Boolean(opportunityId) || (rating !== null ? rating >= 10 : relevantFound(r.company, r.identity_quote, r.domain_hint, false, r.title) && !looksLikeSupplier(r.identity_quote)),
       likelyRole: likelyRole(r.company, r.identity_quote),
       rating, ratingRole: r.rating_role, ratingReason: r.rating_reason,
-      alsoBuys: (r.rating_also ?? []).map((id) => getCatalogueItem(id)?.shortName ?? id) });
+      alsoBuys: (r.rating_also ?? []).map((id) => getCatalogueItem(id)?.shortName ?? id),
+      guessed: r.rating_source === 'rules' && !ruleRating(r.company, r.identity_quote, productName) });
   }
   // Saved buyers first, then by rating (best first), unrated last in the order found.
   return result.sort((a, b) => Number(Boolean(b.opportunityId)) - Number(Boolean(a.opportunityId)) || (b.rating ?? -1) - (a.rating ?? -1));
@@ -200,6 +203,7 @@ export async function rateFoundCompanies(db: Db, runId: string): Promise<{ rated
   const result = await rateCandidates(db, runId, { productId: run.product_id }, provider ? () => provider : null, 200);
   const likely = result.rated.filter((r) => r.rating >= 45).length;
   if (result.rated.length) await researchProgress(db, runId, 'check', `Shortlist: rated ${result.rated.length} companies; ${likely} look like buyers.`);
+  if (!provider && !result.rated.length) return { rated: 0, likely: 0, message: "Today's AI allowance is used up. Rating with AI is available again after midnight UTC." };
   return { rated: result.rated.length, likely, message: result.rated.length
     ? `Rated ${result.rated.length} companies: ${likely} look like buyers.${provider ? '' : " Today's AI allowance is low, so plain rules rated them."}${result.warning ? ` ${result.warning}` : ''}`
     : 'Every company in this search is already rated.' };
