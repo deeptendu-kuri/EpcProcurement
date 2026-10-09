@@ -28,6 +28,9 @@ import { captureOpportunities } from '@/mvp/opportunities';
 import { awardTriggerSnapshots, budgetedAwardProviders, capabilityTriggerSnapshots } from '@/mvp/sourcing/hybrid';
 import {persistAwardTriggers} from '@/mvp/sourcing/triggers';
 import {persistRoundupAwards} from '@/mvp/sourcing/roundup-triggers';
+import { extendResearchIfShort,retryAfterRateLimit } from './extend';
+import { REPEAT_STORY_PRIORITY,sameStory } from '@/mvp/sourcing/story';
+import { LLMHttpError,QuotaExceededError } from '@/mvp/llm/types';
 import { tedSource } from '@/mvp/pipeline/sources/ted';
 import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@/mvp/sourcing/roundup';
 import {SOURCING_REGISTRY,collectRegistry,registryPageTargets,registryReadWarning,registryRaw} from '@/mvp/sourcing/registry';
@@ -167,9 +170,11 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       }
       // The persisted stage stays 'analyse' for compatibility with migration 019;
       // the explicit subtype is analyse:award. WP5 adds the trigger table, not a second run.
+      // Another outlet's copy of a story already queued is analysed after lists and company pages.
+      const repeat=award&&!raw.structured&&(await db.query<{title:string|null}>("select payload->'raw'->>'title' as title from research_jobs where run_id=$1 and stage='analyse' and payload->>'kind'='analyse:award'",[job.run_id])).rows.some(r=>sameStory(r.title,grounded.title));
       const next:Parameters<typeof completeJob>[3]=list?
         [{stage:'analyse',key:`roundup:${stored.id}`,payload:{kind:'analyse:roundup',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY[pageKind]}]:award?
-        [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY[pageKind]}]:
+        [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:repeat?REPEAT_STORY_PRIORITY:EXTRACTOR_PRIORITY[pageKind]}]:
         candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:buyerResearchPriority(grounded,stored.text,input)}]:[];
       await completeJob(db,job,{documentId:stored.id,candidate,award,pageKind,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},next);
       await markBudget(db,job.run_id,'read',job.key,'completed');
@@ -269,6 +274,10 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
       await completeJob(db,job,{budgetLimited:true,skipped:'Shared AI budget exhausted; saved original retained.'});
       await finishIdleResearch(db,job.run_id);return {processed:true,budgetLimited:true};
     }
+    // Groq answers 429 for both per-minute and per-day limits; only the per-minute one clears soon.
+    const perMinute=!(error instanceof QuotaExceededError)&&(error instanceof LLMHttpError&&error.status===429||error instanceof Error&&/\b429\b|rate.?limit/i.test(error.message))
+      &&!(error instanceof Error&&/per day|\b(?:TPD|RPD)\b|daily/i.test(error.message));
+    if(perMinute&&job.stage==='analyse'&&job.attempts<4){await retryAfterRateLimit(db,job);return {processed:true,retrying:true};}
     const quota=error instanceof Error&&/quota|rate.?limit|429|budget/i.test(error.message);
     if(quota&&job.stage==='analyse'){await parkJob(db,job,'AI provider quota/rate limit: saved research is retained.');return {processed:true,paused:true};}
     const message=error instanceof Error?error.message:'';
@@ -313,6 +322,8 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
     const budgetStop=(j:typeof jobs[number])=>j.state==='paused'&&/budget exhausted/i.test(j.error??'');
     const partial=jobs.some(j=>j.state==='paused'&&!budgetStop(j)||j.stage==='analyse'&&j.state==='failed');
     const coverageLimited=jobs.some(j=>budgetStop(j)||(j.result?.deferred??0)>0||j.result?.budgetLimited);
+    // Fewer buyers than wanted: re-run the work that stopped only at a limit, under a larger budget.
+    if(!allSourcesFailed&&!partial&&await extendResearchIfShort(db,s.run_id))continue;
     const state=allSourcesFailed?'failed':partial?'partial':'done';
     const stopReason=partial||coverageLimited?(jobs.find(j=>j.state==='paused')?.error||'Some sources/pages could not be processed within the budget.'):null;
     await db.tx(async tx=>{

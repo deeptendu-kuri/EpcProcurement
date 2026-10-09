@@ -55,7 +55,10 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
       // Hybrid work geography is independently verified; never reject a Belgian HQ for UAE work.
       // Older/offline searches keep their established country eligibility without claiming a trigger.
       const hybrid=(await tx.query('select run_id from research_sessions where run_id=$1',[runId])).rows.length>0;
-      if(best?.country?!input.markets.includes(best.country):!hybrid&&(!record.view.country||!input.markets.includes(record.view.country)))continue;
+      // A company based in a searched country is kept even when this contract is abroad
+      // (an Indian EPC winning UAE work is still an Indian buyer); the table shows both places.
+      const basedHere=Boolean(record.view.country&&input.markets.includes(record.view.country));
+      if(best?.country?!input.markets.includes(best.country)&&!basedHere:!hybrid&&!basedHere)continue;
       const proof = record.view.proof.filter(p => readIds.has(p.evidenceId));
       if (!proof.length) continue;
       if (companies.has(record.view.companyId)) continue;

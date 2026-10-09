@@ -149,6 +149,8 @@ describe('durable research checkpoints',()=>{
     expect((await sessionFor(db,id))?.state).toBe('failed');
   });
   it('settles reviewed work with parked jobs as partial, but never finishes future queued work',async()=>{
+    // Base settle contract; extension rounds (re-running budget-parked work) are covered in extend.test.ts.
+    vi.stubEnv('MVP_MIN_BUYERS','0');
     const id=await createResearchRun(input,db);
     const first=(await db.query<{id:string}>('select id from research_jobs where run_id=$1 limit 1',[id])).rows[0];
     const original=await storeDocument(db,id,doc(32));

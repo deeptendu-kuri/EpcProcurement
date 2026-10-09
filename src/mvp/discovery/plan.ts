@@ -9,7 +9,7 @@ import { MATERIAL_ACTIVITIES } from "./material";
 export function buyingActivities(productId: string): string[] { return [...(MATERIAL_ACTIVITIES[productId] ?? [])]; }
 export type ResearchMode = "preview" | "batch" | "deep";
 type BudgetInput = Pick<RunInput, "query" | "markets"> & {researchMode?:ResearchMode; targetCompanies?:number};
-const MODE_BUDGETS = {
+export const MODE_BUDGETS = {
   preview:{searchQueries:4,bingQueries:6,maxPages:40,maxAiPages:20,maxAiTokens:60_000,maxPagesPerDomain:4,maxRepairCalls:1,targetCompanies:10},
   batch:{searchQueries:8,bingQueries:12,maxPages:80,maxAiPages:40,maxAiTokens:120_000,maxPagesPerDomain:4,maxRepairCalls:2,targetCompanies:30},
   deep:{searchQueries:24,bingQueries:30,maxPages:200,maxAiPages:80,maxAiTokens:250_000,maxPagesPerDomain:4,maxRepairCalls:2,targetCompanies:100},
