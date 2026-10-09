@@ -94,8 +94,10 @@ export function companyPageLinks(links:{url:string;text:string}[],domain:string)
 }
 /** Identity on the company's own domain must corroborate a directory hint before bundling. */
 export function candidatePageIdentity(candidate:ResearchCandidate,text:string) {
-  const short=candidate.company.replace(/(?:[,\s]+(?:L\.?L\.?C\.?|LIMITED|LTD\.?|PVT\.?|PRIVATE|CO\.?))+\s*$/i,'').trim();
-  return namesCompany(text,[candidate.company])||(short.length>=8&&short.split(/\s+/).length>=2&&namesCompany(text,[short]));
+  // "Kalpataru Projects International Ltd (KPIL)": the bracketed short form is not part of the legal name.
+  const base=candidate.company.replace(/\s*\([^)]*\)\s*/g,' ').trim();
+  const short=base.replace(/(?:[,\s]+(?:L\.?L\.?C\.?|LIMITED|LTD\.?|PVT\.?|PRIVATE|CO\.?))+\s*$/i,'').trim();
+  return namesCompany(text,[candidate.company])||base!==candidate.company&&namesCompany(text,[base])||(short.length>=8&&short.split(/\s+/).length>=2&&namesCompany(text,[short]));
 }
 export async function extendInvestigation(db:Db,runId:string,c:ResearchCandidate,raw:RawDoc,documentId:string,text:string,links:{url:string;text:string}[],input:RunInput,budget:{maxPages:number}) {
   if(!c.domain_hint||domainOf(raw.url)!==c.domain_hint)return false;

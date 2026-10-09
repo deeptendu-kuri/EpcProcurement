@@ -23,7 +23,8 @@ export interface FoundCompany {
 }
 export type LikelyRole = 'owner' | 'contractor' | 'pipe_maker';
 // "GASCO, Abu Dhabi" and "GASCO" are one company: the place after a comma is not part of the name.
-const key = (name: string) => name.split(',')[0].toLowerCase().replace(/\b(?:ltd|limited|llc|l\.l\.c|pvt|private|inc|plc|co|company|corporation|corp)\b\.?/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+// "(KPIL)" is a short form, not part of the name, so "… Ltd (KPIL)" and "… Limited" match.
+const key = (name: string) => name.split(',')[0].replace(/\([^)]*\)/g, ' ').toLowerCase().replace(/\b(?:ltd|limited|llc|l\.l\.c|pvt|private|inc|plc|co|company|corporation|corp)\b\.?/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
  * Likely role from how the source names the company: "Pipeline Project for GAIL" (the project owner, who
@@ -50,11 +51,16 @@ const LIMIT_REASON = /budget|deferred|limit/i;
 const WORK = /\b(?:pipes?|pipelines?|tub(?:e|ular)s?|construct\w*|contract\w*|EPC|engineer\w*|infrastructure|projects?|refin\w*|petroleum|oil|gas|steel|fabricat\w*|mechanical|civil|build\w*|develop\w*|energy|power|water|utilit\w*|plants?|terminal|onshore|offshore|cables?)\b/i;
 // Market-news furniture: share prices, results and advice boxes beside an article.
 const NOT_WORK = /\b(?:share price|stock price|investment advice|dividend|earnings|results? today|q[1-4] results?|according to [A-Z][a-z]+ data|subscribe|newsletter)\b/i;
+// Headline wording inside a "name": verbs, amounts and list words ("… Secures A $300M Vessel Contract", "UAE Construction Companies Overview").
+const HEADLINE = /(?:\$|€|₹)\s?\d|\b\d+(?:\.\d+)?\s?(?:m|bn|mn|million|billion|crore)\b|\b(?:secures?|signs?|drives?|wins?|bags|awards?|launch\w*|announces?|overview|activity|record|list|top|best|guide|how|why|what|across|amid)\b/i;
+const MEDIA_OR_BODY = /\b(?:monitor|tracker|observatory|excellence|magazine|journal|digest|times|herald|guardian|gazette|weekly|daily|news|media|wiki\w*|blog)\b/i;
 /** A listed name counts as a work-related company when its own source line is about work, not page furniture. */
 export function relevantFound(name: string, quote: string | null, website: string | null, saved: boolean): boolean {
   if (saved) return true;
   if (junkCompanyReason(name) || (website && nonCompanyDomain(website))) return false;
   if (!/[a-z]/i.test(name)) return false; // garbled or non-name text
+  if (HEADLINE.test(name)) return false; // an article title, not a company
+  if (MEDIA_OR_BODY.test(name)) return false; // publishers, trackers and industry bodies are not buyers
   const line = `${name} ${quote ?? ''}`;
   return WORK.test(line) && !NOT_WORK.test(quote ?? '');
 }

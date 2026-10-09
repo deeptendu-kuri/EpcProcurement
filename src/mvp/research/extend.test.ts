@@ -211,3 +211,26 @@ describe('official website lookup for listed companies',()=>{
     expect((await db.query("select state from research_jobs where run_id=$1 and key=$2",[id,`official:${c.id}`])).rows).toEqual([{state:'queued'}]);
   });
 });
+
+describe('found-company list quality from the live UAE run',()=>{
+  it('folds away headlines, trackers and industry bodies but keeps long real company names',async()=>{
+    const {relevantFound}=await import('./found');
+    expect(relevantFound('Example Arabia and Egypt Drive Record Hotel Construction Activity Across the Middle East',null,null,false)).toBe(false);
+    expect(relevantFound('Example Drydocks Secures A $300M Vessel Construction',null,null,false)).toBe(false);
+    expect(relevantFound('UAE Construction Companies Overview',null,null,false)).toBe(false);
+    expect(relevantFound('Example Energy Monitor',null,null,false)).toBe(false);
+    expect(relevantFound('Constructing Excellence',null,null,false)).toBe(false);
+    expect(relevantFound('EXAMPLE Mechanical Contractor & Manufacturer for OIL & GAS Onshore & Offshore',null,null,false)).toBe(true);
+    expect(relevantFound('Consolidated Example Contractors Company','an EPC contractor',null,false)).toBe(true);
+  });
+  it('treats a bracketed short form as part of the same company',async()=>{
+    const {candidatePageIdentity}=await import('./investigation');
+    const c={id:'x',key:'x',company:'Example Projects International Ltd (EPIL)',domain_hint:null,identity_document_id:null,identity_quote:null,document_ids:[],state:'investigating'};
+    expect(candidatePageIdentity(c,'Welcome to Example Projects International Limited, an EPC company.')).toBe(true);
+    const id=await settledRun(false);
+    const d=await storeDocument(db,id,doc);
+    await registerCandidate(db,id,'Example Projects International Ltd (EPIL)',null,d.id,'Example Projects International Ltd (EPIL) secured a pipeline EPC contract');
+    await registerCandidate(db,id,'Example Projects International Limited',null,d.id,'Example Projects International Limited pipeline work');
+    expect(await listFoundCompanies(db,id)).toHaveLength(1);
+  });
+});
