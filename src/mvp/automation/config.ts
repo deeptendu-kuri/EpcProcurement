@@ -6,10 +6,19 @@ import { requirePersistentWorker,serverlessRuntime } from "@/mvp/runtime";
 
 export { AUTOMATION_RECIPIENT };
 const identityText = (value: string | undefined, limit: number) => value?.replace(/[\r\n<>]/g," ").trim().slice(0,limit) || null;
-export const seller = () => ({ name: identityText(process.env.SALES_PERSON_NAME,120) || "Deeptendu Kuri", email: AUTOMATION_RECIPIENT,
-  company: identityText(process.env.SALES_COMPANY_NAME,160),
-  description: "EPC procurement support for the exact searched product. Evaluate sourcing options against the buyer's technical requirements, quality expectations and budget. Certifications, stock, prices and lead times are not confirmed." });
-export function sellerSignature() { const s=seller();return `Kind regards,\n${s.name}${s.company?`\n${s.company}`:""}\nProcurement support\n${s.email}`; }
+const plainEmail = (value: string | undefined) => {
+  const v = value?.trim().toLowerCase() ?? "";
+  return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(v) ? v : null;
+};
+/** The seller (our client's salesperson). The approved demo inbox plays the BUYER, so it is never the seller's identity. */
+export const seller = () => {
+  const ownEmail = plainEmail(process.env.SALES_PERSON_EMAIL);
+  return { name: identityText(process.env.SALES_PERSON_NAME,120) || "Deeptendu Kuri",
+    email: ownEmail && ownEmail !== AUTOMATION_RECIPIENT.toLowerCase() ? ownEmail : null,
+    company: identityText(process.env.SALES_COMPANY_NAME,160),
+    description: "EPC procurement support for the exact searched product. Evaluate sourcing options against the buyer's technical requirements, quality expectations and budget. Certifications, stock, prices and lead times are not confirmed." };
+};
+export function sellerSignature() { const s=seller();return `Kind regards,\n${s.name}${s.company?`\n${s.company}`:""}\nProcurement support${s.email?`\n${s.email}`:""}`; }
 /** Explicit demo-only opt-in, frozen on new threads. Never weakens the real contact gate. */
 export function prospectDemoEnabled() { return process.env.MVP_PROSPECT_DEMO_OUTREACH === "on"; }
 export function prospectsPerSearch() {

@@ -3,6 +3,11 @@
 
 // Doc 16: additive hybrid-source contracts. WP5 materialises these snapshots in SQL.
 export type TriggerKind = 'award' | 'order' | 'tender' | 'subcontract' | 'capability';
+/** "award" means a contract award (the company won a contract or tender), never a prize. Awards are not required to be a lead. */
+export const TRIGGER_KIND_LABELS: Record<TriggerKind, string> = {
+  award: 'Contract won', order: 'Order won', tender: 'Open tender', subcontract: 'Subcontract won', capability: 'Does this work · no contract yet',
+};
+export const triggerKindLabel = (kind?: TriggerKind | null) => (kind ? TRIGGER_KIND_LABELS[kind] ?? kind : 'Not established');
 export interface Trigger {
   id: string; kind: TriggerKind; role: 'contractor'|'subcontractor'|'supplier'|'owner'; title: string;
   date: string | null; datePrecision: 'day'|'month'|'year'|'unknown'; valueUsd: number | null;

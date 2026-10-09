@@ -156,12 +156,13 @@ async function touchedProjects(db: Queryable, runId: string): Promise<string[]> 
   return unique(rows.map((r) => r.project_id).filter(Boolean));
 }
 
-async function runKinds(db: Queryable, runId: string): Promise<{ exists: boolean; kinds: LeadKind[] }> {
+async function runKinds(db: Queryable, runId: string): Promise<{ exists: boolean; kinds: LeadKind[]; markets: string[] }> {
   const { rows } = await db.query<{ adhoc_query: RunInput | null }>("select adhoc_query from runs where id = $1", [runId]);
   const all: LeadKind[] = ["bid", "supply_subcontract"];
-  if (!rows[0]) return { exists: false, kinds: all };
+  if (!rows[0]) return { exists: false, kinds: all, markets: [] };
   const kinds = rows[0].adhoc_query?.leadKinds?.filter((k): k is LeadKind => k === "bid" || k === "supply_subcontract");
-  return { exists: true, kinds: kinds?.length ? kinds : all };
+  const markets = (rows[0].adhoc_query?.markets ?? []).map((m) => String(m).toUpperCase());
+  return { exists: true, kinds: kinds?.length ? kinds : all, markets };
 }
 
 /** Insert or update the lead for a candidate; append score history. Returns whether it was created. */
@@ -275,7 +276,7 @@ export async function buildSignalsAndScore(
   let updated = 0;
   for (const candidate of candidates) {
     try {
-      const ctx = await loadContext(db, candidate, now, insightsCache);
+      const ctx = await loadContext(db, candidate, now, insightsCache, run.markets);
       if (!ctx) continue;
       const result = scoreContext(ctx);
       const outcome = await upsertLead(db, candidate, result, runRef, ctx);

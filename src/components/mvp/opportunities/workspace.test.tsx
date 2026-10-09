@@ -26,7 +26,7 @@ describe("guided workspace", () => {
     const header=exampleCompany().row;header.hqCountry='BE';header.operatingCountry='AE';
     const evidence:EvidenceDrawerView={header,why:'Example Engineering 1 Limited constructs gas pipelines in UAE.',sources:[{documentId:'Example-doc',url:'https://example.com/Example',domain:'example.com',title:'Example verified page',publishedAt:null,kind:'company_site',quotes:[{evidenceId:'Example-proof',sentence:'Example Engineering 1 Limited constructs gas pipelines in UAE.',highlight:'constructs gas pipelines',proves:'material'}]}],contacts:[],related:{above:[],below:[]},activity:[]};
     render(<OpportunityWorkspace opportunity={{...opportunity,buying_reason:'Example unverified legacy claim',activity_quote:'Example unverified legacy claim',activity_date:'2026-10-08'}} buyer={buyer} returnTo='/crm' events={[]} drafts={[]} points={[]} demoEmail={{enabled:false,ready:false,recipient:null,error:null}} evidenceView={evidence}/>);
-    expect(screen.getByRole('region',{name:'Trigger'}).textContent).toContain('Capability only');
+    expect(screen.getByRole('region',{name:'Trigger'}).textContent).toContain('no contract yet');
     expect(screen.getByRole('article',{name:'Source: Example verified page'}).querySelector('mark')?.textContent).toBe('constructs gas pipelines');
     const info=screen.getByRole('region',{name:'Company information'});expect(info.textContent).toContain('Headquarters countryBelgium');expect(info.textContent).toContain('Operating country · verified workUAE');
     expect(screen.queryByText('Example unverified legacy claim')).toBeNull();

@@ -8,7 +8,7 @@
  */
 import { getCatalogue } from "@/mvp/config/buyers-config";
 import { countryName, locationMatches } from "./format";
-import { BUYER_ROLE_LABELS, BUYER_STAGE_LABELS } from "./types";
+import { BUYER_ROLE_LABELS, BUYER_STAGE_LABELS, triggerKindLabel } from "./types";
 import type {
   BuyerFacets,
   BuyerRow,
@@ -166,7 +166,7 @@ export function buildFacets(records: readonly BuyerRecord[], search: BuyerSearch
   const itemName = (id: string) => catalogue.find((i) => i.id === id)?.shortName ?? id;
   const hide = hideCompetitors(search);
   return {
-    triggers:count(pass('triggers').flatMap(r=>r.row.trigger?[r.row.trigger.kind]:[]),v=>v==='capability'?'Capability only':v),
+    triggers:count(pass('triggers').flatMap(r=>r.row.trigger?[r.row.trigger.kind]:[]),triggerKindLabel),
     roles: count(pass("roles").map((r) => r.view.role), (v) => BUYER_ROLE_LABELS[v]),
     countries: count(
       pass("location").map((r) => (search.location?.basis === "site" ? r.siteCountry : r.hqCountry)).filter((c): c is string => Boolean(c)),

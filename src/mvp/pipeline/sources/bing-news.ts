@@ -9,6 +9,7 @@
  */
 import { XMLParser } from "fast-xml-parser";
 import { MARKET_NAMES } from "@/mvp/config/markets";
+import { COUNTRIES } from "@/mvp/config/countries";
 import type { MarketCode } from "@/mvp/types";
 import type { RawDoc, Source, SourceContext } from "../contracts";
 import {
@@ -105,7 +106,7 @@ export function buildBingQuery(terms: string[], market: string): string {
  */
 export function buildBingQueries(terms: string[], market: string): string[] {
   const code = market.toUpperCase();
-  const country = MARKET_NAMES[code as MarketCode] ?? market;
+  const country = MARKET_NAMES[code as MarketCode] ?? COUNTRIES.find((c) => c.code === code)?.name ?? market;
   const scope = newsScope(terms);
   const pipeish = /pipe/.test(scope);
   // "pipe order" catches line-pipe supply orders ("Welspun bags pipe order"); other scopes keep their words.
@@ -231,7 +232,8 @@ export const bingNewsSource: Source = {
     const docs: RawDoc[] = [];
     let failures = 0;
     let requests = 0;
-    const markets = ctx.input.markets.filter((m) => BING_MKT[m.toUpperCase()]);
+    // Every selected country is searched; countries without their own Bing edition use the global English one.
+    const markets = ctx.input.markets.filter((m) => COUNTRIES.some((c) => c.code === m.toUpperCase()));
     for (const market of markets) {
       let taken = 0;
       for (const query of buildBingQueries(ctx.terms, market)) {
@@ -239,7 +241,7 @@ export const bingNewsSource: Source = {
         requests++;
         try {
           await politeWait("www.bing.com", BING_INTERVAL_MS);
-          const url = `${BING_NEWS_URL}?${new URLSearchParams({ q: query, format: "rss", mkt: BING_MKT[market.toUpperCase()] })}`;
+          const url = `${BING_NEWS_URL}?${new URLSearchParams({ q: query, format: "rss", mkt: BING_MKT[market.toUpperCase()] ?? "en-us" })}`;
           const res = await getText(
             url,
             "application/rss+xml, application/xml, text/xml",

@@ -28,7 +28,7 @@ describe('WP8 hybrid SuperSearch projections',()=>{
   });
   it('counts actual trigger facets and rejects arbitrary kinds/recipient parameters',()=>{
     const r=record();r.view.sellItems=[];r.view.team=[];r.view.howSure='low';r.view.reach={email:'allowed'} as never;r.view.role='epc_contractor';r.signals=[];
-    expect(buildFacets([r],{},new Date('2026-10-08')).triggers).toEqual([{value:'capability',label:'Capability only',count:1}]);
+    expect(buildFacets([r],{},new Date('2026-10-08')).triggers).toEqual([{value:'capability',label:'Does this work · no contract yet',count:1}]);
     expect(parseBuyerSearch({triggers:{kinds:['made-up']}}).ok).toBe(false);
     expect(parseBuyerSearch({triggers:{recipient:'example@example.com'}}).ok).toBe(false);
   });

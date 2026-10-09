@@ -23,7 +23,7 @@ describe("local funnel startup isolation", () => {
   it("requires explicit worker activation and a stable session secret", () => {
     const env=localFunnelEnv({...base,APPROVED_DEMO_RECIPIENT_EMAIL:"new-demo@gmail.com",DEMO_RECIPIENT_EMAIL:"scraped@example.com"},root);
     expect(env.DEMO_RECIPIENT_EMAIL).toBe("new-demo@gmail.com");
-    expect(localFunnelEnv({...base,SALES_PERSON_NAME:"Hritik Debnath"},root).DEMO_EMAIL_FROM).toBe("Hritik Debnath | Procurement demo <onboarding@resend.dev>");
+    expect(localFunnelEnv({...base,SALES_PERSON_NAME:"Example Seller",SALES_COMPANY_NAME:"Example Supplies LLC"},root).DEMO_EMAIL_FROM).toBe("Example Seller · Example Supplies LLC <onboarding@resend.dev>");
     expect(localFunnelEnv({ ...base, MVP_FUNNEL_WORKER: "on" }, root).MVP_FUNNEL_WORKER).toBe("on");
     expect(() => localFunnelEnv({ ...base, MVP_FUNNEL_WORKER: "external" }, root)).toThrow("off or on");
     expect(() => localFunnelEnv({ SESSION_SECRET: "short" }, root)).toThrow("32 characters");

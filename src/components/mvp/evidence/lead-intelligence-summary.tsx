@@ -23,7 +23,7 @@ export function LeadIntelligenceSummary({lead,leadId,workspace}:{lead:LeadRow;le
         <div><dt className="text-xs text-[var(--muted)]">Where the work is</dt><dd>{lead.operatingCountry?marketName(lead.operatingCountry):'Not established'}</dd></div>
         <div><dt className="text-xs text-[var(--muted)]">Headquarters</dt><dd>{lead.hqCountry?marketName(lead.hqCountry):'Not established'}</dd></div>
       </dl>
-      {trigger?.kind==='capability'?<p className="mt-3 text-xs text-amber-800">Relevant company services only; a recent award or active order has not been verified.</p>:null}
+      {trigger?.kind==='capability'?<p className="mt-3 text-xs text-amber-800">Does this kind of work; no recent contract win or order found yet.</p>:null}
     </section>
     <nav aria-label="Buyer details and next steps" className="flex flex-col items-start gap-2">
       {workspace?<Link href={`${workspace}&tab=conversation`} className="btn btn-secondary btn-sm">Email & meeting progress →</Link>:null}

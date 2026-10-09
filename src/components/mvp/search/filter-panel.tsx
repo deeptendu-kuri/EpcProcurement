@@ -21,6 +21,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { BuyerFacets, BuyerRole, BuyerSignal, BuyerStage, ChainTier, SlotRole } from "@/mvp/buyers/types";
+import { TRIGGER_KIND_LABELS } from "@/mvp/buyers/types";
 
 const TIER_OPTION_LABELS: Record<ChainTier, string> = { 1: "Tier 1 · won the work", 2: "Tier 2 · supplies them", 3: "Tier 3 · supplies tier 2" };
 import {
@@ -316,7 +317,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
         </Group>
 
         <Group icon={<Zap size={15}/>} title="Trigger" defaultOpen active={state.triggerKinds.length+(state.triggerAge?1:0)}>
-          <label className="block text-xs">Trigger kind<select aria-label="Trigger kind" className="control mt-1 w-full" value={state.triggerKinds[0]??''} onChange={e=>onChange({triggerKinds:e.target.value?[e.target.value as import('@/mvp/buyers/types').TriggerKind]:[]})}><option value="">All triggers</option>{['award','order','tender','subcontract','capability'].map(v=><option key={v} value={v}>{v==='capability'?'Capability only':v}</option>)}</select></label>
+          <label className="block text-xs">Trigger kind<select aria-label="Trigger kind" className="control mt-1 w-full" value={state.triggerKinds[0]??''} onChange={e=>onChange({triggerKinds:e.target.value?[e.target.value as import('@/mvp/buyers/types').TriggerKind]:[]})}><option value="">All triggers</option>{(['award','order','tender','subcontract','capability'] as const).map(v=><option key={v} value={v}>{TRIGGER_KIND_LABELS[v]}</option>)}</select></label>
           <label className="mt-2 block text-xs">Trigger age<select aria-label="Trigger age" className="control mt-1 w-full" value={state.triggerAge} onChange={e=>onChange({triggerAge:e.target.value})}><option value="">Any date</option>{[30,90,365,540].map(n=><option key={n} value={n}>Last {n} days</option>)}<option value="undated">Date not established</option></select></label>
         </Group>
         <Group icon={<Zap size={15} />} title="Buying signal" active={state.signals.length + (state.withinDays ? 1 : 0)}>

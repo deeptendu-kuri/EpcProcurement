@@ -78,8 +78,12 @@ export async function loadContext(
   candidate: Candidate,
   now: Date,
   insightsCache: InsightsCache = new Map(),
+  searchMarkets: string[] = [],
 ): Promise<ScoringContext | null> {
-  const profile = getClientProfile();
+  // The countries chosen in this search are the markets; the profile list is only the default.
+  const base = getClientProfile();
+  // Any ISO country can be searched; the market gate only compares codes, so widening the type is safe.
+  const profile = searchMarkets.length ? { ...base, markets: searchMarkets as typeof base.markets } : base;
   const buyer = await one<CompanyRow>(db, "select * from companies where id = $1", [candidate.buyerId]);
   if (!buyer) return null;
   const project = candidate.projectId ? await one<ProjectRow>(db, "select * from projects where id = $1", [candidate.projectId]) : null;

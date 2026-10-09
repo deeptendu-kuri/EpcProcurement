@@ -3,6 +3,7 @@
 import { AlertTriangle, Loader2, Save } from "lucide-react";
 import { isDerivedLeadId, type BuyerRow, type ChainTier } from "@/mvp/buyers/types";
 import { SampleBadge } from "../badges";
+import { triggerKindLabel } from "@/mvp/buyers/types";
 import { HOW_SURE_LABELS, HOW_SURE_STYLES, LINK_LABELS, LINK_STYLES, ROLE_STYLES, TENDER_STYLE, TIER_STYLES, avatarColour, countryName, initials, isTenderLabel, roleText, whatTheyDoText } from "./buyer-labels";
 
 /** A derived row: a tier 2/3 company with no stored lead yet (docs/mvp/15 §D). */
@@ -138,7 +139,7 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                   </div>
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px]">
-                  <RolePill role={row.role} label={label} />{row.trigger?<span className="mt-2 block text-xs font-semibold text-[var(--accent-2)]">{row.trigger.kind==='capability'?'Capability only':row.trigger.kind}{row.trigger.date?` · ${row.trigger.date}`:''}</span>:null}
+                  <RolePill role={row.role} label={label} />{row.trigger?<span className="mt-2 block text-xs font-semibold text-[var(--accent-2)]">{triggerKindLabel(row.trigger.kind)}{row.trigger.date?` · ${row.trigger.date}`:''}</span>:null}
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px]" data-testid="tier-cell">
                   <TierBadge tier={tier} />
