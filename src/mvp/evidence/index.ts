@@ -42,8 +42,6 @@ export async function sourceCards(db:Queryable,ids:string[]):Promise<SourceCard[
   const cards=new Map<string,SourceCard>();
   for(const r of rows){
     const quote=originalQuote(r.text,r.quote);if(!quote)continue;
-    // A page title ("Product & Services – Example Ltd") only names the company; it proves no work.
-    if(titleOnly(quote))continue;
     let domain:string;try{const u=new URL(r.url);if(!['https:','http:'].includes(u.protocol))continue;domain=u.hostname;}catch{continue;}
     const classified=classifyPage({url:r.url,title:r.title,text:r.text});
     if(classified==='junk')continue;
@@ -52,7 +50,12 @@ export async function sourceCards(db:Queryable,ids:string[]):Promise<SourceCard[
     for(const proves of proofGroups(r.fields,quote))card.quotes.push({evidenceId:r.id,sentence:sentenceFor(r.text,quote,null,null)??quote,highlight:quote,proves});
     cards.set(r.document_id,card);
   }
-  return [...cards.values()];
+  // A page title or a bare company name ("Product & Services – Example Ltd") proves no work: hide it
+  // when real statements remain, so the panel never ends up empty.
+  const all=[...cards.values()];
+  const nameOnly=(q:SourceCard['quotes'][number])=>titleOnly(q.sentence)||titleOnly(q.highlight)||(!/[a-z]/.test(q.highlight)&&q.highlight.split(/\s+/).length<=8);
+  if(!all.some(c=>c.quotes.some(q=>!nameOnly(q))))return all;
+  return all.map(c=>({...c,quotes:c.quotes.filter(q=>!nameOnly(q))})).filter(c=>c.quotes.length);
 }
 async function companyProofIds(db:Queryable,companyId:string){
   return (await db.query<{evidence_id:string}>("select evidence_id from fact_evidence where entity_type='company' and entity_id=$1",[companyId])).rows.map(r=>r.evidence_id);

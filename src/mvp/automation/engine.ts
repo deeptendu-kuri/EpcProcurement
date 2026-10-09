@@ -116,7 +116,7 @@ export async function startEmailTest(productId:string) {
 }
 
 export async function listFunnelThreads(opportunityId?:string) {
-  return (await getDb().query<FunnelThread&{company:string;product:string;keyword:string;run_id:string|null;project_name:string|null;why:string|null}>(`select t.*,coalesce(o.product_name,t.test_product) as product,coalesce(o.keyword,'Email workflow test — not a buyer') as keyword,o.run_id,p.name as project_name,coalesce(c.canonical_name,'Your demo inbox') as company,o.buying_reason as why
+  return (await getDb().query<FunnelThread&{company:string;product:string;keyword:string;run_id:string|null;project_name:string|null;why:string|null}>(`select t.*,coalesce(o.product_name,t.test_product) as product,coalesce(o.keyword,'Email workflow test — not a buyer') as keyword,o.run_id,p.name as project_name,coalesce(c.canonical_name,'Your demo inbox') as company,coalesce(nullif(o.activity_quote,''),(select tr.title from company_triggers tr where tr.company_id=o.company_id and tr.run_id=o.run_id order by tr.kind='capability',tr.created_at limit 1),o.buying_reason) as why
     from funnel_threads t left join search_opportunities o on o.id=t.opportunity_id left join companies c on c.id=t.company_id left join leads l on l.id=o.lead_id left join projects p on p.id=l.project_id
     ${opportunityId?"where t.opportunity_id=$1":""} order by t.created_at desc limit 200`,opportunityId?[opportunityId]:[])).rows
     .map(({reply_token,...row})=>({...row,product:searchedProductLabel(row.product_id,row.keyword,row.product),hasReplyAddress:Boolean(reply_token),

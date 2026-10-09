@@ -50,6 +50,10 @@ describe('names that are not buyers',()=>{
     expect(genericServicePhrase('Pressure Vessel Fabrication')).toBe(true);
     expect(genericServicePhrase('Example Steel Pressure Vessel Fabrication')).toBe(false);
     expect(junkFoundName('Example Engineering Pvt. Ltd.','Example Engineering is a trusted pressure vessel manufacturer')).toBeNull();
+    expect(junkFoundName('Example Institut za materiale',null)).toBe('institution');
+    expect(junkFoundName('Pressure Vessel Fabrication',null)).toBe('service phrase, not a name');
+    expect(relevantFound('ExampleWeb','ExampleWeb is a digital marketing agency for metal fabricators in Malaysia.',null,false)).toBe(false);
+    expect(relevantFound('Example Vessels Sdn Bhd','Example Vessels builds pressure vessels to ASME standards.',null,false)).toBe(true);
   });
   it('marks sellers of the material as suppliers, not buyers',()=>{
     expect(looksLikeSupplier('At Example Steel Corporation, we supply high-strength steel plates')).toBe(true);

@@ -19,7 +19,19 @@ const SLOGAN = /^(?:we|our|your|you|i|the)\b/i;
 // Words showing the company is named for project, construction or material work.
 const WORK = /\b(?:pipes?|pipelines?|tub(?:e|ular)s?|construct\w*|contract\w*|EPC|engineer\w*|infrastructure|projects?|refin\w*|petroleum|oil|gas|steel|fabricat\w*|mechanical|civil|build\w*|develop\w*|energy|power|water|utilit\w*|plants?|terminal|onshore|offshore|cables?|vessels?|tanks?|boilers?|ship\w*|dock\w*|marine|manufactur\w*|industr\w*)\b/i;
 // Market-news furniture: share prices, results and advice boxes beside an article.
-const NOT_WORK = /\b(?:share price|stock price|investment advice|dividend|earnings|results? today|q[1-4] results?|according to [A-Z][a-z]+ data|subscribe|newsletter|insurance)\b/i;
+const NOT_WORK = /\b(?:share price|stock price|investment advice|dividend|earnings|results? today|q[1-4] results?|according to [A-Z][a-z]+ data|subscribe|newsletter|insurance|marketing agency|digital marketing|web design|seo|software|standardi[sz]ation|accreditation body|certification body)\b/i;
+// Institutions rather than companies that buy material.
+const INSTITUTION = /\b(?:institut\w*|university|college|committee|accreditation)\b/i;
+// Words that describe a service or product line, never a company's own name on their own.
+const SERVICE_WORDS = new Set(['pressure', 'vessel', 'vessels', 'fabrication', 'fabricator', 'fabricators', 'manufacturing', 'manufacturer', 'manufacturers', 'services', 'service',
+  'solutions', 'engineering', 'construction', 'steel', 'plate', 'plates', 'tank', 'tanks', 'storage', 'industrial', 'products', 'product', 'equipment', 'pipe', 'pipes', 'pipeline',
+  'pipelines', 'process', 'heavy', 'oil', 'gas', 'marine', 'offshore', 'onshore', 'mechanical', 'electrical', 'civil', 'installation', 'works', 'contractor', 'contractors',
+  'and', 'for', 'of', 'the', 'in', 'with', 'boiler', 'boilers', 'structural', 'metal', 'sheet', 'sheets', 'welding', 'repair', 'maintenance', 'supply', 'suppliers']);
+/** A title made only of service words ("Pressure Vessel Fabrication") is a page topic, not a company. */
+export function genericServicePhrase(name: string): boolean {
+  const words = name.toLowerCase().replace(/&/g, ' and ').match(/[a-z0-9]+/g) ?? [];
+  return words.length > 0 && words.every((w) => SERVICE_WORDS.has(w));
+}
 
 /** Why a listed name is not a possible buyer company, or null. */
 export function junkFoundName(name: string, quote: string | null): string | null {
@@ -30,6 +42,8 @@ export function junkFoundName(name: string, quote: string | null): string | null
   if (HEADLINE.test(n)) return 'headline';
   if (MEDIA_OR_BODY.test(n)) return 'publisher or tracker';
   if (SLOGAN.test(n)) return 'slogan';
+  if (INSTITUTION.test(n)) return 'institution';
+  if (genericServicePhrase(n)) return 'service phrase, not a name';
   if (quote && quote.length < 140 && CREDIT.test(quote)) return 'site credit';
   return junkCompanyReason(n);
 }

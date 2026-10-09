@@ -7,7 +7,7 @@ import { buyerPageCandidate } from "@/mvp/discovery/plan";
 import { addJob } from "./store";
 import { readLane, readLaneLimits } from "./registry";
 import { companyIdentityReason,nonCompanyDomain } from '@/mvp/sourcing/entities';
-import { junkFoundName } from '@/mvp/sourcing/names';
+import { genericServicePhrase, junkFoundName } from '@/mvp/sourcing/names';
 
 export interface ResearchCandidate {id:string;key:string;company:string;domain_hint:string|null;identity_document_id:string|null;identity_quote:string|null;document_ids:string[];state:string}
 export interface DirectorySeed {company:string;quote:string|null;domain:string|null;row:number}
@@ -30,16 +30,7 @@ export function directorySeeds(text:string,productId:string):DirectorySeed[] {
   }
   return [...new Map(result.map(s=>[normalized(s.company),s])).values()];
 }
-// Words that describe a service or product line, never a company's own name on their own.
-const SERVICE_WORDS=new Set(['pressure','vessel','vessels','fabrication','fabricator','fabricators','manufacturing','manufacturer','manufacturers','services','service',
-  'solutions','engineering','construction','steel','plate','plates','tank','tanks','storage','industrial','products','product','equipment','pipe','pipes','pipeline',
-  'pipelines','process','heavy','oil','gas','marine','offshore','onshore','mechanical','electrical','civil','installation','works','contractor','contractors',
-  'and','for','of','the','in','with','boiler','boilers','structural','metal','sheet','sheets','welding','repair','maintenance','supply','suppliers']);
-/** A title made only of service words ("Pressure Vessel Fabrication") is a page topic, not a company. */
-export function genericServicePhrase(name:string):boolean {
-  const words=name.toLowerCase().replace(/&/g,' and ').match(/[a-z0-9]+/g)??[];
-  return words.length>0&&words.every(w=>SERVICE_WORDS.has(w));
-}
+export { genericServicePhrase };
 /** Conservative page-brand seed. A title/hint is not a purchasing or legal-verification claim. */
 export function pageCompany(text:string,title:string|null,url:string):string|null {
   if(NON_COMPANY.test(domainOf(url))||nonCompanyDomain(domainOf(url)))return null;
