@@ -88,3 +88,38 @@ Sources: big5constructsaudi.com/sponsor/bnc-network, gulfnews.com (BNC largest U
 Risks: free-tier AI limits (mitigated by fallback; recommend paid tier for the pilot), search duration 10–25 minutes (shown honestly in progress), coverage varies by country (shown as coverage notes).
 
 Out of scope for this pass: materials outside the catalogue as fully custom products (closest-product suggestion instead), paid project databases (BNC/MEED) integration, multi-user roles.
+
+## 8. Searches for materials outside the catalogue (analysis, not built)
+
+**Today.** Words that match nothing in the 35-item catalogue ("solar panels", "cable trays") show *"This material is not in your product list yet. Choose the closest type"*. Nothing is guessed and no search runs on words we cannot interpret.
+
+**Why it is not just "search the words".** The research pipeline is keyed on `productId`, not on text. A product ID decides:
+
+| Step | What the product supplies | What breaks without it |
+|---|---|---|
+| Source plan (`sourcing/plan.ts`) | Consuming activities ("pipeline laying", "pressure vessel fabrication") and buyer segments (`whoBuys`) | Queries return sellers and articles *about* the material, not companies that *use* it |
+| Evidence (`materialEvidenceKind`, `buyerPageCandidate`) | Terms, standards and exclusions that prove a page shows matching work | No way to tell "uses cable trays" from "makes cable trays" or from an unrelated "tray" |
+| Opportunity capture (`eligibleForProduct`, needs map `sellItems`) | Which roles in the chain buy it and at which tier | Every company becomes "a buyer"; the tier 2/3 subcontractor logic has nothing to follow |
+| Competitor detection | Which makers and stockists sell the same item | Competitors are emailed as prospects |
+| Email and labels (`searchedProductLabel`) | The product name the intro email offers | The email offers something the client may not stock |
+| Leads filters ("What we can sell") | Catalogue categories | Custom items can't be filtered |
+
+**Three cases, three answers.**
+
+1. *A variant of a known product* ("API 5L X65 PSL2", "ERW black pipe"): add terms or standards to the existing item. Cheap, same day, no new risk.
+2. *An adjacent engineering material* (cable trays, gratings, anchor bolts, insulation): needs a new **material profile** with name, synonyms, standards, consuming activities, buyer segments per tier, makers and sellers to exclude, and words that prove use. An AI model can draft it in one call; a person must confirm it.
+3. *Outside engineering procurement* (solar panels for homes, office furniture, food): the contractor and subcontractor chain model does not hold. Say it is not supported rather than produce low-precision lists.
+
+**Complexities and risks.**
+- **Precision.** Free text is ambiguous ("plates", "fittings", "cable"). Without exclusions and proof words, junk rises sharply. The catalogue's exclusion lists are what keep "number plate" and "optical fibre cable" out today.
+- **Wrong buyer direction.** Insulation is bought by insulation subcontractors, not pipeline EPCs. If the AI gets `whoBuys` wrong, the whole search finds the wrong companies, confidently.
+- **Competitors as leads.** A search for a material mostly surfaces the people who sell it. The profile must name them so they are filtered out.
+- **AI cost.** Generating a profile is small. The real cost is that pages can no longer be judged by catalogue rules, so more pages go to the AI classifier. The Groq free tier (about 200k tokens per day per model) is reached sooner, and searches slow down or fall back.
+- **Claims in email.** The intro email states what the client supplies. A custom product must be confirmed as something he actually sells before automation uses it.
+- **Data model.** The catalogue lives in code. Custom items need a table (`material_profiles`: draft, approved or retired, with a version), searches that pin a profile version, filters that read the table, and a migration (cloud migration needs approval).
+- **Quality checking.** Each new profile needs two or three known buyers to sanity-check the first search; otherwise nobody knows whether it works.
+
+**Recommended path.**
+- **Now:** keep the honest "not in your product list" response with the closest types, and log the words so we learn what he actually asks for.
+- **Next (about 3–5 days):** add "Add this product". The AI drafts the profile; the client reviews a one-screen summary (what it is, who buys it, what to exclude) and approves it. The profile is saved as a custom catalogue item and the existing pipeline runs unchanged. Automatic email for custom products stays off until the first results have been reviewed.
+- **Later:** learn from feedback. "Not relevant" on a lead adds exclusions, and approved leads add proof words, so each custom product gets sharper with use.
