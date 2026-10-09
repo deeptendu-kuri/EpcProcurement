@@ -11,7 +11,8 @@ import { storeDocument } from "@/mvp/pipeline/read";
 import { resolveDocument } from "@/mvp/pipeline/resolve";
 import { buildSignalsAndScore } from "@/mvp/scoring";
 import { addToLeadList, createLeadList, getLeadList, removeFromLeadList } from "./lists";
-import { allBuyerRecords, loadBuyerRecords } from "./load";
+import { allBuyerRecords, clearBuyerCache, loadBuyerRecords } from "./load";
+import { searchBuyers } from "./index";
 import { searchRecords } from "./search";
 
 const NOW = new Date("2026-10-01T09:00:00Z");
@@ -82,5 +83,32 @@ describe("buyers from the database", () => {
     expect((await getLeadList(list.id, db))?.leadIds.length).toBe(ids.length);
     expect(await removeFromLeadList(list.id, [ids[0]], db)).toBe(1);
     expect((await getLeadList(list.id, db))?.itemCount).toBe(ids.length - 1);
+  });
+  it("Leads: rows carry their search, product and email status; the search filter narrows them (doc 17)", async () => {
+    const { rows: leads } = await db.query<{ id: string; company_id: string }>(
+      "select l.id, l.buyer_company_id as company_id from leads l join companies c on c.id = l.buyer_company_id where c.canonical_name ilike '%East Pipes%' limit 1");
+    const { rows: runs } = await db.query<{ id: string }>("insert into runs (status, adhoc_query) values ('done', $1::jsonb) returning id",
+      [JSON.stringify({ query: "steel pipe", productId: "line-pipe", markets: ["SA"] })]);
+    const run = runs[0].id;
+    const { rows: opps } = await db.query<{ id: string }>(
+      `insert into search_opportunities (run_id, lead_id, company_id, keyword, product_id, product_name, buying_reason, evidence_ids)
+       values ($1, $2, $3, 'steel pipe', 'coating-materials', 'Pipe coating materials', 'Aramco order', '{}') returning id`,
+      [run, leads[0].id, leads[0].company_id]);
+    await db.query("insert into funnel_threads (opportunity_id, company_id, product_id, reply_token, state) values ($1, $2, 'coating-materials', 'tok-doc17', 'active')",
+      [opps[0].id, leads[0].company_id]);
+    clearBuyerCache();
+
+    const scoped = await searchBuyers({ run, stage: ["ready", "check", "early"] });
+    expect(scoped.rows.length).toBeGreaterThan(0);
+    for (const row of scoped.rows) {
+      expect(row.searches?.[0]).toEqual({ runId: run, label: expect.stringMatching(/^steel pipe · /) });
+      expect(row.searchedProduct).toBe("Pipe coating materials");
+      expect(row.emailStatus).toBe("Intro sent");
+      expect(row.opportunityId).toBe(opps[0].id);
+    }
+    const other = await searchBuyers({ run: "99999999-9999-4999-8999-999999999999", stage: ["ready", "check", "early"] });
+    expect(other.rows).toHaveLength(0);
+    const all = await searchBuyers({ stage: ["ready", "check", "early"] });
+    expect(all.rows.length).toBeGreaterThanOrEqual(scoped.rows.length);
   });
 });

@@ -22,7 +22,7 @@ import { requirePersistentWorker } from "@/mvp/runtime";
 import { attachStoredHybridRun,createResearchRun,sessionFor,resumeResearchRun } from "@/mvp/research/store";
 import { processResearchTick,productionResearchDeps } from "@/mvp/research/engine";
 import { startResearchWorker,waitForResearchRun } from "@/mvp/research/worker";
-import { resolveMaterial } from "@/mvp/discovery/material";
+import { resolveMaterial } from "@/mvp/discovery/material-catalogue";
 
 export { fixtureDocs } from "./sources/fixtures";
 export { failStaleRuns } from "./active-runs";

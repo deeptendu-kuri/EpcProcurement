@@ -1,36 +1,29 @@
-import Link from 'next/link';
-import {recentSearches} from '@/mvp/opportunities';
-import {crmTables} from '@/mvp/crm/tables';
-import {tableQuerySchema,tableParams} from '@/mvp/crm/contracts';
-import {EvidenceTables} from '@/components/mvp/tables/evidence-tables';
-import {formatDate} from '@/components/mvp/labels';
-import {marketName} from '@/mvp/config/markets';
-import {SearchSwitcher} from '@/components/mvp/tables/search-switcher';
-import {FoundCompanies} from '@/components/mvp/tables/found-companies';
-import {getDb} from '@/mvp/db';
-import {listFoundCompanies} from '@/mvp/research/found';
-export const dynamic='force-dynamic';
-export default async function CrmPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
-  const params=await searchParams;const searches=await recentSearches();
-  const raw=Object.fromEntries(Object.entries(params).filter(([k,v])=>typeof v==='string'&&v!==''&&k!=='search'&&k!=='open'&&k!=='view'));
-  raw.run=String(params.run??params.search??searches.find(s=>s.adhoc_query?.productId)?.id??'none');
-  if(params.view==='verified'){raw.tab='contacts';raw.contacts='validated';}
-  const parsed=tableQuerySchema.safeParse(raw);
-  if(!parsed.success)return <div className="p-6"><h1 className="page-title">Invalid lead filters</h1><Link href="/crm">Reset filters</Link></div>;
-  const query=parsed.data;const data=await crmTables(query);
-  const selected=searches.find(r=>r.id===query.run);
-  const searchId=/^[0-9a-f-]{36}$/i.test(query.run)?query.run:null;
-  // Found companies not yet checked: shown as a summary so they are not missed below the tables.
-  const found=searchId?(await listFoundCompanies(getDb(),searchId).catch(()=>[])).filter(c=>c.relevant):[];
-  const unchecked=found.filter(c=>c.status!=='saved'&&c.status!=='no_match').length;
-  return <div className="flex flex-col gap-5">
-    <header className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="page-title">Leads</h1><p className="page-desc">Results for your selected search. Click a company for its evidence, contacts, supply chain and email progress.</p></div><div className="flex gap-2"><Link href="/search" className="btn btn-secondary">SuperSearch · all companies</Link><Link href="/find" className="btn btn-primary">New search</Link></div></header>
-    {searches.some(s=>s.adhoc_query?.productId)?<section className="card flex flex-wrap items-end gap-4 p-4" aria-label="Select search"><SearchSwitcher value={query.run} tab={query.tab} options={searches.filter(s=>s.adhoc_query?.productId).map(s=>({id:s.id,label:`${s.adhoc_query?.query} · ${formatDate(s.created_at)}`}))}/><div className="pb-1 text-xs text-[var(--muted)]">{selected?.adhoc_query?.markets?.map(marketName).join(', ')}{selected?<p className="mt-1">Updated {formatDate(selected.finished_at??selected.created_at)} · <Link className="underline" href={`/find?run=${selected.id}`}>Research details</Link></p>:null}{query.run==='all'?<p>Combined saved results. Select a search above for product-specific leads.</p>:null}</div></section>:null}
-    {searchId?<section aria-label="Search summary" className="card flex flex-wrap items-center justify-between gap-3 border-blue-200 bg-blue-50/60 p-4">
-      <p className="text-sm">{selected?.status==='running'||selected?.status==='queued'?<><strong>Search still running.</strong> </>:null}<strong>{data.facets.counts.leads} saved {data.facets.counts.leads===1?'lead':'leads'}</strong>{unchecked?<> · <strong>{unchecked} more {unchecked===1?'company':'companies'} found</strong>, not checked yet</>:null}. Only companies whose own pages show matching work become leads.</p>
-      <div className="flex flex-wrap gap-2"><Link href={`/find?run=${searchId}`} className="btn btn-secondary btn-sm">Search progress</Link>{unchecked?<a href="#found-companies" className="btn btn-secondary btn-sm">Review companies found ↓</a>:null}</div>
-    </section>:null}
-    {query.run==='none'?<section className="card p-8"><h2 className="text-lg font-bold">Your leads will appear here</h2><p className="mt-2 text-sm text-[var(--muted)]">Start a material search. Its companies, contractors, supply chain and available contacts will be kept together.</p><Link href="/find" className="btn btn-secondary mt-4">Start your first search</Link></section>:<EvidenceTables key={tableParams(query).toString()} data={data} query={query} initialOpen={typeof params.open==='string'?params.open:''}/>}
-    {searchId?<FoundCompanies runId={searchId}/>:null}
-  </div>;
+import { SearchWorkspace } from "@/components/mvp/search/search-workspace";
+import { catalogueOptions, marketOptions } from "@/components/mvp/search/page-data";
+import { parseSearchState } from "@/components/mvp/search/search-state";
+import { FoundCompanies } from "@/components/mvp/tables/found-companies";
+import { demoEmailEnabled } from "@/mvp/email/config";
+import { recentSearches } from "@/mvp/opportunities";
+import { marketName } from "@/mvp/config/markets";
+
+export const dynamic = "force-dynamic";
+const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/**
+ * Leads (docs/mvp/17 §4.4): the SuperSearch table for one of the user's searches (default: the latest)
+ * or all of them. Filters slide open from the Filters button; companies the search named but has not
+ * checked yet sit under the table.
+ */
+export default async function LeadsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = { ...(await searchParams) };
+  // Older links used ?search=<id>.
+  if (!params.run && typeof params.search === "string") params.run = params.search;
+  const state = parseSearchState(params);
+  const searches = (await recentSearches()).filter((s) => s.adhoc_query?.productId);
+  if (!state.run && searches[0]) state.run = searches[0].id;
+  const runs = searches.map((s) => ({ id: s.id, status: s.status,
+    label: `${s.adhoc_query?.query || "Search"} · ${(s.adhoc_query?.markets ?? []).map(marketName).slice(0, 3).join(", ")}${(s.adhoc_query?.markets?.length ?? 0) > 3 ? "…" : ""} · ${day(s.created_at)}` }));
+  const run = state.run && state.run !== "all" ? state.run : null;
+  return <SearchWorkspace tab="search" basePath="/crm" state={state} runs={runs} catalogue={catalogueOptions()} markets={marketOptions()} demoEmail={demoEmailEnabled()}
+    belowResults={run ? <FoundCompanies runId={run} /> : null} />;
 }

@@ -99,6 +99,14 @@ export interface BuyerRow { /* list row: subset of BuyerView */
   storedLeadId: string | null;
   /** How we know the chain link (derived / tier 2-3 rows); null for tier 1. */
   link: ChainLinkStatus | null;
+  /** Doc 17: the user's searches that saved this company, newest first. */
+  searches?: { runId: string; label: string }[];
+  /** Doc 17: the product searched for (what we can sell them), from the selected or latest search. */
+  searchedProduct?: string | null;
+  /** Doc 17: email automation status for this company. */
+  emailStatus?: string | null;
+  /** Doc 17: the saved opportunity for the selected or latest search. */
+  opportunityId?: string | null;
 }
 export const DERIVED_PREFIX = 'derived:';
 export function isDerivedLeadId(id: string): boolean { return id.startsWith(DERIVED_PREFIX); }
@@ -115,6 +123,8 @@ export interface BuyerSearch {
   reach?: ('allowed' | 'opt_out_only' | 'consent_needed')[];
   stage?: BuyerStage[]; minFit?: number; howSure?: ('high' | 'medium' | 'low')[];
   q?: string; sort?: 'latest' | 'fit' | 'window'; page?: number; pageSize?: number;
+  /** Only companies saved by this search (run id). Absent = all searches. */
+  run?: string;
   /** doc 15 D: supply-chain tier filter. Absent = all tiers. */
   tiers?: ChainTier[];
   /** doc 15 D: "How we know" filter (tier 1 rows count as confirmed). */

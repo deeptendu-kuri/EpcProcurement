@@ -4,5 +4,5 @@ import { DEFAULT_SEARCH } from "@/components/mvp/search/search-state";
 
 /** Lead lists (docs/mvp/14 §10): buyers saved into named lists from SuperSearch. */
 export default function ListsPage() {
-  return <SearchWorkspace tab="lists" state={DEFAULT_SEARCH} catalogue={catalogueOptions()} markets={marketOptions()} />;
+  return <SearchWorkspace tab="lists" basePath="/crm" state={DEFAULT_SEARCH} catalogue={catalogueOptions()} markets={marketOptions()} />;
 }

@@ -3,7 +3,7 @@ import { getDb, type Db, type Queryable } from '@/mvp/db';
 import type { RunInput, RunCounters } from '@/mvp/types';
 import { researchBudget } from '@/mvp/discovery/plan';
 import type { RawDoc } from '@/mvp/pipeline/contracts';
-import { resolveMaterial } from '@/mvp/discovery/material';
+import { resolveMaterial } from '@/mvp/discovery/material-catalogue';
 import { DISCOVERY_VERSION,discoverySchema } from '@/mvp/discovery';
 import { loadCompanyBundle } from '@/mvp/discovery/bundle';
 import { feedUrls } from '@/mvp/pipeline/sources/rss';

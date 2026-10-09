@@ -1,6 +1,7 @@
 import { getCatalogueItem } from '@/mvp/config/buyers-config';
 import { COUNTRIES } from '@/mvp/config/countries';
 import { MATERIAL_ACTIVITIES } from '@/mvp/discovery/material';
+import { whoBuys } from '@/mvp/discovery/material-catalogue';
 import type { ResearchMode, PlannedBuyerQuery } from '@/mvp/discovery/plan';
 import { RESEARCH_SOURCES } from '@/mvp/research/registry';
 import { TED_COUNTRIES } from '@/mvp/pipeline/sources/ted';
@@ -34,7 +35,11 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
       add('roundup','registry',code,n,{url:registry.url,registryId:registry.id,priority:1950,includeDomains:[new URL(registry.url).hostname.replace(/^www\./,'')]});
     }
     add('roundup','tavily',code,0,{query:`${activity} contractors ${name} list top companies`,topic:'general'});
-    for(let n=0;n<2;n++)add('capability','tavily',code,n,{query:`${activities[n%activities.length]} contractor ${name} services projects`,topic:'general'});
+    // Direct company searches: one by consuming work, one by the reviewed buyer segment further down
+    // the chain ("Shipyards Malaysia", "Piping and mechanical subcontractors India").
+    const segments=whoBuys(input.productId);
+    add('capability','tavily',code,0,{query:`${activities[0]} contractor ${name} services projects`,topic:'general'});
+    add('capability','tavily',code,1,{query:segments[1]?`${segments[1]} ${name} company`:`${activities[1%activities.length]} contractor ${name} services projects`,topic:'general'});
   }
   return tasks.sort((a,b)=>b.priority-a.priority);
 }

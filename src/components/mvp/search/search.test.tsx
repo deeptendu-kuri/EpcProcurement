@@ -48,6 +48,16 @@ describe("SuperSearch URL state (docs/mvp/14 §10)", () => {
     expect(parseSearchState({ role: "owner,supplier", stage: "ready,bogus" })).toMatchObject({ roleAny: ["owner"], stage: ["ready"] });
   });
 
+  it("keeps the selected search in the Leads URL and sends only a real run to the server (doc 17)", () => {
+    const run = "11111111-1111-4111-8111-111111111111";
+    expect(parseSearchState({ run }).run).toBe(run);
+    expect(parseSearchState({ run: "all" }).run).toBe("all");
+    expect(parseSearchState({ run: "1; drop table runs" }).run).toBe("");
+    expect(searchHref({ ...DEFAULT_SEARCH, run }, "/crm")).toBe(`/crm?run=${run}`);
+    expect(toBuyerSearch({ ...DEFAULT_SEARCH, run }, []).run).toBe(run);
+    expect(toBuyerSearch({ ...DEFAULT_SEARCH, run: "all" }, []).run).toBeUndefined();
+  });
+
   it("builds the BuyerSearch body, expanding catalogue categories into item ids", () => {
     const body = toBuyerSearch(
       { ...DEFAULT_SEARCH, locAny: ["AE"], roleNot: ["owner"], sell: ["cat:Valves", "flanges"], signals: ["order_won"], withinDays: 90 },

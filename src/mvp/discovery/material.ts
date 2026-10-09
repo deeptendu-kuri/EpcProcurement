@@ -1,4 +1,3 @@
-import { getCatalogue, getCatalogueItem } from "@/mvp/config/buyers-config";
 
 /** Reviewed consuming activities. Search hints, never proof of demand or seller capabilities. */
 export const MATERIAL_ACTIVITIES: Readonly<Record<string, readonly string[]>> = {
@@ -40,7 +39,7 @@ export const MATERIAL_ACTIVITIES: Readonly<Record<string, readonly string[]>> = 
 };
 
 /** Exact user-input aliases. Ambiguous short tokens never silently choose a catalogue item. */
-const INPUT_ALIASES: Readonly<Record<string, readonly string[]>> = {
+export const INPUT_ALIASES: Readonly<Record<string, readonly string[]>> = {
   "line-pipe": ["pipeline", "pipeline pipe", "line pipes", "api 5l", "gas transmission pipe"],
   "cs-process-pipe": ["carbon steel piping", "carbon steel pipes", "process pipe", "a106", "astm a106", "a53"],
   "ss-duplex-pipe": ["stainless steel pipe", "stainless piping", "stainless steel piping", "ss pipe", "duplex pipe", "duplex piping", "astm a312"],
@@ -78,35 +77,4 @@ const INPUT_ALIASES: Readonly<Record<string, readonly string[]>> = {
   pumps: ["pump", "water pumps", "process pumps"],
 };
 
-const AMBIGUOUS = new Set(["pipe", "pipes", "steel", "wire", "wiring", "electrical", "electricals", "valve", "valves", "panel", "panels", "fittings", "insulation", "cable", "cables", "plate", "plates"]);
-export function normalizeMaterialInput(value: string): string {
-  return value.normalize("NFKC").toLowerCase().replace(/[–—_-]/g, " ").replace(/[^\p{L}\p{N}./ ]/gu, " ").replace(/\s+/g, " ").trim();
-}
-export interface MaterialInterpretation {
-  status: "resolved" | "clarification" | "unsupported";
-  originalKeyword: string;
-  productId: string | null;
-  label: string | null;
-  activities: string[];
-  question: string | null;
-  candidateIds: string[];
-}
-
-/** No LLM/provider call. Unsupported input remains unsupported rather than defaulting to pipe. */
-export function resolveMaterial(query: string, selectedProductId?: string): MaterialInterpretation {
-  const originalKeyword = query.trim();
-  const normalized = normalizeMaterialInput(query);
-  const matches = getCatalogue().items.filter(item => [item.id, item.shortName, item.name, ...(INPUT_ALIASES[item.id] ?? [])]
-    .some(alias => normalizeMaterialInput(alias) === normalized));
-  const selected = selectedProductId ? getCatalogueItem(selectedProductId) : undefined;
-  const result = (status: MaterialInterpretation["status"], question: string, candidateIds = matches.map(item => item.id)): MaterialInterpretation =>
-    ({status, originalKeyword, productId:null, label:null, activities:[], question, candidateIds});
-  if(selectedProductId && !selected)return result("unsupported", "Choose a supported material or add this material to the reviewed catalogue.", []);
-  if(selected && matches.some(item => item.id !== selected.id))return result("clarification", "The typed material differs from the selected product. Which material do you want to sell?", [...new Set([selected.id, ...matches.map(item => item.id)])]);
-  if(selected && AMBIGUOUS.has(normalized) && !matches.some(item=>item.id===selected.id))return result("clarification", "Clarify the typed material or use the selected product's name before searching.", [selected.id]);
-  if(!selected && (AMBIGUOUS.has(normalized) || matches.length > 1))return result("clarification", "Which material or type do you mean? Select the specific product before searching.");
-  const product = selected && (!normalized || AMBIGUOUS.has(normalized) || matches.some(item => item.id === selected.id)) ? selected : matches.length === 1 ? matches[0] : null;
-  if(!product)return result("unsupported", "This material is not yet mapped. Add or clarify its material type instead of substituting another product.");
-  return {status:"resolved", originalKeyword, productId:product.id, label:product.shortName,
-    activities:[...(MATERIAL_ACTIVITIES[product.id] ?? [])], question:null, candidateIds:[product.id]};
-}
+// Free-text interpretation and the material check live in ./material-catalogue (resolveMaterial).

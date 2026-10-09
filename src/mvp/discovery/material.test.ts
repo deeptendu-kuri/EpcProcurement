@@ -1,7 +1,9 @@
 // @vitest-environment node
 import {afterEach,describe,expect,it,vi} from "vitest";
 import {getCatalogue} from "@/mvp/config/buyers-config";
-import {MATERIAL_ACTIVITIES,resolveMaterial} from "./material";
+import {MATERIAL_ACTIVITIES} from "./material";
+import {materialCatalogue,resolveMaterial} from "./material-catalogue";
+import {interpretMaterial} from "./interpret";
 import {buyerPageCandidate,buyerQueries,buyingActivities,materialEvidenceKind,researchBudget} from "./plan";
 import type {RunInput} from "@/mvp/types";
 const input:RunInput={query:"line pipe",productId:"line-pipe",markets:["IN","AE","SA"],leadKinds:["supply_subcontract"]};
@@ -14,17 +16,33 @@ describe("reviewed material interpretation and consuming-work planning",()=>{
     expect(buyingActivities("rebar")).toContain("reinforced concrete construction");
     expect(buyingActivities("not-in-catalogue")).toEqual([]);
   });
-  it.each([["HDPE","hdpe-pipe"],["power cables","cables"],["electrical wiring","cables"],["welding wire","welding-consumables"],["steel beams","structural-steel"],["ASTM A106","cs-process-pipe"],["stainless steel pipe","ss-duplex-pipe"]])("resolves specific synonym %s to %s without a provider",(query,id)=>{
+  it.each([["HDPE","hdpe-pipe"],["power cables","cables"],["electrical wiring","cables"],["welding wire","welding-consumables"],["steel beams","structural-steel"],["ASTM A106","cs-process-pipe"],["stainless steel pipe","ss-duplex-pipe"],
+    ["seamless pipe ASTM A106","cs-process-pipe"],["casing and tubing","octg"],["GI pipe","cs-process-pipe"],["LSAW pipe","line-pipe"],["steel plates","plates"],["ductile iron pipe","di-pipe"],["cables","cables"]])("resolves %s to %s without a provider",(query,id)=>{
     expect(resolveMaterial(query)).toMatchObject({status:"resolved",productId:id,originalKeyword:query});
   });
-  it.each(["wire","panel","steel","cables","insulation","valves"])("asks a clarification for ambiguous %s",query=>{
-    expect(resolveMaterial(query)).toMatchObject({status:"clarification",productId:null});
+  it.each(["wire","steel","valves","pipe","steel pipe"])("offers product types for generic %s instead of guessing",query=>{
+    const result=resolveMaterial(query);
+    expect(result).toMatchObject({status:"clarification",productId:null});
+    expect(result.candidateIds.length).toBeGreaterThan(1);
   });
-  it("does not substitute unsupported materials or contradictory selected product",()=>{
+  it("reads generic words as a family with one-click types and who buys",()=>{
+    const steelPipe=interpretMaterial(materialCatalogue(),"steel pipe");
+    expect(steelPipe).toMatchObject({family:"Steel pipe",confidence:"broad"});
+    expect(steelPipe.choices.map(c=>c.id)).toEqual(["line-pipe","cs-process-pipe","ss-duplex-pipe","alloy-pipe","octg"]);
+    expect(steelPipe.whoBuys.length).toBeGreaterThan(0);
+    expect(interpretMaterial(materialCatalogue(),"carbon steel pipe").best?.id).toBe("cs-process-pipe");
+    expect(interpretMaterial(materialCatalogue(),"steel pipe for gas pipeline").best?.id).toBe("line-pipe");
+    expect(interpretMaterial(materialCatalogue(),"plates").whoBuys).toContain("Shipyards");
+  });
+  it("trusts the chosen type unless the words clearly name a different material",()=>{
+    expect(resolveMaterial("steel pipe","line-pipe")).toMatchObject({status:"resolved",productId:"line-pipe"});
+    expect(resolveMaterial("steel pipe","cs-process-pipe")).toMatchObject({status:"resolved",productId:"cs-process-pipe"});
+    expect(resolveMaterial("wire","line-pipe")).toMatchObject({status:"resolved",productId:"line-pipe"});
+    expect(resolveMaterial("power cables","line-pipe")).toMatchObject({status:"clarification",productId:null,candidateIds:["line-pipe","cables"]});
+  });
+  it("does not substitute materials outside the catalogue",()=>{
     expect(resolveMaterial("cement")).toMatchObject({status:"unsupported",productId:null});
-    expect(resolveMaterial("optical fiber cable")).toMatchObject({status:"unsupported",productId:null});
-    expect(resolveMaterial("power cables","line-pipe")).toMatchObject({status:"clarification",productId:null});
-    expect(resolveMaterial("wire","line-pipe")).toMatchObject({status:"clarification",productId:null});
+    expect(resolveMaterial("optical fiber cable")).toMatchObject({productId:null});
     expect(resolveMaterial("cement","cables")).toMatchObject({status:"unsupported",productId:null});
     expect(resolveMaterial("HDPE","invalid")).toMatchObject({status:"unsupported",productId:null});
     expect(buyerQueries({...input,productId:"invalid"})).toEqual([]);

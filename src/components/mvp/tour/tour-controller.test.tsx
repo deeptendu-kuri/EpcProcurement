@@ -7,7 +7,7 @@ const mocks=vi.hoisted(()=>({
   push:vi.fn(),api:vi.fn(),show:vi.fn(),configs:[] as Config[],
   router:{push:vi.fn()},toast:{show:vi.fn()}
 }));
-vi.mock("next/navigation",()=>({usePathname:()=>"/overview",useRouter:()=>mocks.router}));
+vi.mock("next/navigation",()=>({usePathname:()=>"/dashboard",useRouter:()=>mocks.router}));
 vi.mock("../api-client",()=>({apiJson:mocks.api}));
 vi.mock("../shell/toast",()=>({useToast:()=>mocks.toast}));
 vi.mock("driver.js",()=>({driver:(config:Config)=>{
@@ -16,7 +16,7 @@ vi.mock("driver.js",()=>({driver:(config:Config)=>{
 }}));
 beforeEach(()=>{
   localStorage.clear();mocks.configs.length=0;vi.clearAllMocks();
-  window.history.replaceState(null,"","/overview");
+  window.history.replaceState(null,"","/dashboard");
   vi.spyOn(HTMLElement.prototype,"getClientRects").mockReturnValue([{}] as unknown as DOMRectList);
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();});

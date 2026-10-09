@@ -10,7 +10,7 @@ vi.mock('./toast',()=>({ToastProvider:({children}:{children:ReactNode})=>childre
 vi.mock('../api-client',()=>({apiJson:()=>Promise.resolve({lastFinishedAt:null,newGenuine:0,queue:{running:false,waiting:0,runId:null}})}));
 afterEach(cleanup);
 describe('demo navigation restoration',()=>{
-  it.each(['/overview','/find','/crm','/outreach','/search'])('provides a guide without a duplicate global search action at %s',path=>{
+  it.each(['/dashboard','/find','/crm','/outreach','/search'])('provides a guide without a duplicate global search action at %s',path=>{
     state.path=path;render(<AppShell demoMode={false} initialStatus={{lastFinishedAt:null,newGenuine:0,queue:{running:false,waiting:0,runId:null}}}>Example screen</AppShell>);
     const header=within(screen.getByRole('banner',{name:'Workspace header'}));
     expect(header.getByRole('button',{name:'Guide'})).toBeTruthy();
@@ -20,5 +20,8 @@ describe('demo navigation restoration',()=>{
     state.path='/crm';render(<AppShell demoMode={false} initialStatus={{lastFinishedAt:null,newGenuine:0,queue:{running:false,waiting:0,runId:null}}}><input aria-label="Example page filter" data-main-search /></AppShell>);
     fireEvent.keyDown(window,{key:'/'});expect(document.activeElement).toBe(screen.getByLabelText('Example page filter'));
   });
-  it.each(['/search','/lists'])('keeps SuperSearch visible and uniquely active at %s',path=>{state.path=path;render(<AppShell demoMode={false} initialStatus={{lastFinishedAt:null,newGenuine:0,queue:{running:false,waiting:0,runId:null}}}>Example screen</AppShell>);const nav=within(screen.getByRole('navigation',{name:'Main navigation'}));expect(nav.getByRole('link',{name:'SuperSearch'}).getAttribute('aria-current')).toBe('page');expect(nav.getByRole('link',{name:'Leads'}).getAttribute('aria-current')).toBeNull();});
+  it.each(['/crm','/search','/lists'])('shows Leads as the one active item for the SuperSearch layout at %s',path=>{state.path=path;render(<AppShell demoMode={false} initialStatus={{lastFinishedAt:null,newGenuine:0,queue:{running:false,waiting:0,runId:null}}}>Example screen</AppShell>);const nav=within(screen.getByRole('navigation',{name:'Main navigation'}));expect(nav.getByRole('link',{name:/Leads/}).getAttribute('aria-current')).toBe('page');expect(nav.queryByRole('link',{name:'SuperSearch'})).toBeNull();expect(nav.getByRole('link',{name:'Dashboard'}).getAttribute('aria-current')).toBeNull();});
+  it('names the first screen Dashboard and keeps old Overview links active on it',()=>{state.path='/overview';render(<AppShell demoMode={false} initialStatus={{lastFinishedAt:null,newGenuine:0,queue:{running:false,waiting:0,runId:null}}}>Example screen</AppShell>);
+    const nav=within(screen.getByRole('navigation',{name:'Main navigation'}));expect(nav.getByRole('link',{name:'Dashboard'}).getAttribute('aria-current')).toBe('page');
+    expect(nav.getByRole('link',{name:'Find buyers'})).toBeTruthy();expect(nav.getByRole('link',{name:'Email & meetings'})).toBeTruthy();});
 });

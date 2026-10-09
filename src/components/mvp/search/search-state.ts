@@ -32,6 +32,8 @@ export type ResultView = "buyers" | "contacts";
 export const CATEGORY_PREFIX = "cat:";
 
 export interface SearchUrlState {
+  /** Doc 17: the user's search (run id) the leads come from; empty = all searches. */
+  run: string;
   triggerKinds:TriggerKind[];
   triggerAge:string;
   locAny: string[];
@@ -69,6 +71,7 @@ export interface SearchUrlState {
 }
 
 export const DEFAULT_SEARCH: SearchUrlState = {
+  run: "",
   triggerKinds:[],triggerAge:'',
   locAny: [],
   locNot: [],
@@ -129,7 +132,9 @@ function num(value: string | null, min: number, max: number): number | null {
 export function parseSearchState(params: Params): SearchUrlState {
   const get = getter(params);
   const sort = get("sort");
+  const run = (get("run") ?? "").trim();
   return {
+    run: run === "all" || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(run) ? run : "",
     triggerKinds:listOf(get('trigger'),TRIGGER_KINDS),triggerAge:['30','90','365','540','undated'].includes(get('age')??'')?get('age')!:'',
     locAny: list(get("loc")),
     locNot: list(get("locx")),
@@ -170,6 +175,7 @@ export function serializeSearchState(state: SearchUrlState): URLSearchParams {
     out.set(key, String(value));
   };
   const putList = (key: string, values: readonly string[]) => put(key, values.join(","));
+  put("run", state.run);
   put("q", state.q);
   putList('trigger',state.triggerKinds);put('age',state.triggerAge);
   putList("loc", state.locAny);
@@ -296,5 +302,6 @@ export function toBuyerSearch(state: SearchUrlState, catalogue: CatalogueOption[
   if (state.tiers.length) search.tiers = state.tiers;
   if (state.links.length) search.linkStatus = state.links;
   if (state.q) search.q = state.q;
+  if (state.run && state.run !== "all") search.run = state.run;
   return search;
 }

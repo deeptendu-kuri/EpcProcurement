@@ -3,7 +3,7 @@ import {TOUR_LENGTH,TOUR_STEPS,onStepPage,progressText,stepPath,tourSelector} fr
 describe("optional search-scoped guide",()=>{
   it("has six unique steps from a search through a meeting",()=>{
     expect(TOUR_LENGTH).toBe(6);expect(new Set(TOUR_STEPS.map(s=>s.id)).size).toBe(6);
-    expect(TOUR_STEPS.map(s=>s.page)).toEqual(["/overview","/find","/crm","lead","/outreach","/outreach"]);
+    expect(TOUR_STEPS.map(s=>s.page)).toEqual(["/dashboard","/find","/crm","lead","/outreach","/outreach"]);
   });
   it("uses actual progress and the visible guide targets",()=>{
     expect(progressText(0)).toBe("Step 1 of 6");expect(progressText(5)).toBe("Step 6 of 6");

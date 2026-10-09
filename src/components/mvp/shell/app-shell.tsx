@@ -3,25 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import {
-  CircleHelp,
-  CircleUser,
-  Compass,
-  FlaskConical,
-  Keyboard,
-  LayoutDashboard,
-  ListChecks,
-  Mail,
-  Loader2,
-  LogOut,
-  Menu,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Search,
-  Settings,
-  X,
-  Zap,
-} from "lucide-react";
+import { CircleHelp, CircleUser, Compass, FlaskConical, Keyboard, LayoutDashboard, ListChecks, Mail, Loader2, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, X, Zap } from "lucide-react";
 import type { AppStatus } from "@/mvp/types";
 import { apiJson } from "../api-client";
 import { TourController } from "../tour/tour-controller";
@@ -30,18 +12,17 @@ import { ShortcutsDialog } from "./shortcuts-dialog";
 import { statusLabel } from "./time-ago";
 import { ToastProvider } from "./toast";
 
-/** Menu (docs/mvp/14 §10): Overview · SuperSearch · Lead lists · Pipeline · Settings · Help. */
+/** Menu (docs/mvp/17 §4.1): Dashboard · Find buyers · Leads (SuperSearch layout) · Email & meetings · Settings. */
 export const NAV = [
-  { href: "/overview", label: "Overview", icon: LayoutDashboard, tour: "nav-overview", also: [] as string[] },
-  { href: "/find", label: "New search", icon: Compass, tour: "nav-find", also: [] as string[] },
-  { href: "/crm", label: "Leads", icon: ListChecks, tour: "nav-crm", also: ["/opportunities","/buyers","/pipeline"] },
-  { href: "/search", label: "SuperSearch", icon: Search, tour: "nav-search", also: ["/lists"] },
-  { href: "/outreach", label: "Email automation", icon: Mail, tour: "nav-outreach", also: [] as string[] },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, tour: "nav-overview", also: ["/overview"] as string[] },
+  { href: "/find", label: "Find buyers", icon: Compass, tour: "nav-find", also: [] as string[] },
+  { href: "/crm", label: "Leads", icon: ListChecks, tour: "nav-crm", also: ["/opportunities","/buyers","/pipeline","/search","/lists"] },
+  { href: "/outreach", label: "Email & meetings", icon: Mail, tour: "nav-outreach", also: [] as string[] },
   { href: "/settings", label: "Settings", icon: Settings, tour: "nav-settings", also: [] as string[] },
 ] as const;
 
 /** Pages that use the whole screen (own top bar and filter panel, like the mockup). */
-const FULL_BLEED = ["/search", "/lists"];
+const FULL_BLEED = ["/crm", "/search", "/lists"];
 
 const COLLAPSED_KEY = "mvp.sidebar.collapsed";
 const STATUS_POLL_MS = 60_000;

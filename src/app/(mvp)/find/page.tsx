@@ -9,6 +9,7 @@ import { FindForm } from "@/components/mvp/find-form";
 import { PageHeader } from "@/components/mvp/page-header";
 import { SavedSearchesList } from "@/components/mvp/saved-searches-list";
 import { catalogueOptions } from "@/components/mvp/search/page-data";
+import { materialCatalogue } from "@/mvp/discovery/material-catalogue";
 import {funnelStatus} from '@/mvp/automation/config';
 import {AutomationReadiness} from '@/components/mvp/outreach/automation-readiness';
 
@@ -40,10 +41,11 @@ export default async function FindPage({ searchParams }: FindPageProps) {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title={runParam?"Research progress":"Find buyers"} subtitle={runParam?"Review this search’s coverage and saved results.":"Choose what you sell and where you want buyers. We save the results automatically."} />
+      <PageHeader title={runParam?"Research progress":"Find buyers"} subtitle={runParam?"How this search is going, and what it has found so far.":"Type what you supply, the way you would in Google. Pick the countries; we find the companies that buy it."} />
       <AutomationReadiness status={automation}/>
       <FindForm
         products={catalogueOptions()}
+        materials={materialCatalogue()}
         markets={profile.markets.map((code) => ({ code, name: marketName(code) }))}
         suggestions={suggestions}
         initialRunId={runParam}
@@ -51,7 +53,7 @@ export default async function FindPage({ searchParams }: FindPageProps) {
         initialInput={selectedRun?.adhoc_query ?? null}
       />
       <details className="card p-4"><summary className="cursor-pointer text-sm font-semibold">Scheduled searches ({saved.length})</summary><div className="mt-4"><SavedSearchesList searches={saved} /></div></details>
-      <Link href="/overview" className="self-start text-sm text-[var(--muted)] underline">View your previous searches in Overview</Link>
+      <Link href="/dashboard" className="self-start text-sm text-[var(--muted)] underline">See all your searches on the Dashboard</Link>
     </div>
   );
 }

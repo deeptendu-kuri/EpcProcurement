@@ -11,3 +11,9 @@ describe('searched product wording',()=>{
     expect(searchedProductLabel('cables','HDPE pipe','cables')).toBe('cables');
   });
 });
+describe('generic words with a picked type (doc 17)',()=>{
+  it('names the picked product, but keeps specific wording',()=>{
+    expect(searchedProductLabel('ball-valves','valves')).toMatch(/ball valves/i);
+    expect(searchedProductLabel('cs-process-pipe','seamless A106')).toBe('seamless A106');
+  });
+});

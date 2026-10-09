@@ -1,19 +1,45 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {cleanup,render,screen} from '@testing-library/react';
-import CrmPage from './page';
-import {filterTables} from '@/mvp/crm/tables';
-import {exampleDataset,EXAMPLE_RUN} from '@/mvp/crm/fixtures';
-const fixtures=vi.hoisted(()=>({data:undefined as unknown}));
-vi.mock('next/navigation',()=>({useRouter:()=>({push:vi.fn(),refresh:vi.fn()})}));
-vi.mock('@/mvp/opportunities',()=>({recentSearches:async()=>[{id:'11111111-1111-4111-8111-111111111111',created_at:'2026-10-08',adhoc_query:{productId:'line-pipe',query:'line pipe',markets:['AE']}}]}));
-vi.mock('@/mvp/crm/tables',async original=>{const mod=await original<typeof import('@/mvp/crm/tables')>();return {...mod,crmTables:async(q:import('@/mvp/crm/contracts').TableQuery)=>mod.filterTables(fixtures.data as import('@/mvp/crm/tables').TableDataset,q)};});
-vi.mock('@/components/mvp/search/lead-lists',()=>({AddToListDialog:()=>null}));
-afterEach(()=>{cleanup();fixtures.data=undefined;});
-async function show(params:Record<string,string>={}){fixtures.data??=exampleDataset(2);return render(await CrmPage({searchParams:Promise.resolve({search:EXAMPLE_RUN,...params})}));}
-describe('search-scoped table CRM',()=>{
-  it('defaults to the selected search and gives one clear results surface',async()=>{await show();expect((screen.getByLabelText('Search') as HTMLSelectElement).value).toBe(EXAMPLE_RUN);expect(screen.getAllByRole('table')).toHaveLength(1);expect(screen.getByRole('heading',{name:'Leads'})).toBeTruthy();});
-  it('keeps missing contacts and blank optional fields without inventing a summary',async()=>{await show();expect(screen.getAllByText('Example Engineering 1 Limited')).toHaveLength(1);const cells=screen.getByRole('table').querySelectorAll('tbody tr')[0].querySelectorAll('td');expect(cells[4].textContent).toBe('');expect(cells[5].textContent).toBe('');expect(screen.getByText(/Missing contacts never hide a company/)).toBeTruthy();});
-  it('hides rejected buyers except in explicit review history',async()=>{const data=exampleDataset();data.companies[0].qualification='rejected';fixtures.data=data;await show();expect(screen.queryByText('Example Engineering 1 Limited')).toBeNull();cleanup();await show({showRejected:'1'});expect(screen.getByText('Example Engineering 1 Limited')).toBeTruthy();});
-  it('supports direct contacts/contractors links and does not confuse capability with active work',async()=>{await show({tab:'contractors'});expect(screen.getByText(/2 capability-only companies are under Leads/)).toBeTruthy();cleanup();await show({activity:'active'});expect(screen.queryByRole('table')).toBeNull();});
-  it('rejects invalid filters and gives an escape route without querying arbitrary inputs',async()=>{await show({sort:'SQL injection'});expect(screen.getByRole('heading',{name:'Invalid lead filters'})).toBeTruthy();expect(screen.getByRole('link',{name:'Reset filters'})).toBeTruthy();expect(filterTables(exampleDataset(),(await import('@/mvp/crm/contracts')).tableQuerySchema.parse({})).total).toBe(1);});
+import LeadsPage from './page';
+import type {SearchWorkspaceProps} from '@/components/mvp/search/search-workspace';
+
+const LATEST='11111111-1111-4111-8111-111111111111';
+const OLDER='22222222-2222-4222-8222-222222222222';
+const seen=vi.hoisted(()=>({props:null as unknown}));
+vi.mock('@/components/mvp/search/search-workspace',()=>({SearchWorkspace:(props:SearchWorkspaceProps)=>{seen.props=props;return <div data-testid="workspace">{props.belowResults}</div>;}}));
+vi.mock('@/components/mvp/tables/found-companies',()=>({FoundCompanies:({runId}:{runId:string})=><p>found companies for {runId}</p>}));
+vi.mock('@/components/mvp/search/page-data',()=>({catalogueOptions:()=>[],marketOptions:()=>[]}));
+vi.mock('@/mvp/email/config',()=>({demoEmailEnabled:()=>true}));
+vi.mock('@/mvp/opportunities',()=>({recentSearches:async()=>[
+  {id:LATEST,status:'running',created_at:'2026-10-08T10:00:00Z',adhoc_query:{productId:'line-pipe',query:'steel pipe',markets:['AE','SA']}},
+  {id:'33333333-3333-4333-8333-333333333333',status:'done',created_at:'2026-10-07T10:00:00Z',adhoc_query:null},
+  {id:OLDER,status:'done',created_at:'2026-10-01T10:00:00Z',adhoc_query:{productId:'valves',query:'gate valves',markets:['AE','SA','QA','OM']}},
+]}));
+afterEach(()=>{cleanup();seen.props=null;});
+async function show(params:Record<string,string>={}){render(await LeadsPage({searchParams:Promise.resolve(params)}));return seen.props as SearchWorkspaceProps;}
+
+describe('Leads page (SuperSearch scoped to the user\'s searches)',()=>{
+  it('opens on the latest search with its unchecked companies under the table',async()=>{
+    const props=await show();
+    expect(props.basePath).toBe('/crm');
+    expect(props.tab).toBe('search');
+    expect(props.state.run).toBe(LATEST);
+    expect(screen.getByText(`found companies for ${LATEST}`)).toBeTruthy();
+  });
+  it('labels each material search with its words, countries and date and skips searches without a product',async()=>{
+    const props=await show();
+    expect(props.runs?.map(r=>r.id)).toEqual([LATEST,OLDER]);
+    expect(props.runs?.[0].label).toBe('steel pipe · UAE, Saudi Arabia · 8 Oct');
+    expect(props.runs?.[1].label).toMatch(/^gate valves · .+… · 1 Oct$/);
+  });
+  it('keeps old ?search= links and explicit runs',async()=>{
+    expect((await show({search:OLDER})).state.run).toBe(OLDER);
+    cleanup();
+    expect((await show({run:OLDER})).state.run).toBe(OLDER);
+  });
+  it('shows all searches without a found-companies panel',async()=>{
+    const props=await show({run:'all'});
+    expect(props.state.run).toBe('all');
+    expect(props.belowResults).toBeNull();
+  });
 });

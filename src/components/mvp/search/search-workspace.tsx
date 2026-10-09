@@ -195,12 +195,12 @@ function SavedSearchesMenu({ state, onApply }: { state: SearchUrlState; onApply:
   );
 }
 
-function TopTabs({ tab, right }: { tab: Tab; right?: React.ReactNode }) {
+function TopTabs({ tab, right, basePath = "/search" }: { tab: Tab; right?: React.ReactNode; basePath?: string }) {
   const base = "border-b-2 px-0.5 pb-[18px] text-base";
   return (
     <div className="flex h-16 shrink-0 items-end gap-6 border-b border-[var(--line)] px-4 sm:gap-[34px] lg:px-6">
-      <Link href="/search" aria-current={tab === "search" ? "page" : undefined} className={`${base} ${tab === "search" ? "border-[var(--accent)] font-semibold text-[var(--accent)]" : "border-transparent text-[#64748b] hover:text-[#334155]"}`}>
-        SuperSearch
+      <Link href={basePath} aria-current={tab === "search" ? "page" : undefined} className={`${base} ${tab === "search" ? "border-[var(--accent)] font-semibold text-[var(--accent)]" : "border-transparent text-[#64748b] hover:text-[#334155]"}`}>
+        Leads
       </Link>
       <Link href="/lists" aria-current={tab === "lists" ? "page" : undefined} data-tour="search-lists-tab" className={`${base} ${tab === "lists" ? "border-[var(--accent)] font-semibold text-[var(--accent)]" : "border-transparent text-[#64748b] hover:text-[#334155]"}`}>
         Lead Lists
@@ -212,6 +212,12 @@ function TopTabs({ tab, right }: { tab: Tab; right?: React.ReactNode }) {
 
 export interface SearchWorkspaceProps {
   demoEmail?: boolean;
+  /** Page the workspace lives on: "/crm" (Leads) or "/search" (old links). */
+  basePath?: string;
+  /** The user's searches, for the Search picker (doc 17 §4.4). */
+  runs?: { id: string; label: string; status: string }[];
+  /** Shown under the results for the selected search (e.g. companies found, not checked yet). */
+  belowResults?: React.ReactNode;
   tab: Tab;
   state: SearchUrlState;
   catalogue: CatalogueOption[];
@@ -223,7 +229,7 @@ export interface SearchWorkspaceProps {
  * SuperSearch | Lead Lists tabs, the count line, Buyers | Contacts, Select all, Add to list, Export,
  * Find contacts · the buyer sidebar. Filters live in the URL; 25 buyers per page.
  */
-export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: SearchWorkspaceProps) {
+export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, basePath = "/search", runs = [], belowResults = null }: SearchWorkspaceProps) {
   const router = useRouter();
   const toast = useToast();
   const [isPending, startTransition] = useTransition();
@@ -236,7 +242,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openId, setOpenId] = useState(state.open);
   const [listIds, setListIds] = useState<string[] | null>(null);
-  const [filtersCollapsed, setFiltersCollapsed] = useState(false);
+  const [filtersCollapsed, setFiltersCollapsed] = useState(true);
   const [filtersOpenSmall, setFiltersOpenSmall] = useState(false);
   const [panelKey, setPanelKey] = useState(0);
   const [exporting, setExporting] = useState(false);
@@ -260,7 +266,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (safeStorage.get(FILTERS_KEY) === "1") setFiltersCollapsed(true);
+      if (safeStorage.get(FILTERS_KEY) === "0") setFiltersCollapsed(false);
     }, 0);
     return () => clearTimeout(timer);
   }, []);
@@ -304,9 +310,9 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
   const navigate = useCallback(
     (change: Partial<SearchUrlState>) => {
       const next = applySearchChange({ ...state, open: openId, view }, change);
-      startTransition(() => router.replace(searchHref(next), { scroll: false }));
+      startTransition(() => router.replace(searchHref(next, basePath), { scroll: false }));
     },
-    [router, state, openId, view],
+    [router, state, openId, view, basePath],
   );
 
   const switchView = (next: ResultView) => {
@@ -314,7 +320,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
     setViewState(next);
     setContactsPage(1);
     if (tab !== "search") return;
-    const href = searchHref({ ...state, open: openId, view: next, page: 1 });
+    const href = searchHref({ ...state, open: openId, view: next, page: 1 }, basePath);
     window.history.replaceState(window.history.state, "", href);
   };
 
@@ -378,11 +384,16 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
       setOpenId(leadId);
       if (tab !== "search") return;
       // Keep the open buyer in the link without a server round trip.
-      const href = searchHref({ ...state, open: leadId, view });
+      const href = searchHref({ ...state, open: leadId, view }, basePath);
       window.history.replaceState(window.history.state, "", href);
     },
-    [state, tab, view],
+    [state, tab, view, basePath],
   );
+
+  const searchRun = state.run && state.run !== "all" ? state.run : undefined;
+  // A row opens by lead; a link from Email automation or the dashboard may carry an opportunity id.
+  const drawerTarget = (id: string) => id.startsWith("company:") ? { companyId: id.slice(8), run: searchRun }
+    : rows.some((r) => r.leadId === id) || !/^[0-9a-f-]{36}$/i.test(id) ? { leadId: id, run: searchRun } : { opportunityId: id, run: searchRun };
 
   const clearAll = () => {
     setPanelKey((value) => value + 1);
@@ -478,7 +489,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
   const topRight = (
     <>
 
-      {tab === "search" ? <SavedSearchesMenu state={state} onApply={(query) => startTransition(() => router.replace(query ? `/search?${query}` : "/search"))} /> : null}
+      {tab === "search" ? <SavedSearchesMenu state={state} onApply={(query) => startTransition(() => router.replace(query ? `${basePath}?${query}` : basePath))} /> : null}
     </>
   );
 
@@ -571,8 +582,8 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
         ) : noData ? (
           <EmptyState
             icon={<Users size={20} aria-hidden />}
-            title="No saved companies yet"
-            text="Start a new material search. SuperSearch will let you explore and filter its saved companies alongside other searches."
+            title={searchRun ? "No buyers saved by this search yet" : "No saved companies yet"}
+            text={searchRun ? "Check the search progress, or review the companies it found below and check them." : "Start a material search. Its buyers appear here with the proof, contacts and email status."}
           />
         ) : view === "contacts" ? (
           contacts && contacts.rows.length ? (
@@ -627,14 +638,23 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail }: S
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col bg-white">
-        <TopTabs tab={tab} right={topRight} />
-        {tab==="search"?<p className="border-b border-[var(--line)] px-4 py-2 text-xs text-[var(--muted)] lg:px-6">All saved companies across searches · filters only, no new web search. For a specific material, open its search from <Link className="font-semibold underline" href="/overview">Overview</Link>.</p>:null}
+        <TopTabs tab={tab} right={topRight} basePath={basePath} />
+        {tab==="search"?<div className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] bg-[var(--subtle)] px-4 py-2.5 text-sm lg:px-6" data-tour="leads-search">
+          <label className="flex items-center gap-2 font-semibold">Search
+            <select aria-label="Search" className="control h-9 max-w-[22rem] px-2 font-normal" value={state.run || "all"} onChange={e=>navigate({run:e.target.value})}>
+              {runs.map(r=><option key={r.id} value={r.id}>{r.label}{r.status==="running"||r.status==="queued"?" · running":""}</option>)}
+              <option value="all">All searches</option>
+            </select>
+          </label>
+          {state.run&&state.run!=="all"?<Link href={`/find?run=${state.run}`} className="btn btn-secondary btn-sm">Search progress</Link>:null}
+          <span className="text-xs text-[var(--muted)]">{state.run&&state.run!=="all"?"Companies saved by this search. Filters work within it.":"Companies from all your searches."}</span>
+        </div>:null}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-          {tab === "search" ? results : <LeadListsView onOpenBuyer={setOpen} openId={openId} />}
+          {tab === "search" ? <>{results}{belowResults ? <div className="px-4 pb-8 lg:px-6">{belowResults}</div> : null}</> : <LeadListsView onOpenBuyer={setOpen} openId={openId} />}
         </div>
       </div>
 
-      {openId?<EvidenceDrawer key={openId} target={openId.startsWith('company:')?{companyId:openId.slice(8)}:{leadId:openId}} onClose={()=>setOpen('')} onTarget={t=>setOpen(t.companyId?`company:${t.companyId}`:t.leadId??'')} onPrevious={rows.findIndex(r=>r.leadId===openId)>0?()=>setOpen(rows[rows.findIndex(r=>r.leadId===openId)-1].leadId):undefined} onNext={rows.findIndex(r=>r.leadId===openId)>=0&&rows.findIndex(r=>r.leadId===openId)<rows.length-1?()=>setOpen(rows[rows.findIndex(r=>r.leadId===openId)+1].leadId):undefined}/>:null}
+      {openId?<EvidenceDrawer key={openId} target={drawerTarget(openId)} onClose={()=>setOpen('')} onTarget={t=>setOpen(t.companyId?`company:${t.companyId}`:t.leadId??'')} onPrevious={rows.findIndex(r=>r.leadId===openId)>0?()=>setOpen(rows[rows.findIndex(r=>r.leadId===openId)-1].leadId):undefined} onNext={rows.findIndex(r=>r.leadId===openId)>=0&&rows.findIndex(r=>r.leadId===openId)<rows.length-1?()=>setOpen(rows[rows.findIndex(r=>r.leadId===openId)+1].leadId):undefined}/>:null}
       {addingContact ? (
         <AddContactModal
           company={addingContact.company}

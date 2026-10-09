@@ -59,8 +59,8 @@ export interface ResultsTableProps {
 }
 
 /**
- * Buyers table (docs/mvp/14 §10): Buyer · Buyer role · Why they buy now · What we can sell them
- * (+ competitor note) · Location · Buyer fit + how sure · Contacts. A click opens the sidebar.
+ * Leads table (docs/mvp/17 §4.4): Company · Role in the chain (with tier) · Why they buy · What we can
+ * sell (the searched product) · Where · From search · Email · Fit · Contacts. A click opens the evidence drawer.
  */
 export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true, onSaveDerived, saving }: ResultsTableProps) {
   return (
@@ -69,13 +69,14 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
         <thead>
           <tr className="bg-[#fcfcfd] text-left text-xs uppercase tracking-[.03em] text-[#6b7280]">
             {selectable ? <th scope="col" className="w-[34px] border border-[var(--line)] px-2.5 py-2.5 font-medium"><span className="sr-only">Select</span></th> : null}
-            <th scope="col" className="w-[18%] border border-[var(--line)] px-2.5 py-2.5 font-medium">Buyer</th>
-            <th scope="col" className="w-[14%] border border-[var(--line)] px-2.5 py-2.5 font-medium">What they do</th>
-            <th scope="col" className="w-[9%] border border-[var(--line)] px-2.5 py-2.5 font-medium" title="Supply-chain tier: 1 won the work, 2 supplies them, 3 supplies tier 2">Tier</th>
-            <th scope="col" className="w-[22%] border border-[var(--line)] px-2.5 py-2.5 font-medium">Why they buy now</th>
-            <th scope="col" className="w-[21%] border border-[var(--line)] px-2.5 py-2.5 font-medium">What we can sell them</th>
-            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">Location</th>
-            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium" title="Buyer fit (0–100) and how sure we are">Buyer fit</th>
+            <th scope="col" className="w-[17%] border border-[var(--line)] px-2.5 py-2.5 font-medium">Company</th>
+            <th scope="col" className="w-[14%] border border-[var(--line)] px-2.5 py-2.5 font-medium" title="Tier 1 won the work; tier 2 and 3 supply them">Role in the chain</th>
+            <th scope="col" className="w-[22%] border border-[var(--line)] px-2.5 py-2.5 font-medium">Why they buy</th>
+            <th scope="col" className="w-[13%] border border-[var(--line)] px-2.5 py-2.5 font-medium">What we can sell</th>
+            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">Where</th>
+            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">From search</th>
+            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">Email</th>
+            <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium" title="Buyer fit (0–100) and how sure we are">Fit</th>
             <th scope="col" className="border border-[var(--line)] px-2.5 py-2.5 font-medium">Contacts</th>
           </tr>
         </thead>
@@ -139,10 +140,8 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                   </div>
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px]">
-                  <RolePill role={row.role} label={label} />{row.trigger?<span className="mt-2 block text-xs font-semibold text-[var(--accent-2)]">{triggerKindLabel(row.trigger.kind)}{row.trigger.date?` · ${row.trigger.date}`:''}</span>:null}
-                </td>
-                <td className="border border-[var(--line)] px-2.5 py-[11px]" data-testid="tier-cell">
-                  <TierBadge tier={tier} />
+                  <RolePill role={row.role} label={label} />
+                  <div className="mt-1.5" data-testid="tier-cell"><TierBadge tier={tier} />
                   {tier > 1 && row.link ? (
                     <span className={`ml-1 inline-block whitespace-nowrap rounded-full px-1.5 py-px text-[10.5px] font-semibold ${LINK_STYLES[row.link]}`}>{LINK_LABELS[row.link]}</span>
                   ) : null}
@@ -154,13 +153,15 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                       </a>
                     </div>
                   ) : null}
+                  </div>
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px] text-[#1f2937]">
+                  {row.trigger?<span className="mb-1 block text-xs font-semibold text-[var(--accent-2)]">{triggerKindLabel(row.trigger.kind)}{row.trigger.date?` · ${row.trigger.date}`:''}</span>:null}
                   {row.buyingReason || <span className="text-[#9ca3af]">{tier > 1 ? "In the supply chain of this deal" : "Not known yet"}</span>}
                   {moreDeals ? <div className="mt-0.5 text-[11.5px] font-semibold text-[#475569]">+{moreDeals} more {moreDeals === 1 ? "deal" : "deals"}</div> : null}
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px] text-[#1f2937]">
-                  {row.sellSummary || <span className="text-[#9ca3af]">Nothing matched yet</span>}
+                  {row.searchedProduct || row.sellSummary || <span className="text-[#9ca3af]">Nothing matched yet</span>}
                   {row.competitorNote ? (
                     <div className="mt-0.5 flex items-start gap-1 text-[11.5px] text-[#b91c1c]">
                       <AlertTriangle size={12} className="mt-px shrink-0" aria-hidden />
@@ -169,8 +170,14 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                   ) : null}
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px]">{countryName(row.country)}</td>
+                <td className="border border-[var(--line)] px-2.5 py-[11px] text-[12.5px]">
+                  {row.searches?.length ? <>{row.searches[0].label}{row.searches.length > 1 ? <div className="text-[11.5px] text-[var(--muted)]">+{row.searches.length - 1} more</div> : null}</> : <span className="text-[#9ca3af]">—</span>}
+                </td>
+                <td className="border border-[var(--line)] px-2.5 py-[11px] text-[12.5px]">
+                  {row.emailStatus ? <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${/Meeting/.test(row.emailStatus) ? "bg-green-50 text-green-800" : /Replied|Intro/.test(row.emailStatus) ? "bg-blue-50 text-blue-800" : /Held|Stopped/.test(row.emailStatus) ? "bg-amber-50 text-amber-800" : "bg-[var(--subtle)] text-[var(--text-2)]"}`}>{row.emailStatus}</span> : <span className="text-[#9ca3af]">—</span>}
+                </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px]">
-                  <span className="font-bold tabular-nums">{row.fitScore}</span>
+                  {row.fitScore > 0 ? <span className="font-bold tabular-nums">{row.fitScore}</span> : <span className="text-[var(--muted)]">Not scored</span>}
                   <div className={`text-[11.5px] ${HOW_SURE_STYLES[row.howSure]}`} title="How sure we are">{HOW_SURE_LABELS[row.howSure]}</div>
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px] text-[12.5px]">

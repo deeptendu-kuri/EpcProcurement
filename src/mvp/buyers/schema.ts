@@ -30,6 +30,7 @@ export const buyerSearchSchema = z
     minFit: z.number().min(0).max(100).optional(),
     howSure: list(z.enum(["high", "medium", "low"])).optional(),
     q: z.string().trim().max(200).optional(),
+    run: z.string().uuid().optional(),
     sort: z.enum(["latest", "fit", "window"]).optional(),
     page: z.number().int().min(1).max(10_000).optional(),
     pageSize: z.number().int().min(1).max(200).optional(),

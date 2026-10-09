@@ -4,7 +4,7 @@ vi.mock('@/mvp/research/store',()=>({createResearchRun:deps.create}));
 vi.mock('@/mvp/research/worker',()=>({startResearchWorker:deps.start}));
 vi.mock('@/mvp/scheduler',()=>({getRunQueue:deps.queue}));
 vi.mock('@/mvp/config/env',()=>({mvpEnv:{offline:()=>false}}));
-vi.mock('@/mvp/discovery/material',()=>({resolveMaterial:()=>({status:'resolved'})}));
+vi.mock('@/mvp/discovery/material-catalogue',()=>({resolveMaterial:()=>({status:'resolved'})}));
 import {enqueueResponse} from './queue';
 const job={input:{query:'line pipe',productId:'line-pipe',markets:['IN'],leadKinds:['supply_subcontract' as const]}};
 afterEach(()=>{vi.unstubAllEnvs();vi.clearAllMocks();});

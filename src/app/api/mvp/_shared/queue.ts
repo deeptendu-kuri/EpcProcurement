@@ -5,7 +5,7 @@ import { serverlessRuntime,SERVERLESS_SETUP_MESSAGE } from "@/mvp/runtime";
 import { createResearchRun } from "@/mvp/research/store";
 import { startResearchWorker } from "@/mvp/research/worker";
 import { mvpEnv } from "@/mvp/config/env";
-import { resolveMaterial } from "@/mvp/discovery/material";
+import { resolveMaterial } from "@/mvp/discovery/material-catalogue";
 
 /** How long a POST waits for its job to start before answering "waiting in line". */
 const START_WAIT_MS = 4000;
