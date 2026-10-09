@@ -156,6 +156,7 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   counters.readFailures=Object.fromEntries(failures.map(f=>[f.reason??'unknown',f.count]));
   counters.researchUsage={search:units('search'),reads:units('read'),aiCalls:units('ai_pages'),estimatedAiTokens:units('ai_tokens'),pdfPages:units('pdf_pages')};
   counters.researchUsage.bingSearches=units('bing_search');
+  counters.researchUsage.websiteLookups=units('lookup');
   if(session)counters.researchLimits={search:session.budget.searchQueries,reads:session.budget.maxPages,aiCalls:session.budget.maxAiPages,estimatedAiTokens:session.budget.maxAiTokens};
   if(session)counters.researchLimits!.bingSearches=session.budget.bingQueries;
   // Extra rounds taken because fewer buyers than wanted were saved (see extend.ts).

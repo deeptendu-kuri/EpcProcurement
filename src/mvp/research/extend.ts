@@ -89,8 +89,16 @@ export async function extendResearchIfShort(db: Db, runId: string): Promise<bool
       where ${runnable}`, [runId]);
     // Buyers come from checking companies already named, then from direct company searches;
     // more news and list queries mostly add names. Spend the extra searches in that order.
-    await tx.query(`update research_jobs set priority=case when key like 'official:%' then 2300 when payload->>'sourcingLane'='capability' then 2200 else priority end
-      where run_id=$1 and state='queued' and stage='collect'`, [runId]);
+    // Order: find a found company's website → read it → judge it → direct company searches;
+    // reading more list pages (which only adds names) comes last.
+    await tx.query(`update research_jobs set priority=case
+        when stage='collect' and key like 'official:%' then 2300
+        when stage='read' and payload->'raw'->'research'->>'lane'='investigation' then 2250
+        when stage='analyse' and payload ? 'candidateId' then 2240
+        when stage='collect' and payload->>'sourcingLane'='capability' then 2200
+        when stage='analyse' and payload->>'kind'='analyse:roundup' then 100
+        else priority end
+      where run_id=$1 and state='queued'`, [runId]);
   });
   // Companies parked by a reading limit get their website read again (imported lazily: found.ts uses this module).
   if (parked) await (await import('./found')).requeueDeferredCandidates(db, runId, next);

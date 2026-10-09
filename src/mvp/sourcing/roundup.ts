@@ -117,6 +117,10 @@ export async function extractRoundup(document:{id:string;text:string},provider:L
   if(body.length>14000)result.warnings.push('Roundup extraction input limited to 14,000 characters; later entries may remain unsearched.');
   return result;
 }
+/** Website lookups allowed for a search: twice its web-search allowance, at least 8 (0 when searching is off). */
+export function websiteLookupLimit(budget:{searchQueries:number}):number {
+  return budget.searchQueries===0?0:Math.max(8,budget.searchQueries*2);
+}
 /** Candidate discovery only. A result URL is a hint; the investigation must corroborate identity. */
 export async function seedRoundup(db:Db,runId:string,input:RunInput,result:RoundupResult,budget:ResearchBudget) {
   let seeded=0,lookups=0,queued=0;
@@ -163,10 +167,12 @@ export async function lookupRoundupWebsite(db:Db,runId:string,input:RunInput,can
   let results=await cachedTavilyQuery(ctx,query);const cached=results!==null;
   if(results===null){
     const key='roundup-website:'+candidate.id;
-    const reservation=await reserveBudget(db,runId,'search',key,1,budget.searchQueries);
+    // Website lookups have their own allowance (twice the search allowance, at least 8) so checking
+    // companies already found is not starved by collection searches. A zero search budget stays zero.
+    const reservation=await reserveBudget(db,runId,'lookup',key,1,websiteLookupLimit(budget));
     if(reservation!=='reserved')return {queued:0,budgetLimited:true,skipped:reservation==='existing'?'Prior website query acceptance uncertain; no repeated charge.':'Official-site query budget exhausted.'};
-    try{results=await collect(ctx,query);await markBudget(db,runId,'search',key,'completed');}
-    catch{await markBudget(db,runId,'search',key,'unknown');return {queued:0,warning:'Official-site lookup unavailable; no guessed website.'};}
+    try{results=await collect(ctx,query);await markBudget(db,runId,'lookup',key,'completed');}
+    catch{await markBudget(db,runId,'lookup',key,'unknown');return {queued:0,warning:'Official-site lookup unavailable; no guessed website.'};}
   }
   const found=officialSite(candidate.company,results.filter(r=>!junkReason(r.url,r.title,input.markets)));
   if(!found){

@@ -168,7 +168,7 @@ export interface RunCounters {
   researchCandidates?: number;
   investigatedCompanies?: number;
   readFailures?: Record<string,number>;
-  researchUsage?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;pdfPages:number;bingSearches?:number};
+  researchUsage?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;pdfPages:number;bingSearches?:number;websiteLookups?:number};
   researchLimits?: {search:number;reads:number;aiCalls:number;estimatedAiTokens:number;bingSearches?:number};
   /** Extra research rounds taken because fewer buyers than wanted were saved. */
   researchRounds?: number;

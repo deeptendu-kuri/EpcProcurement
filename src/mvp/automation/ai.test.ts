@@ -197,3 +197,25 @@ describe("grounded Groq sales decisions",()=>{
     }
   });
 });
+
+describe("buyer fit on a company's own website",()=>{
+  it("uses the page naming the company when the AI cites a first-person work sentence as identity",async()=>{
+    // Synthetic Example fixture modelled on a fabricator's own site ("Our expertise covers … pressure vessels").
+    const run=(await db.query<{id:string}>("insert into runs(status) values('done') returning id")).rows[0].id;
+    const company=(await db.query<{id:string}>("insert into companies(canonical_name,normalized_name,types,domain) values('Example Vessels Pvt. Ltd.',$1,'{fabricator}','example-vessels.example') returning id",['example vessels '+crypto.randomUUID()])).rows[0].id;
+    const lead=(await db.query<{id:string}>("insert into leads(kind,buyer_company_id,score_breakdown,gate_results,class,reasons,scoring_version,is_sample) values('supply_subcontract',$1,'{}','[]','research','[]',1,false) returning id",[company])).rows[0].id;
+    const page=async(path:string,text:string,quote:string)=>{
+      const url='https://www.example-vessels.example/'+path;
+      const doc=(await db.query<{id:string}>("insert into source_documents(source_key,publisher_key,url,canonical_url,content_hash,text) values('Example','example-vessels.example',$1,$1,$2,$3) returning id",[url,crypto.randomUUID(),text])).rows[0].id;
+      await db.query('insert into run_documents(run_id,document_id) values($1,$2)',[run,doc]);
+      return (await db.query<{id:string}>("insert into evidence(document_id,url,quote,extracted_by,quote_verified,tier,publisher_key) values($1,$2,$3,'Example fixture',true,'B','example-vessels.example') returning id",[doc,url,quote])).rows[0].id;
+    };
+    const identity=await page('pressure-vessels','Example Vessels Pvt. Ltd.\nPressure vessel manufacturers in India.','Example Vessels Pvt. Ltd.');
+    const work='Our expertise covers the design and fabrication of ASME-certified pressure vessels, heat exchangers and reactors.';
+    const work_id=await page('',work,work);
+    const id=(await db.query<{id:string}>("insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,buying_reason,evidence_ids) values($1,$2,$3,'steel plates','plates','Steel plates',$4,$5::uuid[]) returning id",[run,lead,company,work,[identity,work_id]])).rows[0].id;
+    const o={...opportunity,id,run_id:run,name:'Example Vessels Pvt. Ltd.',product_id:'plates',product_name:'Steel plates',keyword:'steel plates',buying_reason:work,evidence_ids:[identity,work_id]} as Opportunity;
+    complete.mockResolvedValue({text:JSON.stringify({approved:true,confidence:.6,reason:'Pressure vessel fabrication uses steel plate',companyEvidenceId:work_id,productEvidenceId:work_id})});
+    expect(await qualifyBuyer(o)).toMatchObject({approved:true});
+  });
+});

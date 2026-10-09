@@ -94,15 +94,25 @@ export async function qualifyBuyer(o: Opportunity,options:{demoFallback?:boolean
   }
   const answer=schema.parse(decision);
   if(!answer.approved)return {approved:false,reason:answer.reason};
-  const company=quotes.find(q=>q.id===answer.companyEvidenceId?.trim());const product=quotes.find(q=>q.id===answer.productEvidenceId?.trim());
-  if(!company || !product || !data.evidence.some(q=>q.id===company.id) || !data.productEvidenceIds.includes(product.id))return {approved:false,reason:"AI cited an evidence ID outside this opportunity's bounded request. No email sent."};
+  let company=quotes.find(q=>q.id===answer.companyEvidenceId?.trim());const product=quotes.find(q=>q.id===answer.productEvidenceId?.trim());
+  if(!company || !product || !data.evidence.some(q=>q.id===company!.id) || !data.productEvidenceIds.includes(product.id))return {approved:false,reason:"AI cited an evidence ID outside this opportunity's bounded request. No email sent."};
   // Match against the original evidence, tolerating typography/whitespace only.
   // A short literal product phrase is not invalid merely because it is under 15 characters.
-  const companyQuote=answer.companyQuote===undefined?company.quote:originalQuote(company.quote,answer.companyQuote);
+  let companyQuote=answer.companyQuote===undefined?company.quote:originalQuote(company.quote,answer.companyQuote);
   const productQuote=answer.productQuote===undefined?product.quote:originalQuote(product.quote,answer.productQuote);
   if(!companyQuote || !productQuote)return {approved:false,reason:"AI citations were not literal excerpts of this opportunity's source evidence. No email sent."};
-  const names=companyNames(o.name,company.quote);
   const domain=(url:string)=>{try{return new URL(url).hostname.toLowerCase().replace(/^www\./,'');}catch{return null;}};
+  // "KRR Engineering" names "KRR Engineering Pvt. Ltd.": the legal suffix and a bracketed short form are optional.
+  const short=o.name.replace(/\s*\([^)]*\)/g,'').replace(/(?:[,\s]+(?:L\.?L\.?C\.?|LIMITED|LTD\.?|PVT\.?|PRIVATE|CO\.?|SDN\.?|BHD\.?|INC\.?|PLC))+\s*$/i,'').trim();
+  const nameList=(quote:string)=>[...new Set([...companyNames(o.name,quote),...(short.length>=8&&short.split(/\s+/).length>=2?[short]:[])])];
+  // The AI may cite a work sentence ("Our expertise covers …") as identity proof. Any verified quote
+  // of this opportunity that names the company proves identity; prefer one from the product quote's site.
+  if(!namesCompany(companyQuote,nameList(company.quote))){
+    const naming=quotes.filter(q=>namesCompany(q.quote,nameList(q.quote)));
+    const alt=naming.find(q=>domain(q.url)===domain(product.url))??naming[0];
+    if(alt){company=alt;companyQuote=alt.quote;}
+  }
+  const names=nameList(company.quote);
   // Discovery can corroborate identity and services on separate company-owned pages.
   // Require both original documents in this search, literal spans and no competing subject.
   const ownSite=company.own_run && product.own_run && company.text && product.text
