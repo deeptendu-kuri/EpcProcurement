@@ -101,7 +101,12 @@ export async function reserveAnalysis(db:Db,runId:string,key:string,tokens:numbe
     await tx.query(`insert into research_budget_reservations(run_id,kind,key,units) values($1,'ai_pages',$2,1),($1,'ai_tokens',$2,$3)`,[runId,key,tokens]);return 'reserved' as const;
   });
 }
-export async function claimJob(db:Db=getDb(),runId?:string,jobId?:string):Promise<ResearchJob|null> {
+/**
+ * Claim the next step. `maxRunning` steps of one search may run at once (doc 19: countries searched in
+ * parallel); AI analysis stays one at a time per search because the AI provider limits tokens per minute.
+ * The default of 1 keeps tests and direct callers sequential.
+ */
+export async function claimJob(db:Db=getDb(),runId?:string,jobId?:string,maxRunning=1):Promise<ResearchJob|null> {
   return db.tx(async tx=>{
     // Cancelled parent runs cannot be revived by a delayed delivery.
     await tx.query(`update research_sessions s set state='cancelled' from runs r where r.id=s.run_id and r.status='cancelled' and s.state<>'cancelled'`);
@@ -110,10 +115,11 @@ export async function claimJob(db:Db=getDb(),runId?:string,jobId?:string):Promis
     const job=(await tx.query<ResearchJob>(`select j.* from research_jobs j join research_sessions s on s.run_id=j.run_id
       where s.state='active' and ($1::uuid is null or j.run_id=$1) and ($2::uuid is null or j.id=$2) and j.available_at<=now()
       and (j.state='queued' or j.state='running' and j.lease_until<now())
-      and not exists(select 1 from research_jobs busy where busy.run_id=j.run_id and busy.state='running' and busy.lease_until>now())
+      and (select count(*) from research_jobs busy where busy.run_id=j.run_id and busy.state='running' and busy.lease_until>now())<$3
+      and not (j.stage='analyse' and exists(select 1 from research_jobs ai where ai.run_id=j.run_id and ai.stage='analyse' and ai.state='running' and ai.lease_until>now()))
       and (coalesce(j.payload->>'sourcingLane','')<>'capability' or not exists(select 1 from research_jobs earlier
         where earlier.run_id=j.run_id and earlier.id<>j.id and earlier.priority>j.priority and earlier.state in ('queued','running')))
-      order by j.priority desc,j.created_at,j.id for update of j,s skip locked limit 1`,[runId??null,jobId??null])).rows[0];
+      order by j.priority desc,j.created_at,j.id for update of j,s skip locked limit 1`,[runId??null,jobId??null,Math.max(1,maxRunning)])).rows[0];
     if(!job)return null;
     await tx.query(`update research_jobs set state='running',lease_token=$2,lease_until=now()+interval '5 minutes',attempts=attempts+1,updated_at=now() where id=$1`,[job.id,token]);
     await tx.query(`update runs set status='running',started_at=coalesce(started_at,now()) where id=$1 and status<>'cancelled'`,[job.run_id]);

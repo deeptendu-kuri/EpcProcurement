@@ -26,3 +26,22 @@ describe("stopping a search", () => {
     expect(await cancelResearchRun(db, run)).toBe(false); // already stopped
   });
 });
+
+describe("parallel steps (docs/mvp/19 Phase 4)", () => {
+  it("lets several steps of one search run at once, but only one AI analysis", async () => {
+    const { claimJob } = await import("./store");
+    const db2 = await createTestDb();
+    try {
+      const id = (await db2.query<{ id: string }>("insert into runs (status, adhoc_query) values ('running', '{}'::jsonb) returning id")).rows[0].id;
+      await db2.query("insert into research_sessions (run_id, budget) values ($1, '{}'::jsonb)", [id]);
+      await db2.query(`insert into research_jobs (run_id, stage, key, priority) values ($1,'collect','ae-news',100),($1,'collect','de-news',100),($1,'read','page',90),
+        ($1,'analyse','a1',80),($1,'analyse','a2',80)`, [id]);
+      // Sequential default: one at a time.
+      expect(await claimJob(db2, id)).not.toBeNull();
+      expect(await claimJob(db2, id)).toBeNull();
+      // Four slots: the other news search and the page read start too, plus one analysis, never two.
+      const claimed = [await claimJob(db2, id, undefined, 4), await claimJob(db2, id, undefined, 4), await claimJob(db2, id, undefined, 4), await claimJob(db2, id, undefined, 4)];
+      expect(claimed.filter(Boolean).map((j) => j!.stage).sort()).toEqual(["analyse", "collect", "read"]);
+    } finally { await db2.close(); }
+  }, 60_000);
+});

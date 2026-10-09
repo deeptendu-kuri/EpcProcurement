@@ -60,4 +60,15 @@ describe("bounded material research form",()=>{
     await screen.findByRole("alert");
     expect(api).toHaveBeenCalledWith("/api/mvp/runs",expect.objectContaining({body:expect.objectContaining({query:"seamless pipe ASTM A106",productId:"cs-process-pipe"})}));
   });
+  it("shows the exact variant typed and sends the stockist choice (docs/mvp/19)",async()=>{
+    api.mockRejectedValue(new Error("Unit test: no network"));render(<FindForm {...props} materials={materialCatalogue()}/>);
+    fireEvent.change(screen.getByLabelText("What do you supply?"),{target:{value:"Welded Stainless Steel Pipes 316L"}});
+    expect(screen.getAllByText("Welded · 316L",{selector:"strong"}).length).toBeGreaterThan(0);
+    const toggle=screen.getByLabelText("Also find stockists and traders") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    fireEvent.submit(screen.getByRole("form",{name:"Search for opportunities"}));
+    await screen.findByRole("alert");
+    expect(api).toHaveBeenCalledWith("/api/mvp/runs",expect.objectContaining({body:expect.objectContaining({query:"Welded Stainless Steel Pipes 316L",productId:"ss-duplex-pipe",includeResellers:false})}));
+  });
 });

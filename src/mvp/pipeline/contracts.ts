@@ -45,6 +45,8 @@ export interface RawDoc {
     searchPreview?: string;
     sourcingLane?: 'trigger'|'roundup'|'capability';
     pageKind?: 'article'|'tender_notice'|'filing'|'company_site'|'directory'|'roundup'|'junk';
+    /** Doc 19: found by following this contractor down its chain (subcontractor search). */
+    chainParent?: { candidateId: string; company: string };
   };
 }
 

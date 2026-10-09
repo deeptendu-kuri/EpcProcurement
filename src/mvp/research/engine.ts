@@ -35,6 +35,7 @@ import { LLMHttpError,QuotaExceededError } from '@/mvp/llm/types';
 import { tedSource } from '@/mvp/pipeline/sources/ted';
 import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@/mvp/sourcing/roundup';
 import { rateCandidates } from './shortlist';
+import { planChainSearches } from './chain';
 import {SOURCING_REGISTRY,collectRegistry,registryPageTargets,registryReadWarning,registryRaw} from '@/mvp/sourcing/registry';
 
 export interface ResearchDeps {
@@ -64,8 +65,8 @@ export const productionResearchDeps:ResearchDeps={
     return sources[source].collect(ctx);
   },read:fetchPageText,discover:discoverBuyers,save:saveBuyer,
 };
-export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=productionResearchDeps,runId?:string,jobId?:string) {
-  const job=await claimJob(db,runId,jobId);
+export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=productionResearchDeps,runId?:string,jobId?:string,maxRunning=1) {
+  const job=await claimJob(db,runId,jobId,maxRunning);
   if(!job){await finishIdleResearch(db,runId);return {processed:false};}
   const session=await sessionFor(db,job.run_id);
   const input=(await db.query<{adhoc_query:RunInput}>('select adhoc_query from runs where id=$1',[job.run_id])).rows[0].adhoc_query;
@@ -108,6 +109,7 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         }
       }else docs=await deps.collect(source,ctx,job.payload);
       if(news)await markBudget(db,job.run_id,'bing_search',job.key,'completed');
+      if(job.payload.chainParent)docs=docs.map(raw=>({...raw,research:{lane:'directory',...raw.research,chainParent:job.payload.chainParent as {candidateId:string;company:string}}}));
       if(job.payload.sourcingLane)docs=docs.map(raw=>({...raw,research:{lane:job.payload.sourcingLane==='trigger'?'news':job.payload.sourcingLane==='roundup'?'directory':'company',...raw.research,sourcingLane:job.payload.sourcingLane as 'trigger'|'roundup'|'capability'}}));
       await enqueueRawDocs(db,job,docs,session.budget.maxPages);
       await researchProgress(db,job.run_id,'collect',`${source}: ${docs.length} original-page candidates. Discovery is saved; contact validation is separate.`);
@@ -206,6 +208,11 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         const likely=rating.rated.filter(r=>r.rating>=45).length;
         if(rating.rated.length)await researchProgress(db,job.run_id,'check',`Shortlist: rated ${rating.rated.length} companies; ${likely} look like buyers. Checking the best rated first.`);
         if(rating.warning)await researchProgress(db,job.run_id,'info',rating.warning);
+        const parent=(job.payload.raw as RawDoc|undefined)?.research?.chainParent;
+        if(parent)await db.query(`update research_candidates set found_via=coalesce(found_via,'{}'::jsonb)||jsonb_build_object('chainParent',$3::jsonb)
+          where run_id=$1 and identity_document_id=$2 and id::text<>$4`,[job.run_id,id,JSON.stringify(parent),parent.candidateId]);
+        const chained=await planChainSearches(db,job.run_id,input).catch(()=>0);
+        if(chained)await researchProgress(db,job.run_id,'check',`Following ${chained} top ${chained===1?'contractor':'contractors'} down their supply chain: searching for their subcontractors.`);
         await persistRoundupAwards(db,job.run_id,input,roundup);
         await completeJob(db,job,{roundup,...seeded,budgetLimited:providers.limited,coverageWarning:roundup.warnings.length>0});
         await researchProgress(db,job.run_id,'check',`Roundup: ${seeded.seeded} verified identity candidates; ${seeded.queued} website reads and ${seeded.lookups} bounded lookup tasks. Candidates are not confirmed buyers.`);
@@ -327,6 +334,9 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
     if(rs?.input?.productId){
       const rated=await rateCandidates(db,s.run_id,rs.input,key=>budgetedAwardProviders(db,s.run_id,key,rs.budget).provider('triage')).catch(()=>null);
       if(rated?.rated.length)await researchProgress(db,s.run_id,'check',`Shortlist: rated ${rated.rated.length} more companies; ${rated.rated.filter(r=>r.rating>=45).length} look like buyers.`);
+      // Contractors found outside list pages are followed too; new searches keep the search running.
+      const chained=await planChainSearches(db,s.run_id,rs.input).catch(()=>0);
+      if(chained){await researchProgress(db,s.run_id,'check',`Following ${chained} top ${chained===1?'contractor':'contractors'} down their supply chain: searching for their subcontractors.`);continue;}
     }
     const jobs=(await db.query<{stage:string;state:string;error:string|null;payload:{source?:string;raw?:RawDoc};result:{deferred?:number;documentId?:string;unreadable?:boolean;budgetLimited?:boolean}|null}>('select stage,state,error,payload,result from research_jobs where run_id=$1',[s.run_id])).rows;
     const collections=jobs.filter(j=>j.stage==='collect');

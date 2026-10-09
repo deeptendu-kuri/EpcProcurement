@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { parseMaterialSpec, specChips } from "@/mvp/discovery/spec";
 import { Bookmark, Check, Loader2, Search } from "lucide-react";
 import type { LeadKind, RunInput } from "@/mvp/types";
 import { apiJson } from "./api-client";
@@ -51,6 +52,8 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
   const suggested = reading.best?.id ?? "";
   if (pickedFor !== query && suggested !== productId && (suggested || !query.trim())) setProductId(suggested);
   const [contactRole, setContactRole] = useState(initialInput?.contactRole ?? "buyer");
+  const [includeResellers, setIncludeResellers] = useState(initialInput?.includeResellers !== false);
+  const variant = useMemo(() => specChips(parseMaterialSpec(query)), [query]);
   const [researchMode, setResearchMode] = useState<"preview" | "batch" | "deep">(initialInput?.researchMode ?? "preview");
   const [targetCompanies, setTargetCompanies] = useState(initialInput?.targetCompanies ?? (initialInput?.researchMode === "deep" ? 50 : 20));
   const [runId, setRunId] = useState<string | null>(initialRunId);
@@ -134,7 +137,7 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
     if (!validate()) return;
     setSubmitting(true);
     try {
-      const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), productId, contactRole, researchMode, targetCompanies, markets: selected, leadKinds: leadKinds() } });
+      const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), productId, contactRole, researchMode, targetCompanies, includeResellers, markets: selected, leadKinds: leadKinds() } });
       emit(EVENTS.refreshStatus);
       if (ticket.runId) {
         // The search's own workspace shows its live progress and shortlist.
@@ -197,14 +200,19 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
               placeholder="e.g. steel pipe, seamless pipe A106, steel plates, ductile iron pipe" autoComplete="off" className="input h-14 w-full pl-11 pr-4 text-base" />
           </div>
           {query.trim().length>=2?<div className="rounded-xl border border-[var(--line)] bg-[var(--subtle)] p-4" aria-live="polite">
-            <p className="text-sm">{reading.family?<><strong>{reading.family}</strong> has several types. Choose the one you sell:</>:reading.best?<>Searching for <strong>{chosen?.shortName??reading.best.label}</strong>{reading.choices.length>1?" · similar types:":""}</>:reading.choices.length?<>Not in your product list. Closest matches:</>:<>This material is not in your product list yet. Choose the closest type:</>}</p>
+            <p className="text-sm">{reading.family?<><strong>{reading.family}</strong> has several types. Choose the one you sell:</>:reading.best?<>Searching for <strong>{chosen?.shortName??reading.best.label}</strong>{variant.length?<> · <strong>{variant.join(" · ")}</strong></>:null}{reading.choices.length>1?" · other types:":""}</>:reading.choices.length?<>Not in your product list. Closest matches:</>:<>This material is not in your product list yet. Choose the closest type:</>}</p>
             <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Product type">
               {reading.choices.map(c=><button key={c.id} type="button" aria-pressed={productId===c.id} title={c.detail} onClick={()=>{setProductId(c.id);setPickedFor(query);}}
                 className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm ${productId===c.id?"border-[var(--accent)] bg-[var(--accent-soft)] font-semibold text-[var(--accent-2)]":"border-[var(--line)] bg-white"}`}>{productId===c.id?<Check size={13} aria-hidden/>:null}{c.label}</button>)}
               {!reading.choices.length?<select aria-label="Product to sell" className="control h-9 px-2 text-sm" value={productId} onChange={e=>{setProductId(e.target.value);setPickedFor(query);}}><option value="">Choose a product type…</option>{materials.map(m=><option key={m.id} value={m.id}>{m.shortName}</option>)}</select>:null}
             </div>
             {chosen?.whoBuys.length?<p className="mt-3 text-xs leading-relaxed text-[var(--text-2)]"><strong>Who buys {chosen.shortName}:</strong> {chosen.whoBuys.join(" · ")}. We look for these companies and the subcontractors below them.</p>:null}
+            {variant.length?<p className="mt-1 text-xs leading-relaxed text-[var(--text-2)]">Companies that name <strong>{variant.join(" · ")}</strong> are ranked first; others that use {chosen?.shortName??"this product"} still appear.</p>:null}
           </div>:null}
+          <label className="flex items-start gap-3 rounded-xl border border-[var(--line)] p-3 text-sm">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--accent)]" checked={includeResellers} onChange={(e) => setIncludeResellers(e.target.checked)} aria-label="Also find stockists and traders" />
+            <span><span className="font-semibold">Also find stockists and traders</span><span className="block text-xs text-[var(--muted)]">Companies that buy {chosen?.shortName ?? "this material"} to resupply contractors. Turn off if you only sell to end users and contractors; they then count as competitors.</span></span>
+          </label>
           <label className="flex flex-col gap-2 text-sm font-semibold sm:max-w-md">Where do you want buyers?
             <select aria-label="Add a country" className="control h-12 px-3 font-normal" value="" onChange={e=>{if(e.target.value&&!selected.includes(e.target.value))setSelected(s=>[...s,e.target.value]);}}>
               <option value="">Add a country</option>{COUNTRIES.map(c=><option key={c.code} value={c.code}>{c.name}</option>)}

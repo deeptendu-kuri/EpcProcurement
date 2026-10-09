@@ -21,3 +21,10 @@ describe("country search details (docs/mvp/19 Phase 3)", () => {
       .toEqual(["ar-SA", "en-XA", "de-DE", "en-US", "en-US", "en-IN"]);
   });
 });
+
+describe("feed text", () => {
+  it("decodes double-escaped characters in news titles", async () => {
+    const { decodeRefs } = await import("@/mvp/research/sources");
+    expect(decodeRefs("Oms erh&#228;lt Auftr&#228;ge &quot;neu&quot; &amp; mehr")).toBe('Oms erhält Aufträge "neu" & mehr');
+  });
+});

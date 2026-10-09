@@ -6,7 +6,7 @@ import { SearchLiveWorkspace } from "./search-live-workspace";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const company = (over: Partial<FoundCompany>): FoundCompany => ({ id: "c", name: "Example", website: null, status: "not_checked", statusText: "Not checked yet", source: null, quote: null,
-  pagesRead: 0, opportunityId: null, relevant: true, likelyRole: null, rating: null, ratingRole: null, ratingReason: null, alsoBuys: [], guessed: false, buyerType: null, match: null, ...over });
+  pagesRead: 0, opportunityId: null, relevant: true, likelyRole: null, rating: null, ratingRole: null, ratingReason: null, alsoBuys: [], guessed: false, buyerType: null, match: null, worksUnder: null, ...over });
 const data: SearchWorkspaceData = {
   run: { id: "11111111-1111-4111-8111-111111111111", query: "Steel plates", productId: "plates", product: "Steel plates", markets: ["IN", "MY"], status: "running", statusText: "Running",
     createdAt: "2026-10-09T14:27:00Z", finishedAt: null, error: null, stopReason: null },
@@ -21,6 +21,8 @@ const data: SearchWorkspaceData = {
     company({ id: "d", name: "Lubrex FZE", rating: 4, relevant: false, ratingRole: "Lubricant trader", ratingReason: "Trades lubricants." }),
   ],
   events: [{ id: 2, ts: "2026-10-09T14:39:00Z", message: "Shortlist: rated 4 companies; 2 look like buyers." }],
+  countries: [{ code: "IN", searchesDone: 3, searchesTotal: 6, verified: 1 }, { code: "MY", searchesDone: 2, searchesTotal: 6, verified: 0 }],
+  variant: [],
 };
 
 describe("Search workspace (docs/mvp/18 §4)", () => {
@@ -75,5 +77,26 @@ describe("Search workspace (docs/mvp/18 §4)", () => {
   it("offers no stop button once a search has finished", () => {
     render(<SearchLiveWorkspace runId={data.run.id} initial={{ ...data, running: false, run: { ...data.run, status: "done", statusText: "Finished" } }} />);
     expect(screen.queryByRole("button", { name: "Stop search" })).toBeNull();
+  });
+  it("filters by buyer type, labels each company and shows every country's progress (docs/mvp/19)", () => {
+    const typed = { ...data, variant: ["Welded", "316L"], companies: [
+      company({ id: "a", name: "Gulf Water Engineering", rating: 82, buyerType: "end_user", match: "named", ratingRole: "Desalination plant builder", ratingReason: "Uses welded SS pipe." }),
+      company({ id: "b", name: "Al Noor Steel Trading", rating: 60, buyerType: "reseller", match: "product", ratingRole: "Stainless pipe stockist", ratingReason: "Stocks SS pipe." }),
+      company({ id: "c", name: "Petrofac", rating: 75, buyerType: "contractor", ratingRole: "EPC contractor", ratingReason: "Builds plants." }),
+      company({ id: "d", name: "Spool Masters", rating: 70, buyerType: "subcontractor", worksUnder: "Petrofac", ratingRole: "Spool fabricator", ratingReason: "Fabricates spools." }),
+    ] };
+    render(<SearchLiveWorkspace runId={data.run.id} initial={typed} />);
+    const strip = within(screen.getByRole("region", { name: "Countries" }));
+    expect(strip.getByText("3/6 searches · 1 verified")).toBeTruthy();
+    const rows = () => screen.getAllByTestId("shortlist-row").map((r) => r.textContent ?? "");
+    expect(rows()).toHaveLength(4);
+    expect(rows()[0]).toContain("Uses it");
+    expect(rows()[0]).toContain("Names Welded · 316L");
+    expect(rows().find((r) => r.includes("Spool Masters"))).toContain("Works under Petrofac");
+    const types = within(screen.getByRole("group", { name: "Buyer type" }));
+    fireEvent.click(types.getByRole("button", { name: /Contractors & subcontractors/ }));
+    expect(rows().map((r) => r.slice(2, 14))).toHaveLength(2);
+    fireEvent.click(types.getByRole("button", { name: /Stockists/ }));
+    expect(rows()[0]).toContain("Stockist / reseller");
   });
 });

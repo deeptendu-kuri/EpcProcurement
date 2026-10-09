@@ -11,6 +11,17 @@ import { Avatar, RatingBadge } from "../search/results-table";
 
 const POLL_MS = 4000;
 type Filter = "likely" | "all" | "not";
+type TypeFilter = "any" | "end_user" | "chain" | "owner" | "reseller";
+/** Doc 19 buyer types, in the words the client uses. */
+export const BUYER_TYPE_LABEL: Record<NonNullable<FoundCompany["buyerType"]>, string> = {
+  end_user: "Uses it", contractor: "Main contractor", subcontractor: "Subcontractor", owner: "Owner / operator",
+  reseller: "Stockist / reseller", competitor: "Competitor", not_buyer: "Not a buyer",
+};
+const TYPE_TONE: Record<NonNullable<FoundCompany["buyerType"]>, string> = {
+  end_user: "bg-[var(--good-bg)] text-[var(--good)]", contractor: "bg-[var(--info-bg)] text-[var(--info)]", subcontractor: "bg-[var(--info-bg)] text-[var(--info)]",
+  owner: "bg-[var(--accent-soft)] text-[var(--accent)]", reseller: "bg-[var(--warn-bg)] text-[var(--warn)]", competitor: "bg-[var(--bad-bg)] text-[var(--bad)]", not_buyer: "bg-[var(--subtle)] text-[var(--muted)]",
+};
+const inType = (c: FoundCompany, t: TypeFilter) => t === "any" || (t === "chain" ? c.buyerType === "contractor" || c.buyerType === "subcontractor" : c.buyerType === t);
 const CHECKABLE: FoundCompany["status"][] = ["not_checked", "no_website", "unreadable"];
 const host = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const compact = (n: number) => (n >= 100_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n));
@@ -47,6 +58,7 @@ function statusLine(c: FoundCompany): { text: string; tone: string } {
 export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial: SearchWorkspaceData }) {
   const [data, setData] = useState(initial);
   const [filter, setFilter] = useState<Filter>("likely");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("any");
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [tick, setTick] = useState(0);
@@ -90,7 +102,8 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
     all: relevant,
     not: data.companies.filter((c) => !c.relevant),
   };
-  const shown = lists[filter];
+  const shown = filter === "not" ? lists.not : lists[filter].filter((c) => inType(c, typeFilter));
+  const typeCounts = (["end_user", "chain", "owner", "reseller"] as TypeFilter[]).map((t) => [t, lists[filter === "not" ? "all" : filter].filter((c) => inType(c, t)).length] as const);
   const unrated = data.companies.filter((c) => c.rating === null || c.guessed).length;
   const nextToCheck = relevant.filter((c) => !c.opportunityId && CHECKABLE.includes(c.status) && (c.rating === null || c.rating >= 25)).slice(0, 5);
   const markets = data.run.markets.map(marketName);
@@ -138,6 +151,18 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
         <Stat label="Verified buyers" value={String(data.counts.verified)} sub="own website shows matching work" />
       </section>
 
+      {data.countries.length > 1 ? (
+        <section aria-label="Countries" className="flex flex-wrap gap-2">
+          {data.countries.map((c) => (
+            <span key={c.code} className="inline-flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-[13px]">
+              <span className="font-medium">{marketName(c.code)}</span>
+              <span className="tabular-nums text-[var(--muted)]">{c.searchesDone}/{c.searchesTotal} searches{c.verified ? ` · ${c.verified} verified` : ""}</span>
+              {data.running && c.searchesDone < c.searchesTotal ? <Loader2 size={12} className="animate-spin text-[var(--accent)]" aria-hidden /> : null}
+            </span>
+          ))}
+        </section>
+      ) : null}
+
       {data.run.error ? <p role="alert" className="rounded-xl bg-[var(--bad-bg)] px-4 py-3 text-[14px] text-[var(--bad)]">{data.run.error}</p> : null}
       {!data.running && data.run.stopReason ? <p className="rounded-xl bg-[var(--warn-bg)] px-4 py-3 text-[13px] text-[var(--warn)]">{data.run.stopReason} Results are a batch, not the whole market.</p> : null}
 
@@ -163,6 +188,17 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
               </button>
             ))}
           </div>
+          {filter !== "not" ? (
+            <div className="mx-5 mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Buyer type">
+              {([["any", "All types"], ...typeCounts.map(([t]) => [t, t === "end_user" ? "Use it" : t === "chain" ? "Contractors & subcontractors" : t === "owner" ? "Owners" : "Stockists"])] as [TypeFilter, string][]).map(([t, label]) => {
+                const n = t === "any" ? null : typeCounts.find(([k]) => k === t)?.[1] ?? 0;
+                if (n === 0 && typeFilter !== t) return null;
+                return <button key={t} type="button" aria-pressed={typeFilter === t} onClick={() => setTypeFilter(t)}
+                  className={`rounded-full border px-2.5 py-1 text-[12.5px] ${typeFilter === t ? "border-[var(--accent)] bg-[var(--accent-soft)] font-medium text-[var(--accent)]" : "border-[var(--line)] text-[var(--text-2)] hover:bg-[var(--hover)]"}`}>
+                  {label}{n !== null ? <span className="ml-1 tabular-nums text-[var(--muted)]">{n}</span> : null}</button>;
+              })}
+            </div>
+          ) : null}
           {note ? <p role="status" className="mx-5 mb-3 rounded-lg bg-[var(--info-bg)] px-3 py-2 text-[13px] text-[var(--info)]">{note}</p> : null}
           {!shown.length ? (
             <p className="border-t border-[var(--line)] px-5 py-8 text-[14px] text-[var(--muted)]">
@@ -182,6 +218,12 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
                           {c.opportunityId ? <Link href={`/opportunities/${c.opportunityId}?returnTo=${encodeURIComponent(`/find?run=${runId}`)}`} className="text-[15px] font-semibold hover:text-[var(--accent)]">{c.name}</Link>
                             : <span className="text-[15px] font-semibold">{c.name}</span>}
                           <p className="text-[13px] text-[var(--text-2)]">{c.ratingRole ?? "Role not rated yet"}{c.website ? <span className="text-[var(--muted)]"> · {c.website}</span> : null}</p>
+                          <div className="mt-1 flex flex-wrap gap-1.5 text-[11.5px]">
+                            {c.buyerType ? <span className={`rounded-full px-2 py-0.5 font-medium ${TYPE_TONE[c.buyerType]}`}>{BUYER_TYPE_LABEL[c.buyerType]}</span> : null}
+                            {c.match === "named" ? <span className="rounded-full bg-[var(--good-bg)] px-2 py-0.5 font-medium text-[var(--good)]">Names {data.variant.length ? data.variant.join(" · ") : "this product"}</span>
+                              : c.match === "product" ? <span className="rounded-full bg-[var(--subtle)] px-2 py-0.5 text-[var(--text-2)]">Mentions {product}</span> : null}
+                            {c.worksUnder ? <span className="rounded-full bg-[var(--subtle)] px-2 py-0.5 text-[var(--text-2)]">Works under {c.worksUnder}</span> : null}
+                          </div>
                         </div>
                         {c.rating !== null ? <RatingBadge score={c.rating} /> : <span className="rounded-full bg-[var(--subtle)] px-2.5 py-1 text-[12px] text-[var(--muted)]">Not rated</span>}
                       </div>

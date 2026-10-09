@@ -11,6 +11,7 @@ import { EMAIL_LABELS } from '@/mvp/buyers';
 import type { RunStatus } from '@/mvp/types';
 import { listFoundCompanies, type FoundCompany } from './found';
 import { runMinutes, runUsage } from './usage';
+import { parseMaterialSpec, specChips } from '@/mvp/discovery/spec';
 
 export interface WorkspaceBuyer { opportunityId: string; name: string; role: string | null; country: string | null; fit: number; reason: string; email: string }
 export interface WorkspaceEvent { id: number; ts: string; message: string }
@@ -23,6 +24,10 @@ export interface SearchWorkspaceData {
   minutes: number | null;
   usage: { tokens: number; tokenLimit: number | null; aiCalls: number; pagesRead: number; pageLimit: number | null; searches: number; searchLimit: number | null };
   counts: { found: number; rated: number; likely: number; verified: number; checking: number; notBuyers: number };
+  /** Doc 19: each country's searches (done of planned) and verified buyers, searched in parallel. */
+  countries: { code: string; searchesDone: number; searchesTotal: number; verified: number }[];
+  /** Doc 19: the exact variant typed ("Welded", "316L", "ASTM A312"). */
+  variant: string[];
   buyers: WorkspaceBuyer[];
   companies: FoundCompany[];
   events: WorkspaceEvent[];
@@ -60,7 +65,7 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
   if (!run) return null;
   const input = run.adhoc_query;
   const running = run.status === 'running' || run.status === 'queued';
-  const [usage, companies, events, buyers] = await Promise.all([
+  const [usage, companies, events, buyers, perCountry] = await Promise.all([
     runUsage(db, [runId]).then((m) => m.get(runId)),
     listFoundCompanies(db, runId).catch(() => [] as FoundCompany[]),
     db.query<{ id: number; ts: string; stage: string; message: string }>(`select id,ts::text,stage,message from run_events where run_id=$1 order by id desc limit 30`, [runId]).then((r) => r.rows),
@@ -69,6 +74,9 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
          (select t.state from funnel_threads t where t.opportunity_id=o.id and t.mode<>'email_test' order by t.created_at desc limit 1) as state
        from search_opportunities o join companies c on c.id=o.company_id join leads l on l.id=o.lead_id
        where o.run_id=$1 and o.qualification<>'rejected' order by o.fit_score desc,o.created_at`, [runId]).then((r) => r.rows),
+    db.query<{ market: string; done: number; total: number }>(`select coalesce(payload->>'market',payload->'query'->>'market') as market,
+        count(*) filter (where state in ('done','failed','cancelled'))::int as done, count(*)::int as total
+      from research_jobs where run_id=$1 and stage='collect' and coalesce(payload->>'market',payload->'query'->>'market') is not null group by 1`, [runId]).then((r) => r.rows),
   ]);
   const latestStage = events.find((e) => PHASES[e.stage])?.stage;
   const relevant = companies.filter((c) => c.relevant);
@@ -90,5 +98,10 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
       email: b.state ? EMAIL_LABELS[b.state] ?? b.state : 'Not started' })),
     companies,
     events: readableEvents(events),
+    variant: specChips(parseMaterialSpec(input?.query ?? '')),
+    countries: (input?.markets ?? []).map((code) => {
+      const c = perCountry.find((p) => p.market === code);
+      return { code, searchesDone: c?.done ?? 0, searchesTotal: c?.total ?? 0, verified: buyers.filter((b) => b.country === code).length };
+    }),
   };
 }

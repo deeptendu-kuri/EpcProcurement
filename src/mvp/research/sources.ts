@@ -42,8 +42,11 @@ export async function collectLocalNews(ctx:SourceContext,payload:{market:string;
   const relevant=(blurb:string)=>buying(blurb,ctx)||local.some(w=>blurb.toLowerCase().includes(w));
   await ctx.log(`${payload.market}: local news (${mkt}${terms?`, ${lang}`:''}) "${query}".`);
   return parseBingRss(res.text).filter(item=>relevant(`${item.title}\n${item.description}`)).slice(0,8).map(item=>({sourceKey:`bing:${hostOf(item.url)??'news'}`,sourceName:`Local news · ${item.source??hostOf(item.url)??'Bing'}`,tier:'B',
-    publisherKey:publisherKeyFor(item.url),url:item.url,title:item.title,publishedAt:item.published,text:null,market:payload.market,language:terms?lang:'en',isSample:false}));
+    publisherKey:publisherKeyFor(item.url),url:item.url,title:decodeRefs(item.title),publishedAt:item.published,text:null,market:payload.market,language:terms?lang:'en',isSample:false}));
 }
+
+/** Feeds sometimes double-escape characters ("&#228;" for "ä"). */
+export const decodeRefs=(text:string|null)=>text?text.replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi,(_,h)=>String.fromCodePoint(parseInt(h,16))).replace(/&quot;/g,'"').replace(/&amp;/g,'&'):text;
 
 /** GDELT asks for at most one request per 5 seconds; this keeps a 6-second gap across all searches. */
 export const GDELT_GAP_MS=6000;

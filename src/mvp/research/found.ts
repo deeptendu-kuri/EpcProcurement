@@ -36,6 +36,8 @@ export interface FoundCompany {
   buyerType: BuyerType | null;
   /** Doc 19: names the exact variant / the product / only its work implies it. */
   match: MatchStrength | null;
+  /** Doc 19: found by following this contractor down its chain ("works under McDermott"). */
+  worksUnder: string | null;
 }
 export type LikelyRole = 'owner' | 'contractor' | 'pipe_maker' | 'supplier';
 // "GASCO, Abu Dhabi" and "GASCO" are one company: the place after a comma is not part of the name.
@@ -63,14 +65,14 @@ interface CandidateRow {
   id: string; company: string; domain_hint: string | null; state: string; reason: string | null; identity_quote: string | null;
   pages: number; title: string | null; url: string | null; pending: boolean; running: boolean;
   rating: number | null; rating_role: string | null; rating_reason: string | null; rating_also: string[] | null; rating_source: string | null;
-  rating_buyer_type: BuyerType | null; rating_match: MatchStrength | null;
+  rating_buyer_type: BuyerType | null; rating_match: MatchStrength | null; works_under: string | null;
 }
 const LIMIT_REASON = /budget|deferred|limit/i;
 export { relevantFound };
 
 export async function listFoundCompanies(db: Queryable, runId: string): Promise<FoundCompany[]> {
   const rows = (await db.query<CandidateRow>(`select c.id,c.company,c.domain_hint,c.state,c.reason,c.identity_quote,cardinality(c.document_ids)::int as pages,d.title,d.url,
-      c.rating,c.rating_role,c.rating_reason,c.rating_also,c.rating_source,c.rating_buyer_type,c.rating_match,
+      c.rating,c.rating_role,c.rating_reason,c.rating_also,c.rating_source,c.rating_buyer_type,c.rating_match,c.found_via->'chainParent'->>'company' as works_under,
       exists(select 1 from research_jobs j where j.run_id=c.run_id and j.state in ('queued','running')
         and (j.payload->>'candidateId'=c.id::text or j.payload->'raw'->'research'->>'candidateId'=c.id::text)) as pending,
       exists(select 1 from research_jobs j where j.run_id=c.run_id and j.state='running'
@@ -121,7 +123,7 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
       rating, ratingRole: r.rating_role, ratingReason: r.rating_reason,
       alsoBuys: (r.rating_also ?? []).map((id) => getCatalogueItem(id)?.shortName ?? id),
       guessed: r.rating_source === 'rules' && !ruleRating(r.company, r.identity_quote, productName, opts),
-      buyerType: opportunityId && (!buyerType || buyerType === 'not_buyer') ? null : buyerType, match: r.rating_match });
+      buyerType: opportunityId && (!buyerType || buyerType === 'not_buyer') ? null : buyerType, match: r.rating_match, worksUnder: r.works_under });
   }
   // Saved buyers first, then by rating (best first), unrated last in the order found.
   return result.sort((a, b) => Number(Boolean(b.opportunityId)) - Number(Boolean(a.opportunityId)) || (b.rating ?? -1) - (a.rating ?? -1));
