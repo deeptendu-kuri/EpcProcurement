@@ -205,7 +205,7 @@ export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=produc
         const resolved=await db.tx(async tx=>{
           if(!await owned(tx,job))return false;
           await resolveDocument(tx,{documentId:id,url:doc.url,tier:raw.tier,publisherKey:raw.publisherKey??publisherKeyFor(doc.url),
-            market:raw.market??detectMarkets(doc.text).find(m=>input.markets.includes(m))??null,publishedAt:doc.published_at,text:doc.text},extracted);
+            market:raw.market??detectMarkets(doc.text,input.markets).find(m=>input.markets.includes(m))??null,publishedAt:doc.published_at,text:doc.text},extracted);
           return true;
         });
         if(!resolved)return {processed:true,stale:true};

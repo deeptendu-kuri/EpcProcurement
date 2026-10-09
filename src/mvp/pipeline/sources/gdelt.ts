@@ -6,8 +6,7 @@
  * message instead of JSON, which we treat as "rate limited" (single attempt, 20 s timeout).
  * Article pages are fetched later by the read step (text = null here).
  */
-import { MARKET_NAMES } from "@/mvp/config/markets";
-import type { MarketCode } from "@/mvp/types";
+import { marketName } from "@/mvp/config/markets";
 import type { RawDoc, Source, SourceContext } from "../contracts";
 import { isHttpUrl } from "../net-guard";
 import { getText, politeWait } from "../read";
@@ -33,7 +32,7 @@ function group(items: string[]): string {
 export function buildGdeltQuery(terms: string[], markets: string[]): string {
   const keywords = terms.filter((t) => t.length >= 3).slice(0, 4).map(quoteTerm);
   const names = markets
-    .map((m) => MARKET_NAMES[m.toUpperCase() as MarketCode] ?? m)
+    .map((m) => marketName(m))
     .map(quoteTerm);
   return [group(keywords.length ? keywords : ["pipeline", '"line pipe"']), group(TRIGGERS), group(names), "sourcelang:english"]
     .filter(Boolean)

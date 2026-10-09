@@ -92,7 +92,7 @@ export function buildBingQuery(terms: string[], market: string): string {
   const words = scope.length ? scope : ["pipeline", "line pipe", "piping"];
   const scopePart =
     words.length > 1 ? `(${words.map(quote).join(" OR ")})` : quote(words[0]);
-  const country = MARKET_NAMES[market.toUpperCase() as MarketCode] ?? market;
+  const country = MARKET_NAMES[market.toUpperCase() as MarketCode] ?? COUNTRIES.find((c) => c.code === market.toUpperCase())?.name ?? market;
   return `${scopePart} (awarded OR contract OR tender OR order) ${quote(country)}`;
 }
 

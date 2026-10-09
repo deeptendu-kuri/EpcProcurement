@@ -20,7 +20,7 @@ import type {
 } from "@/mvp/types";
 import type { ExtractedDoc, VerifiedFact } from "./extract";
 import { plausibleMoney, sameOrder, toUsd, valuesClose } from "./merge";
-import { detectMarkets } from "./filter";
+import { detectCountry, detectMarkets } from "./filter";
 import { isParentInDoc, isParentMention } from "./rules-extract";
 import {
   companyKeys, companyNameParts, displayCompanyName, knownCompany, normalizeCompanyName, normalizePersonName, normalizeProjectName,
@@ -135,7 +135,7 @@ function countryCode(value: string | null | undefined): string | null {
   if (!value) return null;
   const v = value.trim();
   if (/^[A-Z]{2}$/.test(v)) return v;
-  return detectMarkets(v)[0] ?? null;
+  return detectCountry(v);
 }
 
 /**

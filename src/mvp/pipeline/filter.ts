@@ -6,6 +6,7 @@
  * - `drop`      otherwise, including noise (market reports, price indices, job ads, court stories).
  * The reason is stored in source_documents.filter_reason for tuning.
  */
+import { COUNTRIES } from "@/mvp/config/countries";
 import type { ClientProfile, MarketCode } from "@/mvp/types";
 
 export type FilterVerdict = "relevant" | "uncertain" | "drop";
@@ -159,9 +160,24 @@ function firstTerm(text: string, terms: readonly string[]): string | null {
   return null;
 }
 
-/** Markets whose names appear in the text. */
-export function detectMarkets(text: string): MarketCode[] {
-  return (Object.keys(MARKET_TERMS) as MarketCode[]).filter((code) => MARKET_TERMS[code].some((term) => hasTerm(text, term)));
+/**
+ * Markets whose names appear in the text: the default markets by their aliases, plus any searched
+ * country (`watched`) by its full name, so a Kenya search recognises "Kenya" in an article.
+ */
+export function detectMarkets(text: string, watched: readonly string[] = []): MarketCode[] {
+  const known = (Object.keys(MARKET_TERMS) as MarketCode[]).filter((code) => MARKET_TERMS[code].some((term) => hasTerm(text, term)));
+  const named = watched
+    .map((code) => code.toUpperCase())
+    .filter((code) => {
+      const name = COUNTRIES.find((c) => c.code === code)?.name;
+      return !known.includes(code as MarketCode) && Boolean(name) && hasTerm(text, name!);
+    });
+  return [...known, ...(named as MarketCode[])];
+}
+
+/** Any country named in a location value ("Mombasa, Kenya" → KE), default-market aliases first. */
+export function detectCountry(text: string): string | null {
+  return detectMarkets(text)[0] ?? COUNTRIES.find((c) => hasTerm(text, c.name))?.code ?? null;
 }
 
 /** Split a free-text query into scope terms ("line pipe, valves" → ["line pipe","valves"]; long phrases also word-split). */
@@ -197,8 +213,8 @@ export function filterDocument(input: FilterInput): FilterResult {
   const scope = findScope(text, scopeTermsFor(input.profile, input.queryTerms));
   if (!scope) return { verdict: "drop", reason: `no scope term (action: ${action})`, markets: [] };
 
-  const mentioned = detectMarkets(text);
   const watched = input.markets.map((m) => m.toUpperCase());
+  const mentioned = detectMarkets(text, watched);
   let markets = mentioned.filter((m) => watched.includes(m));
   if (!markets.length && input.sourceMarket && watched.includes(input.sourceMarket.toUpperCase())) {
     markets = [input.sourceMarket.toUpperCase() as MarketCode];
