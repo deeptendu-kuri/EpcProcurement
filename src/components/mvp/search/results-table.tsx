@@ -157,7 +157,7 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px] text-[#1f2937]">
                   {row.trigger?<span className="mb-1 block text-xs font-semibold text-[var(--accent-2)]">{triggerKindLabel(row.trigger.kind)}{row.trigger.date?` · ${row.trigger.date}`:''}</span>:null}
-                  {row.buyingReason || <span className="text-[#9ca3af]">{tier > 1 ? "In the supply chain of this deal" : "Not known yet"}</span>}
+                  {row.buyingReason ? <span className="line-clamp-3" title={row.buyingReason}>{row.buyingReason}</span> : <span className="text-[#9ca3af]">{tier > 1 ? "In the supply chain of this deal" : "Not known yet"}</span>}
                   {moreDeals ? <div className="mt-0.5 text-[11.5px] font-semibold text-[#475569]">+{moreDeals} more {moreDeals === 1 ? "deal" : "deals"}</div> : null}
                 </td>
                 <td className="border border-[var(--line)] px-2.5 py-[11px] text-[#1f2937]">

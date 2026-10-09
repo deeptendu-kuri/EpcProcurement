@@ -640,8 +640,8 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
       <div className="flex min-w-0 flex-1 flex-col bg-white">
         <TopTabs tab={tab} right={topRight} basePath={basePath} />
         {tab==="search"?<div className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] bg-[var(--subtle)] px-4 py-2.5 text-sm lg:px-6" data-tour="leads-search">
-          <label className="flex items-center gap-2 font-semibold">Search
-            <select aria-label="Search" className="control h-9 max-w-[22rem] px-2 font-normal" value={state.run || "all"} onChange={e=>navigate({run:e.target.value})}>
+          <label className="flex min-w-0 max-w-full items-center gap-2 font-semibold">Search
+            <select aria-label="Search" className="control h-9 w-full min-w-0 max-w-[22rem] px-2 font-normal" value={state.run || "all"} onChange={e=>navigate({run:e.target.value})}>
               {runs.map(r=><option key={r.id} value={r.id}>{r.label}{r.status==="running"||r.status==="queued"?" · running":""}</option>)}
               <option value="all">All searches</option>
             </select>

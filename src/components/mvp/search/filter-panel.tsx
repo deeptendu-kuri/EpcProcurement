@@ -217,7 +217,7 @@ export function FilterPanel({ state, facets, catalogue, markets, onChange, onCol
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--line)] px-[18px]">
-        <h1 className="text-xl font-bold text-[#111827]">SuperSearch</h1>
+        <h2 className="text-xl font-bold text-[#111827]">Filters</h2>
         <div className="flex items-center gap-1">
           {active ? (
             <button type="button" onClick={onClear} className="btn btn-ghost btn-sm text-xs">
