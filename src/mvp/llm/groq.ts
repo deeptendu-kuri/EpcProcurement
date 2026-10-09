@@ -73,13 +73,31 @@ export async function completeWithJsonRetry(call: (request: LLMRequest, extraBod
 }
 
 /** Groq (OpenAI-compatible). Models per 06 §2, e.g. "qwen3.8-27b", "openai/gpt-oss-20b". */
+// Groq answers 429 for a model's daily allowance with "tokens per day (TPD)" / "requests per day (RPD)".
+const DAILY_LIMIT = /\bper day\b|\b(?:TPD|RPD)\b/i;
+/** Model used when the requested model's own daily allowance is used up (Groq limits each model separately). */
+export function dailyFallbackModel(): string | null {
+  const value = process.env.LLM_GROQ_DAILY_FALLBACK_MODEL?.trim();
+  return value === "off" ? null : value || "openai/gpt-oss-20b";
+}
 export function createGroqProvider(apiKey: string, model: string, fetchImpl?: typeof fetch): LLMProvider {
   // Qwen: thinking off (06 §2). gpt-oss: keep reasoning short.
-  const extraBody = model.toLowerCase().includes("qwen") ? { reasoning_effort: "none" } : model.includes("gpt-oss") ? { reasoning_effort: "low" } : undefined;
+  const extraBody = (m: string) => m.toLowerCase().includes("qwen") ? { reasoning_effort: "none" } : m.includes("gpt-oss") ? { reasoning_effort: "low" } : undefined;
+  const call = (m: string, request: LLMRequest) =>
+    completeWithJsonRetry((req) => chatCompletion({ provider: "groq", url: GROQ_URL, apiKey, model: m, request: req, fetchImpl, extraBody: extraBody(m) }), request);
   return {
     name: "groq",
     model,
-    complete: (request: LLMRequest) =>
-      completeWithJsonRetry((req) => chatCompletion({ provider: "groq", url: GROQ_URL, apiKey, model, request: req, fetchImpl, extraBody }), request),
+    complete: async (request: LLMRequest) => {
+      try {
+        return await call(model, request);
+      } catch (error) {
+        // A refused request (429) is not billed, so asking the fallback model is not a repeated paid call.
+        // Answers are still quote-checked against the original text, whichever model wrote them.
+        const fallback = dailyFallbackModel();
+        if (fallback && fallback !== model && error instanceof LLMHttpError && error.status === 429 && DAILY_LIMIT.test(error.message)) return call(fallback, request);
+        throw error;
+      }
+    },
   };
 }

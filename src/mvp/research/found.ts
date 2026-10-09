@@ -45,7 +45,7 @@ export function likelyRole(name: string, quote: string | null): LikelyRole | nul
 
 interface CandidateRow {
   id: string; company: string; domain_hint: string | null; state: string; reason: string | null; identity_quote: string | null;
-  pages: number; title: string | null; url: string | null; pending: boolean;
+  pages: number; title: string | null; url: string | null; pending: boolean; running: boolean;
 }
 const LIMIT_REASON = /budget|deferred|limit/i;
 export { relevantFound };
@@ -53,7 +53,9 @@ export { relevantFound };
 export async function listFoundCompanies(db: Queryable, runId: string): Promise<FoundCompany[]> {
   const rows = (await db.query<CandidateRow>(`select c.id,c.company,c.domain_hint,c.state,c.reason,c.identity_quote,cardinality(c.document_ids)::int as pages,d.title,d.url,
       exists(select 1 from research_jobs j where j.run_id=c.run_id and j.state in ('queued','running')
-        and (j.payload->>'candidateId'=c.id::text or j.payload->'raw'->'research'->>'candidateId'=c.id::text)) as pending
+        and (j.payload->>'candidateId'=c.id::text or j.payload->'raw'->'research'->>'candidateId'=c.id::text)) as pending,
+      exists(select 1 from research_jobs j where j.run_id=c.run_id and j.state='running'
+        and (j.payload->>'candidateId'=c.id::text or j.payload->'raw'->'research'->>'candidateId'=c.id::text)) as running
     from research_candidates c left join source_documents d on d.id=c.identity_document_id
     where c.run_id=$1 order by c.created_at limit 300`, [runId])).rows;
   const saved = (await db.query<{ id: string; name: string }>(`select o.id,c.canonical_name as name from search_opportunities o join companies c on c.id=o.company_id
@@ -67,7 +69,8 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
     seen.add(k);
     const opportunityId = savedBy.get(k) ?? null;
     const [status, statusText]: [FoundStatus, string] = opportunityId ? ['saved', 'Saved as a buyer']
-      : r.pending ? ['checking', 'Checking now']
+      : r.running ? ['checking', 'Checking now']
+      : r.pending ? ['checking', 'Queued to check']
       : r.state === 'unreadable' ? ['unreadable', 'Website could not be read']
       : r.state === 'review' && /website not confirmed/i.test(r.reason ?? '') ? ['no_website', 'Website not confirmed']
       : r.state === 'review' && /no search result matched/i.test(r.reason ?? '') ? ['no_website', 'Own website not found']

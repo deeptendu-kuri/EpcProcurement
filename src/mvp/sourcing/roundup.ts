@@ -122,7 +122,13 @@ export async function seedRoundup(db:Db,runId:string,input:RunInput,result:Round
   let seeded=0,lookups=0,queued=0;
   const original=(await db.query<{text:string;url:string}>('select text,url from source_documents where id=$1',[result.found_via.documentId])).rows[0];
   if(!original?.text)return {seeded,lookups,queued};
-  for(const company of verifyRoundup(result,original.text,result.found_via.documentId).companies){
+  const verified=verifyRoundup(result,original.text,result.found_via.documentId).companies;
+  // A fabricator's own "our clients" page lists its customers, not more fabricators: the page owner is
+  // the lead; the names it lists are recorded but not looked up.
+  const pageOwner=verified.find(c=>officialSite(c.name,[{url:original.url}]));
+  const clientPage=Boolean(pageOwner)&&(/\/(?:clients?|customers?|partners?|references?)(?:[/-]|$)/i.test(new URL(original.url).pathname)
+    ||/\b(?:our (?:valued |esteemed |major )?(?:clients|customers|partners)|clients include|client list)\b/i.test(original.text));
+  for(const company of verified){
     if(company.role==='owner'||company.role==='consultant')continue;
     // A company named on its own website already has its website: no search needed.
     const own=!company.domain&&officialSite(company.name,[{url:original.url}])?domainOf(original.url):null;
@@ -132,7 +138,8 @@ export async function seedRoundup(db:Db,runId:string,input:RunInput,result:Round
     // Page furniture (platforms, certifiers, site credits) and sellers of the material are listed,
     // but never cost a website search or a page read.
     // A bare name in a contractor list ("Petrofac") is still a lookup worth making; only furniture is skipped.
-    const skip=junkFoundName(company.name,company.quote)??(looksLikeSupplier(company.quote)?'it supplies this material':null);
+    const skip=junkFoundName(company.name,company.quote)??(looksLikeSupplier(company.quote)?'it supplies this material':null)
+      ??(clientPage&&company!==pageOwner?`named on ${pageOwner!.name}'s website as a client or partner`:null);
     if(skip){await db.query("update research_candidates set state='review',reason=$2 where id=$1",[candidate.id,`Not looked up: ${skip}.`]);continue;}
     if(own)await db.query('update research_candidates set document_ids=array(select distinct unnest(document_ids || $2::uuid[])) where id=$1',[candidate.id,[result.found_via.documentId]]);
     const domain=candidate.domain_hint;

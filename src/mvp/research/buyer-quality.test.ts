@@ -48,6 +48,8 @@ describe('names that are not buyers',()=>{
     expect(junkFoundName('Example Web Solutions','Website designed by Example Web Solutions')).toBe('site credit');
     expect(junkFoundName('We give you a clear solution',null)).toBe('slogan');
     expect(genericServicePhrase('Pressure Vessel Fabrication')).toBe(true);
+    expect(genericServicePhrase('Pressure Vessel Manufacturer UAE')).toBe(true);
+    expect(genericServicePhrase('Dubai')).toBe(false);
     expect(genericServicePhrase('Example Steel Pressure Vessel Fabrication')).toBe(false);
     expect(junkFoundName('Example Engineering Pvt. Ltd.','Example Engineering is a trusted pressure vessel manufacturer')).toBeNull();
     expect(junkFoundName('Example Institut za materiale',null)).toBe('institution');
@@ -90,6 +92,20 @@ describe('list seeding',()=>{
     expect((await db.query("select key from research_jobs where run_id=$1 and key like 'official:%'",[id])).rows).toHaveLength(0);
     const skipped=(await db.query<{company:string;reason:string}>("select company,reason from research_candidates where reason like 'Not looked up%' order by company")).rows;
     expect(skipped.map(s=>s.company)).toEqual(['Example Steel Corporation','Example Web Solutions','Google Ads']);
+  });
+});
+
+describe('a fabricator\'s own client list',()=>{
+  it('reads the fabricator and records its clients without looking them up',async()=>{
+    const id=await createResearchRun(input,db);
+    const text='Example Tank Metal fabricates storage tanks and pressure vessels.\nOur valued clients\nExample Oil LLC\nExample Diesel Trading LLC';
+    const doc:RawDoc&{text:string}={sourceKey:'test',sourceName:'Example',tier:'B',url:'https://www.exampletankmetal.example/',title:'Example Tank Metal',publishedAt:null,text,isSample:false};
+    const d=await storeDocument(db,id,doc);
+    const companies=[{name:'Example Tank Metal',quote:'Example Tank Metal fabricates storage tanks and pressure vessels.'},{name:'Example Oil LLC',quote:'Example Oil LLC'},{name:'Example Diesel Trading LLC',quote:'Example Diesel Trading LLC'}];
+    const seeded=await seedRoundup(db,id,input,{companies,dropped:0,warnings:[],found_via:{documentId:d.id,kind:'roundup'}},(await sessionFor(db,id))!.budget);
+    expect(seeded).toMatchObject({seeded:3,lookups:0,queued:1});
+    const clients=(await db.query<{reason:string}>("select reason from research_candidates where company like 'Example Oil%' or company like 'Example Diesel%'")).rows;
+    expect(clients.every(c=>/client or partner/.test(c.reason))).toBe(true);
   });
 });
 

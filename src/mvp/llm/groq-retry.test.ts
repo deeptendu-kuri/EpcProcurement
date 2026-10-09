@@ -72,3 +72,25 @@ describe("Groq JSON retry", () => {
     expect(firstJsonObject("nothing")).toBeNull();
   });
 });
+
+describe("Groq daily allowance fallback", () => {
+  const perDay = () => new Response(JSON.stringify({ error: { message: "Rate limit reached for model `openai/gpt-oss-120b` in organization `org_example` on tokens per day (TPD): Limit 200000, Used 199000, Requested 3770." } }), { status: 429 });
+  it("answers with the fallback model when the requested model's daily allowance is used up", async () => {
+    const { bodies, fetchImpl } = recorder([perDay, () => ok('{"companies":[]}')]);
+    const res = await createGroqProvider("gsk_x", "openai/gpt-oss-120b", fetchImpl).complete({ system: "s", user: "u", json: true, singleAttempt: true });
+    expect(res.text).toBe('{"companies":[]}');
+    expect(bodies.map((b) => b.model)).toEqual(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
+  });
+  it("does not fall back for a per-minute limit or when switched off", async () => {
+    const perMinute = () => new Response(JSON.stringify({ error: { message: "Rate limit reached on tokens per minute (TPM)" } }), { status: 429 });
+    const a = recorder([perMinute]);
+    await expect(createGroqProvider("gsk_x", "openai/gpt-oss-120b", a.fetchImpl).complete({ system: "s", user: "u", singleAttempt: true })).rejects.toBeInstanceOf(LLMHttpError);
+    expect(a.bodies).toHaveLength(1);
+    process.env.LLM_GROQ_DAILY_FALLBACK_MODEL = "off";
+    try {
+      const b = recorder([perDay]);
+      await expect(createGroqProvider("gsk_x", "openai/gpt-oss-120b", b.fetchImpl).complete({ system: "s", user: "u", singleAttempt: true })).rejects.toBeInstanceOf(LLMHttpError);
+      expect(b.bodies).toHaveLength(1);
+    } finally { delete process.env.LLM_GROQ_DAILY_FALLBACK_MODEL; }
+  });
+});

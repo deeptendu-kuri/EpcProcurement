@@ -27,10 +27,13 @@ const SERVICE_WORDS = new Set(['pressure', 'vessel', 'vessels', 'fabrication', '
   'solutions', 'engineering', 'construction', 'steel', 'plate', 'plates', 'tank', 'tanks', 'storage', 'industrial', 'products', 'product', 'equipment', 'pipe', 'pipes', 'pipeline',
   'pipelines', 'process', 'heavy', 'oil', 'gas', 'marine', 'offshore', 'onshore', 'mechanical', 'electrical', 'civil', 'installation', 'works', 'contractor', 'contractors',
   'and', 'for', 'of', 'the', 'in', 'with', 'boiler', 'boilers', 'structural', 'metal', 'sheet', 'sheets', 'welding', 'repair', 'maintenance', 'supply', 'suppliers']);
-/** A title made only of service words ("Pressure Vessel Fabrication") is a page topic, not a company. */
+// Places that often end a page title ("Pressure Vessel Manufacturer UAE").
+const PLACE_WORDS = new Set(['uae', 'ksa', 'gcc', 'dubai', 'abu', 'dhabi', 'sharjah', 'ajman', 'india', 'indian', 'malaysia', 'saudi', 'arabia', 'qatar', 'oman',
+  'kuwait', 'bahrain', 'norway', 'middle', 'east', 'emirates', 'mumbai', 'delhi', 'chennai', 'kuala', 'lumpur', 'riyadh', 'jeddah', 'dammam', 'doha', 'muscat', 'gujarat']);
+/** A title made only of service and place words ("Pressure Vessel Manufacturer UAE") is a page topic, not a company. */
 export function genericServicePhrase(name: string): boolean {
   const words = name.toLowerCase().replace(/&/g, ' and ').match(/[a-z0-9]+/g) ?? [];
-  return words.length > 0 && words.every((w) => SERVICE_WORDS.has(w));
+  return words.length > 0 && words.every((w) => SERVICE_WORDS.has(w) || PLACE_WORDS.has(w)) && words.some((w) => SERVICE_WORDS.has(w));
 }
 
 /** Why a listed name is not a possible buyer company, or null. */
