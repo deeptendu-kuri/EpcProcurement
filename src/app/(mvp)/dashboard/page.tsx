@@ -50,7 +50,7 @@ function SearchRow({ s }: { s: DashboardSearch }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <Link href={`/find?run=${r.id}`} className="text-[16px] font-semibold tracking-[-0.01em] text-[var(--text)] hover:text-[var(--accent)]">{query}</Link>
-          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium ${running ? "bg-[var(--info-bg)] text-[var(--info)]" : /partial/.test(status) ? "bg-[var(--warn-bg)] text-[var(--warn)]" : "bg-[var(--good-bg)] text-[var(--good)]"}`}>
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium ${running ? "bg-[var(--info-bg)] text-[var(--info)]" : r.status === "cancelled" ? "bg-[var(--subtle)] text-[var(--text-2)]" : r.status === "failed" || /partial/.test(status) ? "bg-[var(--warn-bg)] text-[var(--warn)]" : "bg-[var(--good-bg)] text-[var(--good)]"}`}>
             {running ? <Loader2 size={12} className="animate-spin" aria-hidden /> : null}{running ? "Running" : /partial/.test(status) ? "Finished · partial" : status}
           </span>
         </div>

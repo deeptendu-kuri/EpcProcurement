@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, CheckCircle2, ExternalLink, Loader2, Plus, Sparkles, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, CircleSlash, ExternalLink, Loader2, Plus, Sparkles, Square, TriangleAlert } from "lucide-react";
 import type { SearchWorkspaceData } from "@/mvp/research/workspace";
 import type { FoundCompany } from "@/mvp/research/found";
 import { marketName } from "@/mvp/config/markets";
@@ -50,6 +50,7 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [tick, setTick] = useState(0);
+  const [confirmStop, setConfirmStop] = useState(false);
   const product = data.run.product ?? data.run.query;
   const live = data.running || data.counts.checking > 0;
 
@@ -71,6 +72,17 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
     catch (e) { setNote(e instanceof Error ? e.message : "That did not work. Try again."); }
     finally { setBusy(null); }
   }, [runId]);
+
+  const stop = async () => {
+    setBusy("stop"); setNote("");
+    try {
+      await apiJson(`/api/mvp/runs/${runId}`, { method: "POST", body: { action: "cancel" } });
+      setConfirmStop(false);
+      setData((d) => ({ ...d, running: false, phase: "Stopped", run: { ...d.run, status: "cancelled", statusText: "Stopped by you" } }));
+      setTick((n) => n + 1);
+    } catch (e) { setNote(e instanceof Error ? e.message : "The search could not be stopped."); }
+    finally { setBusy(null); }
+  };
 
   const relevant = data.companies.filter((c) => c.relevant);
   const lists: Record<Filter, FoundCompany[]> = {
@@ -95,15 +107,27 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
           <p className="mt-3 inline-flex items-center gap-2 text-[14px] font-medium" role="status" aria-live="polite">
             {data.running ? <Loader2 size={16} className="animate-spin text-[var(--accent)]" aria-hidden />
               : data.run.status === "done" ? <CheckCircle2 size={16} className="text-[var(--good)]" aria-hidden />
+              : data.run.status === "cancelled" ? <CircleSlash size={16} className="text-[var(--muted)]" aria-hidden />
               : <TriangleAlert size={16} className="text-[var(--warn)]" aria-hidden />}
             {data.running ? `Running · ${data.phase}` : data.run.statusText}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {data.running && !confirmStop ? <button type="button" className="btn btn-secondary h-10 px-4" onClick={() => setConfirmStop(true)}><Square size={14} aria-hidden />Stop search</button> : null}
           <Link href="/find" className="btn btn-secondary h-10 px-4"><Plus size={16} aria-hidden />New search</Link>
           <Link href={`/crm?run=${runId}`} className="btn btn-primary h-10 px-4">See leads ({data.counts.verified})<ArrowRight size={16} aria-hidden /></Link>
         </div>
       </header>
+
+      {data.running && confirmStop ? (
+        <div role="alertdialog" aria-label="Stop this search?" className="card flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+          <p className="text-[14px]"><span className="font-semibold">Stop this search?</span> <span className="text-[var(--text-2)]">Companies and buyers found so far are kept. No more pages are read and no more AI tokens are used.</span></p>
+          <div className="flex gap-2">
+            <button type="button" className="btn btn-secondary" onClick={() => setConfirmStop(false)} disabled={busy === "stop"}>Keep running</button>
+            <button type="button" className="btn btn-danger" onClick={() => void stop()} disabled={busy === "stop"}>{busy === "stop" ? "Stopping…" : "Stop search"}</button>
+          </div>
+        </div>
+      ) : null}
 
       <section aria-label="Search status" className="card grid grid-cols-2 divide-[var(--line)] sm:grid-cols-3 lg:grid-cols-6 lg:divide-x">
         <Stat label="Time" value={data.minutes === null ? "—" : `${data.minutes} min`} sub={data.running ? "and counting" : data.run.finishedAt ? `Ended ${clock(data.run.finishedAt)} UTC` : undefined} />

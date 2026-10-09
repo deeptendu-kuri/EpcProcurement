@@ -8,7 +8,7 @@ export type RunStep = (typeof RUN_STEPS)[number];
 export function runStatusText(status:RunStatus,counters:RunCounters={}):string {
   if(status==='done'&&counters.researchState==='partial')return 'Finished · partial coverage';
   if(status==='done'&&counters.coverageIncomplete)return 'Finished · partial coverage';
-  return {queued:'Starting',running:'Running',done:'Finished',failed:'Stopped',cancelled:'Cancelled'}[status];
+  return {queued:'Starting',running:'Running',done:'Finished',failed:'Stopped',cancelled:'Stopped by you'}[status];
 }
 
 const STAGE_TO_STEP: Partial<Record<RunStage, number>> = {

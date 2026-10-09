@@ -297,3 +297,20 @@ export async function admitDeferredDiscovery(db:Db,runId:string):Promise<number>
     return added;
   });
 }
+
+/**
+ * Stop a running search at the user's request. Queued and paused work is cancelled; a step already
+ * running finishes but its result is discarded (owned() checks the run is not cancelled). Companies and
+ * buyers found so far are kept. Returns false when the search was not running.
+ */
+export async function cancelResearchRun(db:Db,runId:string):Promise<boolean> {
+  const stopped=await db.tx(async tx=>{
+    const run=(await tx.query<{id:string}>(`update runs set status='cancelled',finished_at=now(),error='Stopped by you.' where id=$1 and status in ('queued','running') returning id`,[runId])).rows[0];
+    if(!run)return false;
+    await tx.query(`update research_sessions set state='cancelled',stop_reason='Stopped by you.',updated_at=now() where run_id=$1 and state<>'cancelled'`,[runId]);
+    await tx.query(`update research_jobs set state='cancelled',lease_token=null,lease_until=null,updated_at=now() where run_id=$1 and state in ('queued','paused','running')`,[runId]);
+    return true;
+  });
+  if(stopped)await db.query(`insert into run_events(run_id,stage,message) values($1,'info','Search stopped by you. Companies already found are kept.')`,[runId]);
+  return stopped;
+}

@@ -58,4 +58,22 @@ describe("Search workspace (docs/mvp/18 §4)", () => {
     expect(url).toBe(`/api/mvp/research/${data.run.id}/companies`);
     expect(JSON.parse(String(init.body))).toEqual({ candidateIds: ["b", "c", "e"] });
   });
+  it("stops a running search after asking, keeping what it found", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ runId: data.run.id, state: "cancelled" }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SearchLiveWorkspace runId={data.run.id} initial={data} />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop search" }));
+    const dialog = within(screen.getByRole("alertdialog", { name: "Stop this search?" }));
+    expect(dialog.getByText(/found so far are kept/)).toBeTruthy();
+    fireEvent.click(dialog.getByRole("button", { name: "Stop search" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Stopped by you"));
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`/api/mvp/runs/${data.run.id}`);
+    expect(JSON.parse(String(init.body))).toEqual({ action: "cancel" });
+    expect(screen.queryByRole("button", { name: "Stop search" })).toBeNull();
+  });
+  it("offers no stop button once a search has finished", () => {
+    render(<SearchLiveWorkspace runId={data.run.id} initial={{ ...data, running: false, run: { ...data.run, status: "done", statusText: "Finished" } }} />);
+    expect(screen.queryByRole("button", { name: "Stop search" })).toBeNull();
+  });
 });

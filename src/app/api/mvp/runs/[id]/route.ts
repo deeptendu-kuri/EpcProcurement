@@ -2,7 +2,8 @@ import { after,NextResponse } from "next/server";
 import { z } from "zod";
 import { getRun } from "@/mvp/repo";
 import { continueBuyerRun,waitForRun } from "@/mvp/pipeline";
-import { replayCachedCompanyAnalyses } from '@/mvp/research/store';
+import { cancelResearchRun,replayCachedCompanyAnalyses } from '@/mvp/research/store';
+import { getDb } from '@/mvp/db';
 import { startResearchWorker } from '@/mvp/research/worker';
 import { serverlessRuntime } from '@/mvp/runtime';
 import { rejectCrossOrigin } from "../../outreach/_origin";
@@ -24,12 +25,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return serverError("get run", error);
   }
 }
-/** Explicit bounded analysis of saved pages. No new source/search requests. Auth is enforced by proxy. */
+/** Explicit bounded analysis of saved pages (no new source/search requests), or "cancel" to stop a running search. Auth is enforced by proxy. */
 export async function POST(request:Request,{params}:{params:Promise<{id:string}>}){
   const rejected=rejectCrossOrigin(request);if(rejected)return rejected;
   const {id}=await params;if(!uuidSchema.safeParse(id).success)return jsonError(404,"Search not found.");
-  const parsed=await readJson(request,z.object({action:z.enum(["continue_analysis","replay_cached"])}).strict());if(parsed.response)return parsed.response;
+  const parsed=await readJson(request,z.object({action:z.enum(["continue_analysis","replay_cached","cancel"])}).strict());if(parsed.response)return parsed.response;
   try{
+    if(parsed.data.action==='cancel'){
+      const stopped=await cancelResearchRun(getDb(),id);
+      return stopped?NextResponse.json({runId:id,state:'cancelled'},{headers:NO_STORE}):jsonError(409,'This search is not running.');
+    }
     if(parsed.data.action==='replay_cached'){
       if(serverlessRuntime())return jsonError(409,'Run cached-response repair on the persistent local worker.');
       const queued=await replayCachedCompanyAnalyses(id);startResearchWorker();after(()=>waitForRun(id));
