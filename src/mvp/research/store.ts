@@ -295,11 +295,19 @@ export async function enqueueRawDocs(db:Db,job:ResearchJob,docs:RawDoc[],maxPage
 
 /** Reclaim empty queries' unused reading shares, never issue another search.
  * All collected URLs remain checkpoints. Lane, domain and global caps still apply.
+ * Drain existing work first: claimJob uses SKIP LOCKED on the session, so an
+ * idle worker must not repeatedly lock it for admission while jobs need claiming.
  */
 export async function admitDeferredDiscovery(db:Db,runId:string):Promise<number> {
+  const hasPendingWork=async(q:Queryable)=>(await q.query("select 1 from research_jobs where run_id=$1 and state in ('queued','running') limit 1",[runId])).rows.length>0;
+  // A non-locking probe keeps all idle slots out of admission transactions,
+  // including while jobs are waiting for a provider allowance or expired lease.
+  if(await hasPendingWork(db))return 0;
   return db.tx(async tx=>{
     const session=(await tx.query<ResearchSession>('select * from research_sessions where run_id=$1 for update',[runId])).rows[0];
     if(!session||session.state!=='active')return 0;
+    // Another slot may have admitted work between the probe and this lock.
+    if(await hasPendingWork(tx))return 0;
     if((await tx.query("select id from research_jobs where run_id=$1 and stage='collect' and state in ('queued','running','paused') and coalesce(payload->>'sourcingLane','')<>'capability' limit 1",[runId])).rows.length)return 0;
     const input=(await tx.query<{adhoc_query:RunInput}>('select adhoc_query from runs where id=$1',[runId])).rows[0].adhoc_query;
     const sources=(await tx.query<{id:string;result:{docs?:RawDoc[];deferred?:number}}>("select id,result from research_jobs where run_id=$1 and stage='collect' and state='done' and payload->>'source'='tavily' order by priority desc,created_at,id",[runId])).rows;

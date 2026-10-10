@@ -52,6 +52,37 @@ describe('durable research checkpoints',()=>{
     expect(states.sort()).toEqual(['exhausted','reserved']);
     expect(await reserveBudget(db,id,'search','a',1,1)).toBe('existing');
   });
+  it.each(['queued','running','waiting'] as const)('does not compete for the session lock while %s work needs draining',async(state)=>{
+    vi.stubEnv('TAVILY_API_KEY','unit-key');
+    const id=await createResearchRun({...input,researchMode:'batch'},db);
+    await db.query("update research_jobs set state='done',result='{}' where run_id=$1",[id]);
+    const source=(await db.query<{id:string}>("select id from research_jobs where run_id=$1 and payload->>'source'='tavily' limit 1",[id])).rows[0];
+    const raw={...doc(901),title:'Example saved contractor page',url:'https://example.com/deferred-pipeline-work',research:{lane:'company' as const}};
+    await db.query('update research_jobs set result=$2::jsonb where id=$1',[source.id,JSON.stringify({docs:[raw],deferred:1})]);
+    await db.query("insert into research_jobs(run_id,stage,key,state,available_at) values($1,'analyse','Example pending analysis',$2,now()+($3::int*interval '1 hour'))",[id,state==='running'?'running':'queued',state==='waiting'?1:0]);
+    const transaction=vi.spyOn(db,'tx');
+    try {
+      // All four idle worker slots must leave the session lock available to claimJob.
+      expect(await Promise.all(Array.from({length:4},()=>admitDeferredDiscovery(db,id)))).toEqual([0,0,0,0]);
+      expect(transaction).not.toHaveBeenCalled();
+      expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(0);
+    } finally { transaction.mockRestore(); }
+  });
+  it('rechecks pending work under the lock if it arrives after the idle probe',async()=>{
+    vi.stubEnv('TAVILY_API_KEY','unit-key');
+    const id=await createResearchRun({...input,researchMode:'batch'},db);
+    await db.query("update research_jobs set state='done',result='{}' where run_id=$1",[id]);
+    const source=(await db.query<{id:string}>("select id from research_jobs where run_id=$1 and payload->>'source'='tavily' limit 1",[id])).rows[0];
+    const raw={...doc(902),title:'Example saved contractor page',url:'https://example.com/deferred-pipeline-race',research:{lane:'company' as const}};
+    await db.query('update research_jobs set result=$2::jsonb where id=$1',[source.id,JSON.stringify({docs:[raw],deferred:1})]);
+    const racingDb:Db={...db,async tx(fn){
+      await db.query("insert into research_jobs(run_id,stage,key,state) values($1,'read','Example concurrent read','queued')",[id]);
+      return db.tx(fn);
+    }};
+    expect(await admitDeferredDiscovery(racingDb,id)).toBe(0);
+    expect((await db.query("select key from research_jobs where run_id=$1 and stage='read'",[id])).rows).toEqual([{key:'Example concurrent read'}]);
+    expect((await db.query<{result:{deferred:number}}>('select result from research_jobs where id=$1',[source.id])).rows[0].result.deferred).toBe(1);
+  });
   it('reclaims unused query shares from saved URLs without new search requests or crossing reading caps',async()=>{
     vi.stubEnv('TAVILY_API_KEY','unit-key');
     const id=await createResearchRun({...input,researchMode:'batch'},db);
@@ -63,7 +94,10 @@ describe('durable research checkpoints',()=>{
     expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(5);
     expect(await admitDeferredDiscovery(db,id)).toBe(0); // other searches are unfinished
     await db.query("update research_jobs set state='done',result='{}',lease_token=null,lease_until=null where run_id=$1 and stage='collect' and id<>$2",[id,job.id]);
-    expect(await admitDeferredDiscovery(db,id)).toBe(15); // the rest of the 20 saved URLs
+    expect(await admitDeferredDiscovery(db,id)).toBe(0); // let the existing reads drain without session-lock contention
+    await db.query("update research_jobs set state='done',result='{}' where run_id=$1 and stage='read'",[id]);
+    // Concurrent idle slots admit exactly one wave; the saved URLs are not searched again.
+    expect((await Promise.all(Array.from({length:4},()=>admitDeferredDiscovery(db,id)))).sort((a,b)=>a-b)).toEqual([0,0,0,15]);
     expect((await db.query("select id from research_jobs where run_id=$1 and stage='read'",[id])).rows).toHaveLength(20);
     expect(await admitDeferredDiscovery(db,id)).toBe(0);
     expect((await db.query<{result:{deferred:number}}>("select result from research_jobs where id=$1",[job.id])).rows[0].result.deferred).toBe(0);
