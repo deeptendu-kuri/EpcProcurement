@@ -56,6 +56,8 @@ export interface ResearchDeps {
   extractRoundup?:typeof extractRoundup;
   /** Injectable for fixture proofs: the AI that answers the need check (docs/mvp/20). */
   needProvider?:LLMProvider;
+  /** Injectable for fixture proofs: the AI that writes the search brief (docs/mvp/20). */
+  briefProvider?:LLMProvider;
   lookupWebsite?:typeof collectTavilyQuery;
 }
 export const productionResearchDeps:ResearchDeps={
@@ -232,20 +234,27 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
           if(docs===null){
             // One grounding search per country, on its own allowance (its pages are read too).
             if(await reserveBudget(db,job.run_id,'brief_search',key,1,input.markets.length)!=='reserved')return [];
-            try{docs=await collectTavilyQuery(ctx,planned);await markBudget(db,job.run_id,'brief_search',key,'completed');}
+            try{docs=await deps.collect('tavily',ctx,{source:'tavily',query:planned});await markBudget(db,job.run_id,'brief_search',key,'completed');}
             catch{await markBudget(db,job.run_id,'brief_search',key,'unknown');return [];}
           }
           groundDocs.push(...docs.map(d=>({...d,market:d.market??market,research:{lane:'news' as const,...d.research,sourcingLane:'trigger' as const}})));
           return docs.map(d=>({title:d.title??'',snippet:(d.text??'').slice(0,300),date:d.publishedAt?.slice(0,10)??null}));
         }:null;
-        const provider=budgetedAwardProviders(db,job.run_id,'brief',session.budget).provider('extract_a','openai/gpt-oss-120b');
+        const provider=deps.briefProvider??budgetedAwardProviders(db,job.run_id,'brief',session.budget).provider('extract_a','openai/gpt-oss-120b');
         const brief=await getSearchBrief(db,{material:input.query,markets:input.markets,productId:input.productId??null},provider,ground,job.run_id);
         const planned={...input,brief};
         const jobs=plannedCollectJobs(planned,session.budget);
-        if(groundDocs.length)await enqueueRawDocs(db,job,groundDocs,session.budget.maxPages);
         if(!await db.tx(async tx=>{
           if(!await owned(tx,job))return false;
           await tx.query(`update runs set adhoc_query=adhoc_query||jsonb_build_object('brief',$2::jsonb) where id=$1`,[job.run_id,JSON.stringify(brief)]);
+          // The grounding pages are read like any award search result. Queued here, in this step's own
+          // transaction: enqueueRawDocs would also mark this job done, and the brief and plan would be lost
+          // (Render, 11 Oct: a fresh search stored neither).
+          const reading=new Set((await tx.query<{key:string}>("select key from research_jobs where run_id=$1 and stage='read'",[job.run_id])).rows.map(r=>r.key));
+          for(const raw of groundDocs){
+            if(reading.has(raw.url)||junkReason(raw.url,raw.title,input.markets))continue;
+            if(await queueRead(tx,job.run_id,raw,{maxPages:session.budget.maxPages},1600))reading.add(raw.url);
+          }
           return true;
         }))return {processed:true,stale:true};
         await completeJob(db,job,{brief:{source:brief.source,uses:brief.uses.map(u=>u.name)}},jobs);

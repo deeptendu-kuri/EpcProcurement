@@ -7,6 +7,8 @@ import { briefKey, type SearchBrief } from "@/mvp/discovery/brief";
 import { sourcePlan } from "@/mvp/sourcing/plan";
 import { createResearchRun, sessionFor } from "./store";
 import { processResearchTick, type ResearchDeps } from "./engine";
+import type { LLMProvider } from "@/mvp/llm";
+import type { RawDoc } from "@/mvp/pipeline/contracts";
 
 const brief = (over: Partial<SearchBrief> = {}): SearchBrief => ({
   version: 1, item: "Cryogenic valves", mustHave: ["−196 °C service"], buying: "project", source: "ai", productId: "gate-globe-check",
@@ -76,6 +78,28 @@ describe("the brief as a run's first step (MVP_WORK_SEARCH=on)", () => {
     const stored = (await db.query<{ adhoc_query: RunInput }>("select adhoc_query from runs where id=$1", [id])).rows[0].adhoc_query;
     expect(stored.brief?.source).toBe("catalogue");
     expect((await db.query("select 1 from research_jobs where run_id=$1 and stage='collect'", [id])).rows.length).toBeGreaterThan(0);
+  });
+  it("grounds a fresh brief, reads the grounding pages and still stores the brief and the plan (Render, 11 Oct)", async () => {
+    vi.stubEnv("TAVILY_API_KEY", "test-key-not-used");
+    const page: RawDoc = { sourceKey: "tavily", sourceName: "News", tier: "B", url: "https://news.example/ruwais-lng-epc", title: "Technip Energies wins Ruwais LNG EPC",
+      text: "ADNOC awarded the Ruwais LNG EPC to Technip Energies, JGC and NMDC Energy.", publishedAt: "2026-09-01", isSample: false };
+    const collect = vi.fn(async (_source: string, _ctx: unknown, payload: Record<string, unknown>) =>
+      String((payload.query as { key?: string } | undefined)?.key ?? "").startsWith("brief-ground:") ? [page] : []);
+    const briefProvider: LLMProvider = { name: "groq", model: "test", async complete() { return { tokensIn: 1, tokensOut: 1, text: JSON.stringify({
+      item: "Cryogenic valves", mustHave: ["−196 °C service"], buying: "project",
+      uses: [{ name: "LNG liquefaction plant", newsWords: ["LNG", "liquefaction"], why: "LNG is handled at −162 °C.", countries: ["AE", "SA"] },
+        { name: "NGL fractionation plant", newsWords: ["NGL"], why: "Ethane recovery runs below −90 °C.", countries: ["SA"] }],
+      buyerRoles: ["EPC contractors"], notBuyers: ["water networks"], owners: ["ADNOC"], places: { AE: ["Ruwais"], SA: ["Jubail"] } }) }; } };
+    const id = await createResearchRun(input, db);
+    await processResearchTick(db, { ...deps, collect, briefProvider }, id);
+    const job = (await db.query<{ state: string; result: { brief?: { source: string } } }>("select state, result from research_jobs where run_id=$1 and key='brief'", [id])).rows[0];
+    expect(job).toMatchObject({ state: "done", result: { brief: { source: "ai" } } });
+    const stored = (await db.query<{ adhoc_query: RunInput }>("select adhoc_query from runs where id=$1", [id])).rows[0].adhoc_query;
+    expect(stored.brief?.source).toBe("ai");
+    expect((await db.query("select 1 from research_jobs where run_id=$1 and stage='collect'", [id])).rows.length).toBeGreaterThan(0);
+    expect((await db.query("select 1 from research_jobs where run_id=$1 and stage='read' and key=$2", [id, page.url])).rows).toHaveLength(1);
+    expect((await db.query("select 1 from search_briefs")).rows).toHaveLength(1);
+    expect(collect.mock.calls.filter((c) => String((c[2].query as { key?: string }).key).startsWith("brief-ground:"))).toHaveLength(2);
   });
   it("keeps today's behaviour when the switch is off", async () => {
     vi.stubEnv("MVP_WORK_SEARCH", "");
