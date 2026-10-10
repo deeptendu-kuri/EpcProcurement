@@ -257,7 +257,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         const triggers=await persistAwardTriggers(db,job.run_id,input.productId!,await awardTriggerSnapshots(db,id));
         // Award winners join the shortlist: rated like every other company, saved as likely leads with the
         // award as recent work, even when the announcement does not name the exact product (it rarely does).
-        await shortlistAwardWinners(db,job.run_id,id,triggers).catch(()=>0);
+        await shortlistAwardWinners(db,job.run_id,id,triggers.map(t=>({...t,date:doc.published_at}))).catch(()=>0);
         await buildSignalsAndScore(job.run_id,{db});
         await captureOpportunities(job.run_id,input,db);
         await completeJob(db,job,{extracted,triggers,factsKept:extracted.stats.kept,factsDropped:extracted.stats.dropped,budgetLimited:providers.limited});
@@ -409,10 +409,13 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
  * shortlist, identified by the award sentence on the stored article. The normal rating decides whether
  * each is a likely buyer; the award itself shows as the company's recent work.
  */
-export async function shortlistAwardWinners(db:Db,runId:string,documentId:string,triggers:{id:string;kind:string;role:string;title:string}[]):Promise<number> {
+export async function shortlistAwardWinners(db:Db,runId:string,documentId:string,triggers:{id:string;kind:string;role:string;title:string;date?:string|null}[],now=new Date()):Promise<number> {
   let added=0;
+  // An award older than 18 months has mostly been bought for; the winner still appears through its own work.
+  const cutoff=new Date(now);cutoff.setMonth(cutoff.getMonth()-18);
   for(const t of triggers){
     if(t.kind==='tender'||t.role==='supplier')continue;
+    if(t.date&&Date.parse(t.date)<cutoff.getTime())continue;
     const company=(await db.query<{name:string}>('select c.canonical_name as name from company_triggers t join companies c on c.id=t.company_id where t.id=$1',[t.id])).rows[0]?.name;
     if(!company)continue;
     await db.tx(tx=>registerCandidate(tx,runId,company,null,documentId,t.title));added++;

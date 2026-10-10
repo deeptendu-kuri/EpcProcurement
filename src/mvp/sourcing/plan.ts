@@ -18,6 +18,14 @@ export interface SourcePlanInput {productId:string;keyword?:string;markets:strin
 // Companies found by the work they do share the list tier with contractor lists (doc 19): regular buyers
 // get a fair share of the search allowance instead of what is left after news and lists.
 const BASE_PRIORITY:Record<SourcingLane,number>={trigger:2000,roundup:1000,capability:1000};
+/** Piping materials: bought for oil & gas, water and power projects, which the news reports as EPC awards. */
+export const PIPING_PRODUCTS=new Set(['line-pipe','cs-process-pipe','ss-duplex-pipe','alloy-pipe','bw-fittings','forged-fittings','flanges','induction-bends','spools',
+  'gate-globe-check','ball-valves','butterfly-valves','control-relief-valves','stud-bolts','gaskets']);
+/**
+ * Award news names the project, not the pipe or the elbow ("Aramco awards EPC contract for gas plant"):
+ * for piping materials the news searches ask for awarded projects that consume them (web audit, 10 Oct).
+ */
+export const PROJECT_AWARD_QUERIES=['EPC contract awarded','pipeline project contract awarded','refinery petrochemical gas plant EPC contract','desalination power plant EPC contract awarded'];
 /**
  * Ordered tasks, not promises of buyers (docs/mvp/19). For every country: award news (English, the
  * country's own language and GDELT's local outlets), contractor lists, stockists when he sells to them,
@@ -46,11 +54,13 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
     };
     const activity=activities[0];
     // ── trigger: awards and orders ──
-    add('trigger','bing-query',0,{query:`${activity} contract awarded ${name}`});
-    add('trigger','tavily',0,{query:`${material} ${activity} contract awarded orders ${name}`,topic:'news',days:365});
+    const piping=PIPING_PRODUCTS.has(input.productId);
+    if(piping)PROJECT_AWARD_QUERIES.forEach((words,n)=>add('trigger','bing-query',n,{query:`${words} ${name}`}));
+    else add('trigger','bing-query',0,{query:`${activity} contract awarded ${name}`});
+    add('trigger','tavily',0,{query:piping?`EPC contract awarded pipeline refinery gas plant desalination ${name}`:`${material} ${activity} contract awarded orders ${name}`,topic:'news',days:365});
     add('trigger','local-news',0,{query:`${material} contract ${name}`,material,work:uses[0]??activity});
     add('trigger','gdelt-country',0,{words:[material,activity,...activities.slice(1,2)]});
-    add('trigger','bing-query',1,{query:`wins ${activity} contract ${name}`});
+    if(!piping)add('trigger','bing-query',1,{query:`wins ${activity} contract ${name}`});
     if(TED_COUNTRIES[code])add('trigger','ted',0,{});
     // ── roundup: lists of contractors (and stockists when he sells to them) ──
     for(const [n,registry] of RESEARCH_SOURCES.filter(r=>r.country===code&&r.materials.includes(input.productId)&&r.permission==='public-listing').entries()){

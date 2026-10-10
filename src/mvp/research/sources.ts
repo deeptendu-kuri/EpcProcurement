@@ -9,7 +9,16 @@ import {GDELT_URL,parseSeenDate} from '@/mvp/pipeline/sources/gdelt';
 import {bingMarket,countryLanguage,gdeltCountry} from '@/mvp/config/country-meta';
 import {localNewsQuery,localTerms} from '@/mvp/sourcing/local-terms';
 import {getLLM} from '@/mvp/llm';
-const buying=(blurb:string,ctx:SourceContext)=>[...ACTION_TERMS.en,...ACTION_TERMS.ar,...ACTION_TERMS.ms].some(t=>hasTerm(blurb,t))&&Boolean(findScope(blurb,scopeTermsFor(ctx.profile,ctx.terms)));
+import {PIPING_PRODUCTS} from '@/mvp/sourcing/plan';
+/**
+ * Projects that consume piping materials. Award news names the project ("EPC contract for a gas plant"),
+ * rarely the pipe or fitting, so for piping materials these count as scope too (web audit, 10 Oct).
+ */
+export const PIPING_PROJECT_SCOPE=['refinery','refineries','petrochemical','petrochemicals','gas processing','gas plant','lng','gas field','oil field','oilfield',
+  'desalination','water treatment','sewage treatment','wastewater treatment','power plant','power station','combined cycle','iwp','ipp','fertilizer plant','ammonia plant',
+  'offshore','onshore','tank farm','مصفاة','تحلية','محطة','بتروكيماويات','معالجة'];
+const scopeFor=(ctx:SourceContext)=>[...scopeTermsFor(ctx.profile,ctx.terms),...(PIPING_PRODUCTS.has(ctx.input.productId??'')?PIPING_PROJECT_SCOPE:[])];
+export const buying=(blurb:string,ctx:SourceContext)=>[...ACTION_TERMS.en,...ACTION_TERMS.ar,...ACTION_TERMS.ms].some(t=>hasTerm(blurb,t))&&Boolean(findScope(blurb,scopeFor(ctx)));
 export async function collectBingQuery(ctx:SourceContext,market:string,query:string):Promise<RawDoc[]> {
   await politeWait('www.bing.com',2000);
   const url=`${BING_NEWS_URL}?${new URLSearchParams({q:query,format:'rss',mkt:BING_MKT[market]??'en-US'})}`;

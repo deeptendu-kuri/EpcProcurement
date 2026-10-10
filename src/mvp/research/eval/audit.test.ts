@@ -38,3 +38,39 @@ describe("lead quality against the 10 Oct web audit", () => {
     expect(score.notBuyers).toBeLessThanOrEqual(10);
   }, 30_000);
 });
+
+/**
+ * Opt-in (AUDIT_LIVE=1, about 15k AI tokens): re-rate the audited companies with the current AI instructions
+ * and score what would be saved. Usage is recorded in a throwaway database, never the app's.
+ */
+describe.skipIf(!process.env.AUDIT_LIVE)("live AI re-rating of the audited companies", () => {
+  it("rates and scores", async () => {
+    // The AI keys from .env.local (never printed); variables already set win.
+    for (const line of (fs.existsSync(".env.local") ? fs.readFileSync(".env.local", "utf8") : "").split(/\r?\n/)) {
+      const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+      if (m && /^(?:GROQ_|CLOUDFLARE_|LLM_)/.test(m[1]) && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^"|"$/g, "");
+    }
+    const { getLLM } = await import("@/mvp/llm");
+    const { rateRows } = await import("../shortlist");
+    const { createTestDb } = await import("@/mvp/db");
+    const usageDb = await createTestDb();
+    const provider = getLLM("triage", usageDb);
+    const rerated: AuditRow[] = [];
+    for (const set of [...new Set(rows.map((r) => r.set))]) {
+      const list = rows.filter((r) => r.set === set);
+      const first = list[0];
+      const rated = await rateRows(list.map((r, i) => ({ id: String(i), company: r.name, identity_quote: r.quote, title: r.title })),
+        { productId: first.productId, query: first.query, resellers: first.includeResellers, markets: first.markets }, () => provider);
+      for (const r of rated) {
+        const base = list[Number(r.id)];
+        rerated.push({ ...base, rating: r.raw ?? r.rating, role: r.role, reason: r.reason, type: r.buyerType ?? null, source: r.source === "ai" ? "ai" : "rules" });
+      }
+      console.log(`[audit live ${set}] AI calls ${rated.aiCalls ?? 0}${rated.warning ? `; ${rated.warning}` : ""}`);
+    }
+    const score = auditScore(rerated);
+    fs.mkdirSync("tmp", { recursive: true });
+    fs.writeFileSync("tmp/audit-live.json", JSON.stringify({ score, rows: rerated.map((r) => ({ name: r.name, grade: r.grade, rating: r.rating, type: r.type, role: r.role, reason: r.reason })) }, null, 1));
+    console.log("[audit live]", JSON.stringify(score));
+    await usageDb.close();
+  }, 1_800_000);
+});

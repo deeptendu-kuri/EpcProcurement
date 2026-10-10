@@ -16,7 +16,8 @@ describe('WP2 hybrid source plan and deterministic classification',()=>{
     const plan=sourcePlan({...input,mode:'batch'});
     for(const market of input.markets){
       const tasks=plan.filter(t=>t.market===market);
-      expect(tasks.filter(t=>t.source==='bing-query')).toHaveLength(2);
+      // Piping materials: four project-award news searches per country; other materials two.
+      expect(tasks.filter(t=>t.source==='bing-query')).toHaveLength(input.productId==='cables'?2:4);
       expect(tasks.filter(t=>t.source==='tavily'&&t.lane==='trigger')).toHaveLength(1);
       expect(tasks.filter(t=>t.source==='tavily'&&t.lane==='roundup')).toHaveLength(2);
       expect(tasks.find(t=>t.source==='tavily'&&t.lane==='roundup'&&/stockists/.test(t.query??''))).toBeDefined();
@@ -66,3 +67,13 @@ describe('WP2 hybrid source plan and deterministic classification',()=>{
     expect(runInputSchema.safeParse({...input,lanes:['linkedin']}).success).toBe(false);
   });
 });
+
+describe('award news for piping materials (web audit, 10 Oct)',()=>{
+  it('searches for awarded projects that consume the material, not for the product',()=>{
+    const plan=sourcePlan({productId:'bw-fittings',keyword:'ASTM A234 WPB 90 degree elbow',markets:['SA'],mode:'preview'});
+    const news=plan.filter(t=>t.source==='bing-query').map(t=>t.query);
+    expect(news).toEqual(['EPC contract awarded Saudi Arabia','pipeline project contract awarded Saudi Arabia','refinery petrochemical gas plant EPC contract Saudi Arabia','desalination power plant EPC contract awarded Saudi Arabia']);
+    expect(news.join(' ')).not.toMatch(/elbow|A234/);
+  });
+});
+

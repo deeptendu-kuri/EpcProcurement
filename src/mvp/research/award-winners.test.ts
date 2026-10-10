@@ -27,3 +27,21 @@ describe("award winners join the shortlist (elbow search, 10 Oct)", () => {
     expect(rows[0].identity_quote).toMatch(/wins \$600 million offshore EPC contracts/);
   });
 });
+
+describe("only recent award winners join the shortlist", () => {
+  it("skips an award older than 18 months", async () => {
+    const { createTestDb } = await import("@/mvp/db");
+    const db = await createTestDb();
+    try {
+      const run = (await db.query<{ id: string }>("insert into runs (status, adhoc_query) values ('running', '{}'::jsonb) returning id")).rows[0].id;
+      await db.query("insert into research_sessions (run_id, budget) values ($1, '{}'::jsonb)", [run]);
+      const company = (await db.query<{ id: string }>("insert into companies (canonical_name, normalized_name) values ('Example Old EPC', 'example old epc') returning id")).rows[0].id;
+      const id = (await db.query<{ id: string }>(`insert into company_triggers (company_id, run_id, product_id, kind, role, title, evidence_ids, strength)
+        values ($1,$2,'bw-fittings','award','contractor','Example Old EPC wins contract','{}','confirmed') returning id`, [company, run])).rows[0].id;
+      const doc = (await db.query<{ id: string }>("insert into source_documents(source_key,publisher_key,url,canonical_url,content_hash,text) values('t','t','https://n.example/a','https://n.example/a','h','Example Old EPC wins contract') returning id")).rows[0].id;
+      const now = new Date("2026-10-10T00:00:00Z");
+      expect(await shortlistAwardWinners(db, run, doc, [{ id, kind: "award", role: "contractor", title: "Example Old EPC wins contract", date: "2024-01-15" }], now)).toBe(0);
+      expect(await shortlistAwardWinners(db, run, doc, [{ id, kind: "award", role: "contractor", title: "Example Old EPC wins contract", date: "2026-03-01" }], now)).toBe(1);
+    } finally { await db.close(); }
+  }, 60_000);
+});
