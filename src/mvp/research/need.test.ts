@@ -61,7 +61,7 @@ describe("judging one article", () => {
   it("rejects work outside his countries and work dated by its sentence, not the article (rules 3, 12)", () => {
     const old = "In 2005, a group including Tenaga Nasional Berhad was selected to build the Shuaibah plant.";
     const r = judgeNeed(answer({ project: "Shuaibah", country: "Saudi Arabia", companies: [co("Tenaga Nasional Berhad", "epc", old)] }), page(old, "2025-11-26"), brief(), ["SA"], now)!;
-    expect(r.companies[0].reason).toMatch(/older than 18 months \(2005-06\)/);
+    expect(r.companies[0].reason).toMatch(/older than 30 months \(2005-06\)/);
     const moz = "JGC won the Coral North FLNG contract in Mozambique.";
     expect(judgeNeed(answer({ project: "Coral North", country: "Mozambique", companies: [co("JGC", "epc", moz)] }), page(moz), brief(), ["AE", "SA"], now)!.companies[0].reason)
       .toMatch(/outside the chosen countries \(Mozambique\)/);
@@ -153,6 +153,28 @@ describe("need-proven companies become leads (smoke test, 10 Oct)", () => {
       expect(trig).toMatchObject({ kind: "award", title: text, strength: "confirmed" });
       // The engine keeps a trigger date only when the sentence states it; this one does not.
       expect(trig.event_date).toBeNull();
+    } finally { await db.close(); }
+  }, 60_000);
+});
+
+describe("every lead of a work-based search has a sentence about the work (smoke test 2, 10 Oct)", () => {
+  it("does not save a company rated on its name alone; saves one whose own sentence names the work", async () => {
+    const { saveLikelyBuyers } = await import("./likely");
+    const { registerCandidate } = await import("./investigation");
+    const db = await createTestDb();
+    try {
+      const b = brief();
+      const run = (await db.query<{ id: string }>("insert into runs (status, adhoc_query) values ('running', $1::jsonb) returning id", [JSON.stringify({ query: "Cryogenic valves", productId: "gate-globe-check", markets: ["AE"], brief: b })])).rows[0].id;
+      await db.query("insert into research_sessions (run_id, budget) values ($1, '{}'::jsonb)", [run]);
+      const text = "Example Cryo Contracting LLC builds NGL and LNG process units in Abu Dhabi. Fluor is a global engineering company.";
+      const doc = (await db.query<{ id: string }>("insert into source_documents(source_key,publisher_key,url,canonical_url,content_hash,text) values('t','t','https://n.example/c','https://n.example/c','h3',$1) returning id", [text])).rows[0].id;
+      await db.tx((tx) => registerCandidate(tx, run, "Example Cryo Contracting LLC", null, doc, "Example Cryo Contracting LLC builds NGL and LNG process units in Abu Dhabi."));
+      await db.tx((tx) => registerCandidate(tx, run, "Fluor", null, doc, null));
+      await db.query("update research_candidates set rating=80, rating_source='ai', rating_reason='Builds LNG plants.', rating_buyer_type='contractor' where run_id=$1", [run]);
+      const saved = await saveLikelyBuyers(db, run, { productId: "gate-globe-check", query: "Cryogenic valves", brief: b });
+      const names = (await db.query<{ name: string; verification: string }>("select c.canonical_name as name, o.verification from search_opportunities o join companies c on c.id=o.company_id where o.run_id=$1", [run])).rows;
+      expect(names).toEqual([{ name: "Example Cryo Contracting LLC", verification: "listing" }]);
+      expect(saved.saved).toBe(1);
     } finally { await db.close(); }
   }, 60_000);
 });

@@ -3,6 +3,7 @@ import type { NeedCard } from "@/mvp/buyers/types";
 const WINDOW_TONE: Record<NeedCard["window"], string> = {
   "buying now": "bg-[var(--good-bg)] text-[var(--good)]",
   "buying soon": "bg-[var(--info-bg)] text-[var(--info)]",
+  "still building": "bg-[var(--subtle)] text-[var(--text-2)]",
   "check date": "bg-[var(--warn-bg)] text-[var(--warn)]",
 };
 

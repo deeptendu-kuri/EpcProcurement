@@ -32,8 +32,9 @@ describe("Why they are a buyer (docs/mvp/20 §8)", () => {
     expect(screen.getByText(/the source gives no date for this work/)).toBeTruthy();
     expect(screen.queryByText(/Strongest signal/)).toBeNull();
   });
-  it("puts work won in the last 6 months as buying now, up to 18 months as buying soon", () => {
+  it("puts work won in the last 6 months as buying now, up to 18 as buying soon, up to 30 as still building", () => {
     const now = new Date("2026-10-10T00:00:00Z");
-    expect([buyingWindow("2026-08", now), buyingWindow("2026-01-20", now), buyingWindow(null, now)]).toEqual(["buying now", "buying soon", "check date"]);
+    expect([buyingWindow("2026-08", now), buyingWindow("2026-01-20", now), buyingWindow("2025-02-07", now), buyingWindow(null, now)])
+      .toEqual(["buying now", "buying soon", "still building", "check date"]);
   });
 });

@@ -7,11 +7,11 @@ import { marketName } from '@/mvp/config/markets';
 const ROLE_WORD: Record<string, string> = {
   epc: 'EPC contractor', jv_partner: 'Construction joint-venture partner', subcontractor: 'Subcontractor', maintenance_contractor: 'Maintenance contractor',
 };
-/** Buying now: work won in the last 6 months; soon: within 18 months (docs/mvp/20 §7c). */
+/** Buying now: work won in the last 6 months; soon: within 18; still building: within 30 (big plants keep buying). */
 export function buyingWindow(date: string | null, now = new Date()): NeedCard['window'] {
   if (!date) return 'check date';
   const months = (now.getTime() - Date.parse(date.length === 7 ? `${date}-15` : date)) / 2.63e9;
-  return months <= 6 ? 'buying now' : 'buying soon';
+  return months <= 6 ? 'buying now' : months <= 18 ? 'buying soon' : 'still building';
 }
 const hostOf = (url: string | null) => { try { return url ? new URL(url).hostname.replace(/^www\./, '') : null; } catch { return null; } };
 

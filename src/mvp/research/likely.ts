@@ -17,6 +17,7 @@ import { clearBuyerCache } from '@/mvp/buyers/load';
 import { listFoundCompanies } from './found';
 import type { BuyerType } from './shortlist';
 import { sameCompanyName } from './company-names';
+import { namesWork } from '@/mvp/discovery/brief';
 
 /** A need check's accepted company, with its source (docs/mvp/20). */
 interface NeedLead { company_name: string; role: string; quote: string; need_why: string | null; work_date: string | null; market: string | null; project: string | null;
@@ -45,8 +46,12 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
     `select n.company_name,n.role,n.quote,n.need_why,n.work_date,n.market,n.project,n.document_id,d.url,d.tier,d.publisher_key
      from need_checks n join source_documents d on d.id=n.document_id where n.run_id=$1 and n.verdict='lead' order by n.work_date desc nulls last`, [runId])).rows : [];
   const needFor = (name: string) => needs.find((n) => sameCompanyName(n.company_name, name)) ?? null;
+  const work = input.brief?.source === 'ai';
   const picks = (await listFoundCompanies(db, runId))
-    .filter((c) => !c.opportunityId && (needFor(c.name) || (c.relevant && (c.rating ?? 0) >= LIKELY_MIN && c.buyerType && ROLE[c.buyerType])))
+    // Smoke test, 10 Oct: names rated without any source sentence (Fluor on LNG Canada, a package name) became
+    // leads. In a work-based search a rated company needs its own sentence naming the brief's work.
+    .filter((c) => !c.opportunityId && (needFor(c.name) || (c.relevant && (c.rating ?? 0) >= LIKELY_MIN && c.buyerType && ROLE[c.buyerType]
+      && (!work || Boolean(c.quote && namesWork(c.quote, input.brief!))))))
     .slice(0, LIKELY_MAX_PER_SEARCH);
   if (!picks.length) return { saved: 0, listing: 0 };
   const docs = new Map((await db.query<{ id: string; doc: string | null; text: string | null; url: string | null; tier: string | null; publisher_key: string | null }>(
@@ -60,7 +65,10 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
     // A list entry that itself describes work with the material is quoted evidence ("listing"); the need check's
     // sentence was verified against its source when it was judged.
     const quote = need ? need.quote : c.quote && squash(c.quote).length >= 20 ? squash(c.quote) : null;
-    const listed = Boolean(need) || Boolean(quote && doc?.doc && doc.text && squash(doc.text).includes(quote!) && materialEvidenceKind(quote!, productId) !== 'none');
+    const listed = Boolean(need) || Boolean(quote && doc?.doc && doc.text && squash(doc.text).includes(quote!)
+      && (work ? namesWork(quote!, input.brief!) : materialEvidenceKind(quote!, productId) !== 'none'));
+    // Every lead of a work-based search has a source sentence about the work.
+    if (work && !listed) continue;
     // A plain-rule guess (no AI yet) becomes a lead only with its listed work as evidence.
     if (c.guessed && !listed) continue;
     const verification = listed ? 'listing' : 'rating';

@@ -33,8 +33,11 @@ const WORK = /\b(?:EPC\w*|contract\w*|construct\w*|build\w*|install\w*|fabricat\
 // Rule 14: an engineering-only package (detailed engineering, FEED, design) buys no material.
 const ENGINEERING_ONLY = /\b(?:detailed|front[- ]end|basic|FEED|pre-?FEED|design|consultancy|engineering services|engineering contract|engineering role)\b/i;
 const BUYS_MATERIAL = /\b(?:EPC\w*|procurement|construct\w*|install\w*|fabricat\w*|build\w*|supply|maintenance)\b/i;
-/** Awards older than this have mostly been bought for (as shortlistAwardWinners). */
-export const NEED_WINDOW_MONTHS = 18;
+/**
+ * Work older than this has mostly been bought for. Big plants buy valves, pipe and fittings for 2-2.5 years after
+ * the award (smoke test, 10 Oct: the Ruwais LNG EPC, awarded early 2025 and built until 2028, was dropped at 18).
+ */
+export const NEED_WINDOW_MONTHS = 30;
 
 const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.replace(/\s+/g, ' ').trim().slice(0, n) : '');
 /** Does the sentence name this company: its core name (legal suffixes dropped) or its initials? */

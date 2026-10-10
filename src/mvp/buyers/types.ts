@@ -52,7 +52,7 @@ export interface NeedCard {
   /** Why that work needs the item. */
   why: string;
   use: string | null; project: string | null; date: string | null;
-  window: 'buying now' | 'buying soon' | 'check date';
+  window: 'buying now' | 'buying soon' | 'still building' | 'check date';
   role: string | null; country: string | null;
   url: string | null; source: string | null;
   /** A competitor supplying the item to the same work, when the news names one. */
