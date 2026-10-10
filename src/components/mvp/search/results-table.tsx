@@ -61,6 +61,8 @@ export interface ResultsTableProps {
   newIds?: ReadonlySet<string>;
   /** Where "Open details" comes back to: this Leads view (a /crm address; the workspace accepts only those). */
   returnTo?: string;
+  /** For "New this week" (tests pass a fixed date). */
+  now?: Date;
 }
 
 /** How a lead is proven (doc 19 §6), as a short tag. */
@@ -102,7 +104,11 @@ const TD = "px-4 py-4 align-top";
  * searched product and why) · Rating · Email · Contacts · Open details (the opportunity workspace, as
  * "Open workspace" in the evidence panel). A click on the row opens the evidence panel.
  */
-export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true, onSaveDerived, saving, newIds, returnTo = "/crm" }: ResultsTableProps) {
+/** First found by a search in the last 7 days: new work since the last check (docs/mvp/20 §7c). */
+export const foundThisWeek = (firstFoundAt: string | null | undefined, now: Date) =>
+  Boolean(firstFoundAt) && now.getTime() - Date.parse(firstFoundAt!) <= 7 * 86_400_000;
+
+export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true, onSaveDerived, saving, newIds, returnTo = "/crm", now = new Date() }: ResultsTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1040px] border-collapse text-[14px] leading-[1.45]" aria-label="Buyers">
@@ -170,7 +176,8 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                         {country ? <span className="text-[var(--muted)]"> · {country}</span> : null}
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="tier-cell">
-                        {newIds?.has(row.leadId) ? <span className="rounded-full bg-[var(--accent)] px-1.5 py-px text-[11px] font-semibold text-white">New</span> : null}
+                        {newIds?.has(row.leadId) ? <span className="rounded-full bg-[var(--accent)] px-1.5 py-px text-[11px] font-semibold text-white">New</span>
+                          : foundThisWeek(row.firstFoundAt, now) ? <span title="First found by a search in the last 7 days" className="rounded-full bg-[var(--accent-soft)] px-1.5 py-px text-[11px] font-semibold text-[var(--accent-2)]">New this week</span> : null}
                         {row.verification ? <span title={PROOF[row.verification].title} className={`rounded-full px-1.5 py-px text-[11px] font-semibold ${PROOF[row.verification].tone}`}>{PROOF[row.verification].label}</span> : null}
                         <TierBadge tier={tier} />
                         {tier > 1 && row.link ? (

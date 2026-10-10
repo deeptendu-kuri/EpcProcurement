@@ -140,6 +140,8 @@ export interface BuyerRow { /* list row: subset of BuyerView */
   verification?: 'website' | 'listing' | 'rating' | null;
   /** docs/mvp/20: from the need check of a work-based search: its work (the source's sentence) and why it needs the item. */
   need?: { work: string; why: string } | null;
+  /** When a search first found the company (docs/mvp/20 §7c monitoring). */
+  firstFoundAt?: string | null;
 }
 export const DERIVED_PREFIX = 'derived:';
 export function isDerivedLeadId(id: string): boolean { return id.startsWith(DERIVED_PREFIX); }

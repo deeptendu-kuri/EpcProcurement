@@ -63,6 +63,13 @@ describe("Leads table columns (docs/mvp/18 §2)", () => {
       .toEqual({ work: "KPIL received a Letter of Award.", why: "A gas pipeline is built from line pipe." });
     expect(needOf("Won a contract. Potential need: Station valves")).toBeNull();
   });
+  it("marks companies a search first found this week (new work since the last check)", () => {
+    const now = new Date("2026-10-10T12:00:00Z");
+    render(<ResultsTable rows={[{ ...row, firstFoundAt: "2026-10-08T09:00:00Z" }, { ...row, leadId: "33333333-3333-4333-8333-333333333333", name: "Older Buyer", firstFoundAt: "2026-09-20T09:00:00Z" }]}
+      selected={new Set()} openId="" onToggle={() => {}} onOpen={() => {}} now={now} />);
+    expect(screen.getAllByText("New this week")).toHaveLength(1);
+    expect(screen.getByText("New this week").closest("tr")?.getAttribute("data-lead-id")).toBe(row.leadId);
+  });
   it("turns the 0–100 fit into a word", () => {
     expect([80, 50, 20, 0].map((n) => ratingWord(n).word)).toEqual(["Strong", "Good", "Possible", "Not rated"]);
   });

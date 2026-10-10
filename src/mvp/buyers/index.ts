@@ -36,7 +36,7 @@ export async function getBuyerView(leadId: string): Promise<BuyerView | null> {
   return getBuyerPage(leadId);
 }
 
-interface SearchLink { runId: string; label: string; product: string; productId: string; opportunityId: string; email: string | null; fit: number; fitKind: 'explicit' | 'potential'; verification: 'website' | 'listing' | 'rating' ; reason: string }
+interface SearchLink { runId: string; label: string; product: string; productId: string; opportunityId: string; email: string | null; fit: number; fitKind: 'explicit' | 'potential'; verification: 'website' | 'listing' | 'rating' ; reason: string ; createdAt: string }
 export const EMAIL_LABELS: Record<string, string> = {
   qualifying: "Checking fit", review: "Held for review", needs_contact: "Needs a contact", active: "Intro sent",
   engaged: "Replied", awaiting_time: "Replied", awaiting_calendar: "Replied", meeting_pending: "Replied",
@@ -60,7 +60,7 @@ async function searchLinks(): Promise<Map<string, SearchLink[]>> {
   for (const r of rows) {
     const list = links.get(r.company_id) ?? [];
     list.push({ runId: r.run_id, label: `${r.query || r.product_name} · ${shortDate(r.created_at)}`, product: r.product_name, productId: r.product_id, opportunityId: r.opportunity_id,
-      email: r.state ? EMAIL_LABELS[r.state] ?? r.state : null, fit: Number(r.fit_score) || 0, fitKind: r.material_fit_kind, verification: r.verification, reason: r.buying_reason ?? '' });
+      email: r.state ? EMAIL_LABELS[r.state] ?? r.state : null, fit: Number(r.fit_score) || 0, fitKind: r.material_fit_kind, verification: r.verification, reason: r.buying_reason ?? '', createdAt: r.created_at });
     links.set(r.company_id, list);
   }
   return links;
@@ -118,7 +118,9 @@ export async function searchBuyers(search: BuyerSearch = {}): Promise<BuyerSearc
       .map((i) => getCatalogueItem(i.itemId)?.shortName ?? i.name).slice(0, 4);
     return { ...row, searches: list.map((l) => ({ runId: l.runId, label: l.label })), searchedProduct: current?.product ?? null,
       emailStatus: current ? current.email ?? "Not started" : null, opportunityId: current?.opportunityId ?? null,
-      alsoSell, searchFit: current?.fitKind ?? null, verification: current?.verification ?? null, need: needOf(current?.reason) };
+      alsoSell, searchFit: current?.fitKind ?? null, verification: current?.verification ?? null, need: needOf(current?.reason),
+      // When a search first found the company (Leads marks the ones found this week: new work since the last check).
+      firstFoundAt: list.length ? list.map((l) => l.createdAt).sort()[0] : null };
   });
   return result;
 }
