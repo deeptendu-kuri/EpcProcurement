@@ -113,7 +113,7 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
       : ['not_checked', 'Not checked yet'];
     // AI ratings are re-checked against the current consistency rules, so a rule fix applies without a new AI call.
     const judged = { rating: Number(r.rating), role: r.rating_role ?? '', reason: r.rating_reason ?? '', buyerType: r.rating_buyer_type };
-    const row = { company: r.company, identity_quote: r.identity_quote };
+    const row = { company: r.company, identity_quote: r.identity_quote, title: r.title };
     const shortlist = r.rating === null ? null : r.rating_source === 'ai' ? consistentRating(judged, row, productName, opts) : Number(r.rating);
     const buyerType = r.rating === null ? null : r.rating_source === 'ai' ? consistentType(judged, row, productName, opts) : r.rating_buyer_type;
     // One number per company per search: a verified buyer keeps the higher of the two ratings.

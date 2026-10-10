@@ -101,6 +101,23 @@ Each slots into the same steps, and is measured by the same golden set:
 
 Welded stainless shows the gap is mostly *where* we search, not only the rating.
 
+### The new rater on the golden set (live AI, 10 Oct)
+
+Each round re-rated the same 184 companies with the live AI rater (paced to the free tier), then fixed what the per-company list showed.
+
+| Round | Top-20 precision | Junk among "likely" | Recall | Competitors as "likely" | What the per-company list showed |
+|---|---|---|---|---|---|
+| Baseline (old rater) | 0.53 | 30% | 89% | 0 | — |
+| v2: types, variant, resellers | 0.48 | 34% | 84% | 5 | The AI copied a page's subject onto bare names on a customer list; composite makers were let in; owners scored 0; pipe mills counted as stockists |
+| v3: page context, other materials, makers | 0.47 | 21% | 76% | 2 | Real Malaysian fabricators were capped as page context; owners still scored 0 as "clients"; "no indication of pipe usage" still scored 45 |
+| **v4: final** | **0.57** | **17%** | **87%** | **0** | Remaining: small-reactor and wind partners; a few names that appear only in a person's CV |
+
+Per search, v4:
+
+- **Steel plates:** top-20 precision 0.95, junk **4%** (target ≤ 5% met), recall 79%.
+- **Steel pipe:** top-20 precision 0.75, junk 30% (was 48%), recall **100%**. Owners such as Aramco and ADNOC are now counted.
+- **Welded stainless:** no competitor is rated likely. That search found no buyers at all; better sourcing is what fixes it (live test below).
+
 ### Built and tested (commits 75306ee, f2f6c9b)
 
 | Phase | What | Proof |
@@ -112,6 +129,25 @@ Welded stainless shows the gap is mostly *where* we search, not only the rating.
 | 4 | Up to 4 steps per search at once, AI one at a time; budgets grow per country; countries alternate | Claim test |
 | 5 | Top contractors and owners followed down their chain ("works under") | Chain tests |
 | 6 | Variant chips and stockist toggle on Find buyers; workspace buyer-type filter, badges and per-country strip | Component tests, screenshots |
+
+### §6: regular buyers are first-class (commit 5b3863f)
+
+An award was never a hard requirement, but the system acted as if it were. Six changes:
+
+| Was | Now |
+|---|---|
+| Searches stopped extending once 2 buyers were saved | They extend until the search's own target (10–100) |
+| Searches for companies by their work ran last, after news and lists | They share the list tier |
+| Proven ongoing work was capped at "Early — keep an eye" | Shown as "Regular buyer · does this work", stage "check first" |
+| Score: a recent contract added +25; regular buyers stopped near 57 | Material fit and consuming work carry it (about 80 when the material is named); a recent contract adds +10 |
+| Owners and operators were rejected | Accepted when they operate, maintain or procure the assets (a contractor labelled as an owner is not) |
+| A company was saved only after its own website was found and read | Every likely buyer (rated 45+) is saved as a lead at once, marked how it is proven (below) |
+
+How each lead is proven:
+
+- **Listing:** its list entry quoting work with the material is the evidence.
+- **Rating:** likely, not verified; never emailed automatically.
+- **Website:** a later website check upgrades the lead.
 
 **Live local-news check, 10 Oct:**
 

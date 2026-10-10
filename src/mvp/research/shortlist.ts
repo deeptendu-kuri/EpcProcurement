@@ -52,6 +52,8 @@ const PLACE_OR_FORM = new Set(['uae', 'ksa', 'gcc', 'dubai', 'abu', 'dhabi', 'sh
   'fze', 'fzc', 'fzco', 'llc', 'ind', 'area', 'industrial', 'zone', 'free', 'city']);
 /** A project, field or facility named in the news ("Ichthys LNG Project", "Marjan Increment … Package 4"), not a company. */
 export function projectName(name: string): boolean {
+  // "Natural Gas Development Project Offshore Brunei": a project word and no company form anywhere.
+  if (/\b(?:project|development project|field development)\b/i.test(name) && !/\b(?:ltd|limited|llc|inc|corp(?:oration)?|company|co|group|plc|gmbh|ag|sa|sdn|bhd|pvt|fze|wll|holdings?)\b\.?/i.test(name)) return true;
   return /\b(?:projects?|development|facilit(?:y|ies)|fpu|fpso|oss|expansion|increment|package \d+|train \d+|field|fields|platform removal|decommissioning|wind farms?|terminal)\b\s*(?:\(|$|[-–—,])/i.test(name.trim());
 }
 /** A name made only of place and company-form words. */
@@ -122,7 +124,7 @@ export function ratingPrompt(productId: string, rows: Row[], ctx: Omit<RateConte
       '- end_user: uses it in its own work (fabricators, spool and workshop shops, plant builders, plant operators doing maintenance);',
       '- contractor: a main or EPC contractor that buys for its projects or passes the work to subcontractors;',
       '- subcontractor: a piping, mechanical, installation or fabrication subcontractor working under a main contractor;',
-      '- owner: a plant or pipeline owner/operator that buys for its own projects or maintenance;',
+      '- owner: a plant, pipeline or utility owner/operator. Owners that commission projects usually buy the material for them (owner-furnished material) or for maintenance: rate 55-80 when their business uses it, never 0 just because they are a client of a contractor;',
       resellers
         ? `- reseller: a stockist, trader or distributor that buys ${name} to supply contractors and projects (a buyer for this supplier; rate at most 65);`
         : `- reseller: stockists, traders and distributors of ${name} are competitors here (rate 0-5, type competitor);`,
@@ -131,7 +133,7 @@ export function ratingPrompt(productId: string, rows: Row[], ctx: Omit<RateConte
       `"match": "named" when its own words name this exact variant or standard, "product" when they name the product, "work" when only its work implies it, "none" otherwise.`,
       'Judge each company separately, from its own name and its own sentence ("said"). The page title ("page") only tells you which page or list the name was on:',
       '- a name in a list titled "X manufacturers" or "X contractors" is probably such a company (rate it 50-70 unless its own words or well-known facts say more or less);',
-      "- names on one company's website (its clients, partners, projects, staff history) are that company's customers or contacts, not makers of what the page is about; judge them by their own names;",
+      "- names on one company's website (its clients, partners, projects, staff history) are that company's customers or contacts, not makers of what the page is about; judge them by who they are: a client that commissions projects (an oil, gas, water or power company) buys the material for them (type owner), while traders and service firms on such a list do not;",
       '- composite or aluminium cylinders and vessels do not use steel plate or steel pipe;',
       '- a company named only because it signed an MoU, cooperation or study with another company is a weak lead (at most 40);',
       '- a project, field or facility name is not a company (rate 0, type not_buyer).',
@@ -146,19 +148,33 @@ export function ratingPrompt(productId: string, rows: Row[], ctx: Omit<RateConte
 
 // "not a line pipe buyer", "supplies umbilicals, not line pipe; rating low", "does not use plates".
 const NOT_BUYER = /\bnot (?:an? )?(?:[\w/-]+ ){0,3}(?:buyer|consumer|user)\b|\brating low\b|\bdoes(?: not|n't) (?:buy|use|need)\b|\bcompetitor\b/i;
+// "No indication of pipe usage", "only umbilicals mentioned": the AI's own doubt.
+const WEAK = /\bno (?:clear |direct )?(?:indication|evidence|mention|sign)\b|\bno direct\b|\bonly [\w\s/-]{1,40} mentioned\b|\bunclear\b/i;
 const MAKER = /\b(?:manufacturer|maker|mill|producer)\b/i;
 const TRADER = /\b(?:supplier|stockist|stockholder|distributor|dealer|trader|seller|sells|exporter)\b/i;
 const MATERIAL_WORD = /plate|pipe|tube|valve|fitting|flange|cable|steel|gasket|bolt/i;
 // Fuel and lubricant trading names. "Oil" alone is not one: oil companies own pipelines and buy line pipe.
 const FUEL_TRADE = /\b(?:lubricants?|lubechem|grease|diesel|trad(?:ing|g|ers?)|trdg)\b|\b(?:oil|petrol\w*|refin\w*)\b.*\b(?:fze|fzc|llc|l\.l\.c)\b/i;
-const WORK_WORD = /\b(?:fabricat\w*|engineering|vessels?|tanks?|boilers?|steel|construct\w*|contract\w*|piping|pipeline|structur\w*|marine|shipyard|heavy industr\w*|epc|projects?)\b/i;
+// The page or the role names a different material ("Top 10 Composite Pressure Vessel Manufacturers").
+const OTHER_MATERIAL = /\b(?:composite|alumin(?:i)?um|plastics?|grp|frp|hdpe|pvc|polyethylene|fib(?:re|er)glass|carbon fib(?:re|er))\b/i;
+/** Reasons the AI copied from the page instead of the company's own work (see parseRatings). */
+export const PAGE_CONTEXT = 'Page context only: ';
+const WORK_WORD = /\b(?:fabricat\w*|engineering|kejuruteraan|ingenier\w*|ingenieur\w*|vessels?|tanks?|boilers?|steel|construct\w*|contract\w*|piping|pipeline|structur\w*|marine|shipyard|heavy industr\w*|epc|projects?)\b/i;
 type Judged = Pick<RatedCompany, 'rating' | 'role' | 'reason'> & { buyerType?: BuyerType | null; also?: string[] };
+type JudgedRow = Pick<Row, 'company' | 'identity_quote'> & { title?: string | null };
+const productNoun = (productName: string) => (productName.toLowerCase().match(/[a-z]+/g) ?? []).pop()?.replace(/s$/, '') ?? '';
 const sellsMaterial = (r: Judged, product: string) => MATERIAL_WORD.test(r.role) || r.role.toLowerCase().includes(product.split(' ').pop() ?? product);
 /** The buyer type after the guards: a seller of the material is a reseller or a competitor depending on the setting. */
-export function consistentType(r: Judged, row: Pick<Row, 'company' | 'identity_quote'>, productName: string, opts: { resellers?: boolean } = {}): BuyerType | null {
+export function consistentType(r: Judged, row: JudgedRow, productName: string, opts: { resellers?: boolean } = {}): BuyerType | null {
   const product = productName.toLowerCase().replace(/s$/, '');
+  const noun = productNoun(productName);
   if (projectName(row.company) || placeOnlyName(row.company)) return 'not_buyer';
   if (MAKER.test(r.role) && sellsMaterial(r, product) && !/fabricat/i.test(r.role)) return 'competitor';
+  // Its own words say it manufactures the product ("biggest stainless steel pipe suppliers and manufacturers"),
+  // or its name is the product ("East Pipes"): a maker, not a buyer.
+  const own = row.identity_quote ?? '';
+  if (noun && /\b(?:manufactur\w*|mills?|producers?)\b/i.test(own) && new RegExp(`\\b${noun}s?\\b`, 'i').test(own) && !/fabricat/i.test(`${r.role} ${own}`)) return 'competitor';
+  if (noun && new RegExp(`\\b${noun}s?\\b`, 'i').test(row.company) && !/\b(?:fabricat\w*|construct\w*|contract\w*|install\w*|engineering|erect\w*)\b/i.test(row.company)) return 'competitor';
   if (r.buyerType === 'reseller' || (TRADER.test(r.role) && sellsMaterial(r, product))) return resellersOn(opts) ? 'reseller' : 'competitor';
   if (NOT_BUYER.test(r.reason) && r.buyerType !== 'competitor') return 'not_buyer';
   return r.buyerType ?? null;
@@ -169,7 +185,7 @@ export function consistentType(r: Judged, row: Pick<Row, 'company' | 'identity_q
  * competitors when he does not sell to them); fuel traders and composite makers stay low; and a bare
  * name with no work in it cannot be rated above 50 (well-known names still reach "Good").
  */
-export function consistentRating(r: Judged, row: Pick<Row, 'company' | 'identity_quote'>, productName: string, opts: { resellers?: boolean } = {}): number {
+export function consistentRating(r: Judged, row: JudgedRow, productName: string, opts: { resellers?: boolean } = {}): number {
   const type = consistentType(r, row, productName, opts);
   if (type === 'not_buyer' && (projectName(row.company) || placeOnlyName(row.company))) return 0;
   if (type === 'competitor') return Math.min(r.rating, 5);
@@ -177,17 +193,27 @@ export function consistentRating(r: Judged, row: Pick<Row, 'company' | 'identity
   const plain = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   const own = (row.identity_quote ?? '').trim();
   const bare = !own || plain(own) === plain(row.company);
-  if (type === 'reseller') return Math.min(r.rating, RESELLER_CEILING, bare && !WORK_WORD.test(row.company) ? 50 : 100);
+  // A reseller must say itself that it stocks or supplies; a name on a price list is not enough.
+  const ownSaysTrade = /\b(?:stock\w*|suppl(?:y|ies|ier|iers|ying)|trad(?:er|ers|ing)|distribut\w*|dealers?|wholesal\w*)\b/i.test(own) && !bare;
+  if (type === 'reseller') return Math.min(r.rating, RESELLER_CEILING, ownSaysTrade ? 100 : 40);
   if (NOT_BUYER.test(r.reason) || type === 'not_buyer') return Math.min(r.rating, 5);
   // Fuel, oil and lubricant traders (often a fabricator's client list) do not buy the material.
   if (FUEL_TRADE.test(row.company) && !WORK_WORD.test(row.company)) return Math.min(r.rating, 10);
-  // Composite and aluminium cylinders are not made from steel products; software and process licensors buy none.
-  if (/\bcomposite|alumin/i.test(`${r.role} ${r.reason}`)) return Math.min(r.rating, 30);
+  // A different material named by the page or the role (composite, aluminium, plastic) is not this one.
+  if (OTHER_MATERIAL.test(`${r.role} ${r.reason} ${row.title ?? ''}`) && !OTHER_MATERIAL.test(productName)) return Math.min(r.rating, 30);
+  // The AI repeated the page's subject for a bare name (see parseRatings), or doubts its own rating.
+  if (r.reason.startsWith(PAGE_CONTEXT)) return Math.min(r.rating, 30);
+  if (WEAK.test(r.reason)) return Math.min(r.rating, 30);
   if (/\b(?:software|licensor|licen[cs]es? (?:the )?(?:process|technology)|design verification|consultan\w*)\b/i.test(`${r.role} ${r.reason}`)) return Math.min(r.rating, 20);
   if (bare && !WORK_WORD.test(row.company)) return Math.min(r.rating, 50);
   return r.rating;
 }
 
+const isBareRow = (row: Pick<Row, 'company' | 'identity_quote'>) => {
+  const plain = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  // "Kawan Engineering Sdn Bhd" on a list of pressure vessel makers names its work; "MAGIC OIL" does not.
+  return (!row.identity_quote?.trim() || plain(row.identity_quote) === plain(row.company)) && !WORK_WORD.test(row.company);
+};
 /** Parse and bound the AI answer; unknown ids, types and catalogue ids are dropped. */
 export function parseRatings(text: string, rows: Row[], productId: string, opts: { resellers?: boolean } = {}): RatedCompany[] {
   const parsed = answer.safeParse(JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)));
@@ -200,7 +226,14 @@ export function parseRatings(text: string, rows: Row[], productId: string, opts:
     const row = rows[index];
     if (!row || out.some((o) => o.id === row.id)) continue;
     const typed = (BUYER_TYPES as readonly string[]).includes(c.type ?? '') ? (c.type as BuyerType) : null;
-    const judged = { rating: Math.max(0, Math.min(100, Math.round(c.rating))), role: clip(c.role, 60) || 'Not clear yet', reason: clip(c.reason, 220), buyerType: typed };
+    const plainReason = clip(c.reason, 220).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+    // The same reason given to 3+ bare names of one batch is the page's subject, not their work
+    // (a fabricator's customer list rated "Manufactures steel tanks and pressure vessels" seven times).
+    const echoed = isBareRow(row) && parsed.data.companies.filter((o) => {
+      const other = rows[Number(o.id.replace(/^c/, '')) - 1];
+      return other && isBareRow(other) && clip(o.reason, 220).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '') === plainReason;
+    }).length >= 3;
+    const judged = { rating: Math.max(0, Math.min(100, Math.round(c.rating))), role: clip(c.role, 60) || 'Not clear yet', reason: `${echoed ? PAGE_CONTEXT : ''}${clip(c.reason, 220)}`, buyerType: typed };
     const raw = judged.rating;
     const rating = consistentRating(judged, row, productName, opts);
     const buyerType = consistentType(judged, row, productName, opts);

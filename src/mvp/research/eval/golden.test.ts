@@ -62,13 +62,24 @@ describe.skipIf(!process.env.EVAL_LIVE)("live AI rating of the golden inputs", (
   it("rates and scores", async () => {
     const { getLLM } = await import("@/mvp/llm");
     const { rateRows } = await import("../shortlist");
+    const { createTestDb } = await import("@/mvp/db");
     const predictions = new Map<string, Prediction>();
-    const provider = getLLM("triage");
+    const detail: unknown[] = [];
+    // Usage is recorded in a throwaway database, never the app's.
+    const usageDb = await createTestDb();
+    const provider = getLLM("triage", usageDb);
     for (const set of [...new Set(rows.map((r) => r.set))]) {
       const list = rows.filter((r) => r.set === set);
       const rated = await rateRows(list.map((r, i) => ({ id: String(i), company: r.name, identity_quote: r.said || null, title: r.page || null })), { productId: list[0].product }, () => provider);
-      for (const r of rated) predictions.set(goldKey(list[Number(r.id)]), { rating: r.rating, buyerType: r.buyerType ?? null });
+      for (const r of rated) {
+        predictions.set(goldKey(list[Number(r.id)]), { rating: r.rating, buyerType: r.buyerType ?? null });
+        const g = list[Number(r.id)];
+        detail.push({ set, name: g.name, label: g.label, unsure: g.unsure ?? false, rating: r.rating, raw: r.raw ?? null, type: r.buyerType, role: r.role, reason: r.reason, source: r.source });
+      }
+      console.log(`[eval ${set}] AI calls ${rated.aiCalls ?? 0}; rated by AI ${rated.filter((r) => r.source === "ai").length}/${rated.length}${rated.warning ? `; warning: ${rated.warning}` : ""}`);
     }
     report(process.env.EVAL_LABEL ?? "live", predictions);
-  }, 600_000);
+    fs.writeFileSync(`tmp/eval-${process.env.EVAL_LABEL ?? "live"}-rows.json`, JSON.stringify(detail, null, 1));
+    await usageDb.close();
+  }, 1_800_000);
 });

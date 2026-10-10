@@ -15,7 +15,7 @@ export interface PaceLimits {
 
 /** Per-model limits (kept ~10% under Groq's published free-tier limits). */
 export function paceLimitsFor(provider: string, model: string): PaceLimits | null {
-  if (process.env.VITEST) return null; // unit tests use fake fetches
+  if (process.env.VITEST && !process.env.EVAL_LIVE) return null; // unit tests use fake fetches; the live eval is paced like the app
   if (provider === "groq") {
     const tpm = Number(process.env.LLM_GROQ_TPM ?? 7000) || 7000;
     return /qwen/i.test(model) ? { tpm, otpm: 900 } : { tpm };

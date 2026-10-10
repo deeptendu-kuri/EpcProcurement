@@ -45,7 +45,9 @@ describe("ratings stay consistent with their own words (9 Oct steel plates findi
     // A stockist is a reseller buyer (ranked below end users) when he sells wholesale, else a competitor.
     const stockist = r(70, "Steel plate supplier", "Sells SA516 plates for boilers");
     const navgraha = { company: "Navgraha Steels INC", identity_quote: "Navgraha Steels INC" };
-    expect([consistentRating(stockist, navgraha, "steel plates"), consistentType(stockist, navgraha, "steel plates")]).toEqual([50, "reseller"]);
+    // A bare name is not enough to be a likely reseller: it must say itself that it stocks or supplies.
+    expect([consistentRating(stockist, navgraha, "steel plates"), consistentType(stockist, navgraha, "steel plates")]).toEqual([40, "reseller"]);
+    expect(consistentRating(stockist, { company: "Navgraha Steels INC", identity_quote: "Navgraha Steels is a stockist and supplier of SA516 plates to fabricators" }, "steel plates")).toBe(65);
     expect([consistentRating(stockist, navgraha, "steel plates", { resellers: false }), consistentType(stockist, navgraha, "steel plates", { resellers: false })]).toEqual([5, "competitor"]);
     expect(consistentType(r(90, "Steel plate manufacturer"), navgraha, "steel plates")).toBe("competitor");
     expect(consistentRating(r(70, "Wind farm EPC contractor", "DEME installed turbines, not line pipe buyer."), { company: "DEME", identity_quote: "DEME installed turbines" }, "line pipe")).toBe(5);
@@ -64,7 +66,8 @@ describe("ratings stay consistent with their own words (9 Oct steel plates findi
   it("sets project names aside: the project's owner or contractor is the buyer", () => {
     for (const name of ["Ichthys LNG Project", "North Field Expansion Project", "Marjan Increment Project – Package 4 Offshore Gas Facilities", "Scarborough FPU", "TenneT BorWin 6 OSS", "Umm Shaif Field Development"])
       expect(ruleRating(name, name, "line pipe")?.rating).toBe(0);
-    for (const name of ["McDermott", "Subsea 7", "Petronas", "Larsen & Toubro"]) expect(ruleRating(name, name, "line pipe")).toBeNull();
+    for (const name of ["McDermott", "Subsea 7", "Petronas", "Larsen & Toubro", "Project Engineering Co LLC"]) expect(ruleRating(name, name, "line pipe")).toBeNull();
+    expect(ruleRating("Natural Gas Development Project Offshore Brunei", "", "line pipe")?.rating).toBe(0);
     expect(consistentRating({ rating: 85, role: "EPC contractor", reason: "Requires line pipe.", also: [] }, { company: "Ichthys LNG Project", identity_quote: "Ichthys LNG Project" }, "line pipe")).toBe(0);
   });
   it("sets place names aside without AI", () => {
@@ -170,5 +173,51 @@ describe("buyer types and the exact variant (docs/mvp/19 Phase 2)", () => {
     expect(heuristicRating("Al Noor Steel Trading", "stockist of stainless steel pipes", null, "stainless pipe")).toMatchObject({ buyerType: "reseller", rating: 40 });
     expect(heuristicRating("Al Noor Steel Trading", "stockist of stainless steel pipes", null, "stainless pipe", { resellers: false })).toMatchObject({ buyerType: "competitor" });
     expect(heuristicRating("Gulf Mech", "mechanical subcontractor", null, "stainless pipe")).toMatchObject({ buyerType: "subcontractor" });
+  });
+});
+
+describe("fixes from the per-company eval (docs/mvp/19 §5)", () => {
+  const rows = ["Lubrex FZe", "Ayla International LLC", "MAGIC OIL", "Gulf Fabricators"].map((company, i) => ({ id: String(i), company, identity_quote: company, title: "Top Steel Tank Fabrication Manufacturer In UAE" }));
+  it("treats one reason repeated for 3+ bare names as the page's subject, not their work", () => {
+    const text = JSON.stringify({ companies: rows.map((_, i) => ({ id: `c${i + 1}`, rating: 90, type: "end_user", role: "Pressure vessel fabricator", reason: i < 3 ? "Manufactures steel tanks and pressure vessels" : "Fabricates steel tanks for oil terminals" })) });
+    const rated = parseRatings(text, rows, "plates");
+    expect(rated.slice(0, 3).map((r) => [r.rating, r.reason.startsWith("Page context only")])).toEqual([[30, true], [30, true], [30, true]]);
+    expect(rated[3].rating).toBe(90); // its own distinct reason, and "Fabricators" names its work
+  });
+  it("caps companies whose page or role names a different material", () => {
+    const judged = { rating: 70, role: "Pressure vessel fabricator", reason: "Makes pressure vessels" };
+    expect(consistentRating(judged, { company: "NPROXX", identity_quote: "NPROXX", title: "Top 10 Composite Pressure Vessel Manufacturers" }, "steel plates")).toBe(30);
+    expect(consistentRating(judged, { company: "PolyPipe Works", identity_quote: "PolyPipe Works fabricates HDPE pipelines", title: "HDPE pipe contractors" }, "HDPE pipe")).toBe(70);
+  });
+  it("calls a maker a competitor from its own words or its name", () => {
+    expect(consistentType({ rating: 70, role: "stainless steel pipe supplier", reason: "Supplies pipe", buyerType: "reseller" },
+      { company: "Metallica", identity_quote: "Metallica is one of the biggest stainless steel pipe suppliers and manufacturers in India" }, "stainless / duplex pipe")).toBe("competitor");
+    expect(consistentType({ rating: 45, role: "EPC contractor", reason: "Secured a pipe contract", buyerType: "contractor" },
+      { company: "East Pipes Integrated Company", identity_quote: "EPIC secured a steel pipe contract" }, "line pipe")).toBe("competitor");
+    expect(consistentType({ rating: 80, role: "Pipeline contractor", reason: "Lays pipelines", buyerType: "contractor" },
+      { company: "Gulf Pipeline Builders", identity_quote: "Gulf Pipeline Builders lays gas pipelines" }, "line pipe")).toBe("contractor");
+  });
+  it("tells the AI that owners commissioning projects buy the material", () => {
+    expect(ratingPrompt("line-pipe", rows).system).toMatch(/owner-furnished material/);
+  });
+});
+
+describe("fixes from the per-company eval, round 2", () => {
+  it("does not treat a real list of fabricators as page context", () => {
+    const rows = ["Kawan Engineering Sdn Bhd", "Kejuruteraan Jade Star Sdn Bhd", "MSET Engineering Corporation Sdn Bhd"].map((company, i) => ({ id: String(i), company, identity_quote: company, title: "Pressure Vessel Manufacturers in Malaysia" }));
+    const text = JSON.stringify({ companies: rows.map((_, i) => ({ id: `c${i + 1}`, rating: 70, type: "end_user", role: "Pressure vessel fabricator", reason: "Listed as a pressure vessel manufacturer" })) });
+    expect(parseRatings(text, rows, "plates").map((r) => r.rating)).toEqual([70, 70, 70]);
+  });
+  it("caps a rating whose own reason doubts it", () => {
+    expect(consistentRating({ rating: 45, role: "Wind farm EPC contractor", reason: "No indication of pipe usage" }, { company: "Unison", identity_quote: "Unison builds wind farms" }, "line pipe")).toBe(30);
+    expect(consistentRating({ rating: 45, role: "Subsea contractor", reason: "Only umbilicals mentioned" }, { company: "OneSubsea", identity_quote: "OneSubsea supplies umbilicals" }, "line pipe")).toBe(30);
+  });
+  it("treats the product in a company's name as a maker unless the name names its work", () => {
+    const judged = { rating: 70, role: "Stainless plate user", reason: "Uses plates", buyerType: "end_user" as const };
+    expect(consistentType(judged, { company: "New Castle Stainless Plate", identity_quote: "New Castle Stainless Plate" }, "steel plates")).toBe("competitor");
+    expect(consistentType(judged, { company: "Gulf Plate Fabricators", identity_quote: "Gulf Plate Fabricators" }, "steel plates")).toBe("end_user");
+  });
+  it("tells the AI a client commissioning projects is a buyer", () => {
+    expect(ratingPrompt("line-pipe", []).system).toMatch(/a client that commissions projects .* buys the material/);
   });
 });
