@@ -76,6 +76,11 @@ describe("Search workspace (docs/mvp/18 §4)", () => {
     expect(JSON.parse(String(init.body))).toEqual({ action: "cancel" });
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
+  it("offers Verify for a saved likely lead", () => {
+    render(<SearchLiveWorkspace runId={data.run.id} initial={{ ...data, companies: [company({ id: "l", name: "Example Likely EPC", rating: 70, ratingRole: "EPC contractor", ratingReason: "Builds plants.",
+      opportunityId: "33333333-3333-4333-8333-333333333333", status: "saved", statusText: "Lead · likely, not verified", verification: "rating" })] }} />);
+    expect(screen.getByRole("button", { name: "Verify Example Likely EPC" })).toBeTruthy();
+  });
   it("offers no controls once a search has finished", () => {
     render(<SearchLiveWorkspace runId={data.run.id} initial={{ ...data, running: false, run: { ...data.run, status: "done", statusText: "Finished" } }} />);
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();

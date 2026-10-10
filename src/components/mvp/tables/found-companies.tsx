@@ -18,7 +18,9 @@ const roleHint:Record<LikelyRole,string>={owner:'Named as the owner of a project
 const order:Record<FoundCompany['status'],number>={saved:0,checking:1,not_checked:2,no_website:3,unreadable:4,no_match:5};
 const CHECKABLE:FoundCompany['status'][]=['not_checked','no_website','unreadable'];
 // Stockists and traders are secondary: never checked or saved as leads.
-const checkable=(c:FoundCompany)=>CHECKABLE.includes(c.status)&&!(c.buyerType==='reseller'&&!c.opportunityId);
+const checkable=(c:FoundCompany)=>CHECKABLE.includes(c.status)&&!(c.buyerType==='reseller'&&!c.opportunityId)
+  // A saved lead not yet proven by its own website can be verified.
+  ||Boolean(c.opportunityId)&&(c.verification==='rating'||c.verification==='listing')&&c.status!=='checking'&&c.buyerType!=='reseller';
 const host=(url:string)=>{try{return new URL(url).hostname.replace(/^www\./,'');}catch{return '';}};
 type Data={companies:FoundCompany[];active:boolean};
 

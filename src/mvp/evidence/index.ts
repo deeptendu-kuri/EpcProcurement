@@ -118,7 +118,8 @@ async function ratingFor(db:Queryable,opp:LeadOpp|null){
   const {listFoundCompanies}=await import('@/mvp/research/found');
   const found=(await listFoundCompanies(db,opp.run_id)).find(c=>c.opportunityId===opp.id);
   if(!found)return null;
-  const checkable=['not_checked','no_website','unreadable'].includes(found.status)&&opp.verification!=='website'&&found.buyerType!=='reseller';
+  // A saved likely lead (status "saved") can be verified too; only one already being checked cannot.
+  const checkable=(opp.verification==='rating'||opp.verification==='listing')&&found.status!=='checking'&&found.buyerType!=='reseller';
   return {found,rating:{score:found.rating,role:found.ratingRole,reason:found.ratingReason,buyerType:found.buyerType,candidateId:found.id,runId:opp.run_id,checkable,status:found.statusText}};
 }
 const newestFirst=(a:Trigger,b:Trigger)=>(b.date??'').localeCompare(a.date??'');

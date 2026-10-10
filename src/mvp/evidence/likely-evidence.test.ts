@@ -36,6 +36,7 @@ describe("evidence panel for a likely lead (not verified yet)", () => {
       expect(view!.sources[0]).toMatchObject({ url: list.url, title: list.title });
       expect(view!.sources[0].quotes[0].highlight).toBe("Example Offshore Contractors");
       expect(view!.recent).toEqual([]);
+      expect(view!.rating?.checkable).toBe(true); // a saved likely lead can be verified
     }
   });
 });
