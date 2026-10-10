@@ -33,6 +33,8 @@ export interface FindFormProps {
   initialTicketId?: string | null;
   /** Preserve the selected search's material/countries when opening its progress. */
   initialInput?: RunInput | null;
+  /** Free AI tokens left over the last 24 hours across the search models; null = no daily limit. */
+  aiLeft?: number | null;
 }
 
 /**
@@ -41,15 +43,15 @@ export interface FindFormProps {
  * day's allowance.
  */
 const SIZES = {
-  quick: { label: "Quick", mode: "preview", target: 10, extraRounds: 0, time: "About 10 minutes · up to 60k AI tokens", hint: "A first batch of leads. Good for a demo." },
-  standard: { label: "Standard", mode: "batch", target: 20, extraRounds: 0, time: "About 20 minutes · up to 120k AI tokens", hint: "More searches and pages per country." },
-  deep: { label: "Deep", mode: "deep", target: 50, extraRounds: undefined, time: "An hour or more · may use the day's AI allowance", hint: "Keeps searching until 50+ companies are verified." },
-} as const satisfies Record<string, { label: string; mode: "preview" | "batch" | "deep"; target: number; extraRounds: number | undefined; time: string; hint: string }>;
+  quick: { label: "Quick", mode: "preview", target: 10, extraRounds: 0, tokens: 60_000, time: "About 10 minutes · up to 60k AI tokens", hint: "A first batch of leads. Good for a demo." },
+  standard: { label: "Standard", mode: "batch", target: 20, extraRounds: 0, tokens: 120_000, time: "About 20 minutes · up to 120k AI tokens", hint: "More searches and pages per country." },
+  deep: { label: "Deep", mode: "deep", target: 50, extraRounds: undefined, tokens: 250_000, time: "An hour or more · may use the day's AI allowance", hint: "Keeps searching until 50+ companies are verified." },
+} as const satisfies Record<string, { label: string; mode: "preview" | "batch" | "deep"; target: number; extraRounds: number | undefined; tokens: number; time: string; hint: string }>;
 type SizeKey = keyof typeof SIZES;
 const sizeOf = (mode: "preview" | "batch" | "deep" | undefined): SizeKey => mode === "deep" ? "deep" : mode === "batch" ? "standard" : "quick";
 
 /** Find (09 §4.1, 13 §7): what you offer + markets + lead type → Search now (queued) → live progress; Save this search. */
-export function FindForm({ markets, products, materials: givenMaterials, initialRunId = null, initialTicketId = null, initialInput = null }: FindFormProps) {
+export function FindForm({ markets, products, materials: givenMaterials, initialRunId = null, initialTicketId = null, initialInput = null, aiLeft = null }: FindFormProps) {
   const router = useRouter();
   const toast = useToast();
   const [, startTransition] = useTransition();
@@ -249,6 +251,9 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
               className={`rounded-xl border p-3 text-left text-sm transition ${size===key?"border-[var(--accent)] bg-[var(--accent-soft)]":"border-[var(--line)] bg-white hover:bg-[var(--hover)]"}`}>
               <span className="block font-semibold">{z.label}</span><span className="block text-xs text-[var(--text-2)]">{z.time}</span><span className="mt-1 block text-xs text-[var(--muted)]">{z.hint}</span></button>;})}
           </div>
+          {aiLeft !== null ? <p className={`text-xs ${aiLeft < SIZES[size].tokens ? "rounded-lg bg-[var(--warn-bg)] px-3 py-2 text-[var(--warn)]" : "text-[var(--muted)]"}`} role={aiLeft < SIZES[size].tokens ? "alert" : undefined}>
+            Free AI left (last 24 hours): about {Math.round(aiLeft / 1000)}k tokens.{aiLeft < SIZES[size].tokens ? ` A ${SIZES[size].label} search needs up to ${Math.round(SIZES[size].tokens / 1000)}k, so it may wait for the allowance part-way. Leads found are kept.` : ""}
+          </p> : null}
           <label className="flex flex-wrap items-center gap-2 text-sm">
             <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={pauseOn} onChange={e=>setPauseOn(e.target.checked)} aria-label="Pause when leads are found" />
             <span>Pause when</span>

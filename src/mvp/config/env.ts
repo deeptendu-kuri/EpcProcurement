@@ -22,7 +22,8 @@ export const mvpEnv = {
   groqApiKey: () => read("GROQ_API_KEY"),
   cloudflareAccountId: () => read("CLOUDFLARE_ACCOUNT_ID"),
   cloudflareApiToken: () => read("CLOUDFLARE_API_TOKEN"),
-  groqDailyTokenBudget: () => readInt("LLM_DAILY_TOKEN_BUDGET__GROQ", 180_000),
+  // Groq allows each of the three search models 200k tokens a day; the guard covers all three.
+  groqDailyTokenBudget: () => readInt("LLM_DAILY_TOKEN_BUDGET__GROQ", 600_000),
   cloudflareDailyTokenBudget: () => readInt("LLM_DAILY_TOKEN_BUDGET__CLOUDFLARE", 300_000),
   /** Comma-separated RSS feed URLs; empty → defaults in the RSS source. */
   rssFeeds: () =>

@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** Groq JSON-mode retry (docs/mvp/15 §F). */
-import { describe, expect, it } from "vitest";
-import { JSON_ONLY_INSTRUCTION, createGroqProvider, firstJsonObject } from "./groq";
+import { beforeEach, describe, expect, it } from "vitest";
+import { JSON_ONLY_INSTRUCTION, createGroqProvider, firstJsonObject, groqBlockedModels, resetGroqBlocks, retryAfterMs } from "./groq";
 import { LLMHttpError } from "./types";
 
 const jsonFailed = () =>
@@ -74,6 +74,7 @@ describe("Groq JSON retry", () => {
 });
 
 describe("Groq daily allowance fallback", () => {
+  beforeEach(() => resetGroqBlocks());
   const perDay = () => new Response(JSON.stringify({ error: { message: "Rate limit reached for model `openai/gpt-oss-120b` in organization `org_example` on tokens per day (TPD): Limit 200000, Used 199000, Requested 3770." } }), { status: 429 });
   it("answers with the fallback model when the requested model's daily allowance is used up", async () => {
     const { bodies, fetchImpl } = recorder([perDay, () => ok('{"companies":[]}')]);
@@ -92,5 +93,24 @@ describe("Groq daily allowance fallback", () => {
       await expect(createGroqProvider("gsk_x", "openai/gpt-oss-120b", b.fetchImpl).complete({ system: "s", user: "u", singleAttempt: true })).rejects.toBeInstanceOf(LLMHttpError);
       expect(b.bodies).toHaveLength(1);
     } finally { delete process.env.LLM_GROQ_DAILY_FALLBACK_MODEL; }
+  });
+  it("remembers a model Groq refused for the day, tries the next ones, then says when to retry", async () => {
+    const a = recorder([perDay, () => ok('{"a":1}')]);
+    await createGroqProvider("gsk_x", "openai/gpt-oss-120b", a.fetchImpl).complete({ system: "s", user: "u", json: true, singleAttempt: true });
+    expect(groqBlockedModels().map((b) => b.model)).toEqual(["openai/gpt-oss-120b"]);
+    // The refused model is skipped on the next call: no wasted request.
+    const b = recorder([() => ok('{"b":2}')]);
+    await createGroqProvider("gsk_x", "openai/gpt-oss-120b", b.fetchImpl).complete({ system: "s", user: "u", json: true, singleAttempt: true });
+    expect(b.bodies.map((x) => x.model)).toEqual(["openai/gpt-oss-20b"]);
+    const tpd = (m: string, t: string) => () => new Response(JSON.stringify({ error: { message: `Rate limit reached for model \`${m}\` on tokens per day (TPD). Please try again in ${t}.` } }), { status: 429 });
+    const c = recorder([tpd("openai/gpt-oss-20b", "20m58.8s"), tpd("qwen/qwen3.8-27b", "4m10s")]);
+    const error = await createGroqProvider("gsk_x", "openai/gpt-oss-120b", c.fetchImpl).complete({ system: "s", user: "u", singleAttempt: true }).catch((e) => e);
+    expect(error).toBeInstanceOf(LLMHttpError);
+    expect(error.message).toMatch(/daily AI limit .* used up .*try again in 4m1\ds/);
+  });
+  it("reads Groq's retry time", () => {
+    expect(retryAfterMs("Please try again in 20m58.848s.")).toBe(1_258_848);
+    expect(retryAfterMs("Please try again in 1h2m3s")).toBe(3_723_000);
+    expect(retryAfterMs("no time given")).toBeNull();
   });
 });

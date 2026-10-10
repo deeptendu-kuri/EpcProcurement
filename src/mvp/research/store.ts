@@ -104,7 +104,8 @@ export async function reserveAnalysis(db:Db,runId:string,key:string,tokens:numbe
 /**
  * Claim the next step. `maxRunning` steps of one search may run at once (doc 19: countries searched in
  * parallel); AI analysis stays one at a time per search because the AI provider limits tokens per minute.
- * The default of 1 keeps tests and direct callers sequential.
+ * The default of 1 keeps tests and direct callers sequential. A paused search runs only the steps of
+ * companies the user asked to check (budget.manualChecks).
  */
 export async function claimJob(db:Db=getDb(),runId?:string,jobId?:string,maxRunning=1):Promise<ResearchJob|null> {
   return db.tx(async tx=>{
@@ -113,7 +114,9 @@ export async function claimJob(db:Db=getDb(),runId?:string,jobId?:string,maxRunn
     await tx.query(`update research_jobs j set state='cancelled',lease_token=null,lease_until=null where state in ('queued','paused','running') and exists(select 1 from research_sessions s where s.run_id=j.run_id and s.state='cancelled')`);
     const token=randomUUID();
     const job=(await tx.query<ResearchJob>(`select j.* from research_jobs j join research_sessions s on s.run_id=j.run_id
-      where s.state='active' and ($1::uuid is null or j.run_id=$1) and ($2::uuid is null or j.id=$2) and j.available_at<=now()
+      where (s.state='active' or s.state='paused' and coalesce(j.payload->>'candidateId',j.payload->'raw'->'research'->>'candidateId')
+          in (select jsonb_array_elements_text(coalesce(s.budget->'manualChecks','[]'::jsonb))))
+      and ($1::uuid is null or j.run_id=$1) and ($2::uuid is null or j.id=$2) and j.available_at<=now()
       and (j.state='queued' or j.state='running' and j.lease_until<now())
       and (select count(*) from research_jobs busy where busy.run_id=j.run_id and busy.state='running' and busy.lease_until>now())<$3
       and not (j.stage='analyse' and exists(select 1 from research_jobs ai where ai.run_id=j.run_id and ai.stage='analyse' and ai.state='running' and ai.lease_until>now()))
@@ -188,6 +191,11 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
     await tx.query('insert into run_events(run_id,stage,message,counters) values($1,$2,$3,$4::jsonb)',[runId,stage,message.slice(0,1000),JSON.stringify(counters)]);
   });
   return counters;
+}
+/** True when the user asked to check this company ("Verify", "Check now"): its steps run first, even while paused. */
+export async function manualCheck(q:Queryable,runId:string,candidateId:string|null|undefined):Promise<boolean> {
+  if(!candidateId)return false;
+  return (await q.query("select 1 from research_sessions where run_id=$1 and coalesce(budget->'manualChecks','[]'::jsonb) ? $2",[runId,candidateId])).rows.length>0;
 }
 export async function sessionFor(db:Db,runId:string) { return (await db.query<ResearchSession>('select * from research_sessions where run_id=$1',[runId])).rows[0]??null; }
 /** Repair parser-only failures from exact cached company responses. No budget

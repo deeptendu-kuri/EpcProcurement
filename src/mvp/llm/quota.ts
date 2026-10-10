@@ -117,7 +117,8 @@ export function withQuota(provider: LLMProvider, defaultPurpose: string, db?: Qu
       const base = { provider: provider.name, model: provider.model, purpose: request.purpose ?? defaultPurpose, runId: request.runId };
       try {
         const response = await provider.complete(request);
-        await recordUsage({ ...base, tokensIn: response.tokensIn, tokensOut: response.tokensOut, ok: true }, database()).catch(
+        // A fallback model may have answered (Groq limits each model separately): record the one that did.
+        await recordUsage({ ...base, model: response.model ?? base.model, tokensIn: response.tokensIn, tokensOut: response.tokensOut, ok: true }, database()).catch(
           (error) => console.warn("[llm] failed to record usage", error),
         );
         return response;
@@ -130,4 +131,31 @@ export function withQuota(provider: LLMProvider, defaultPurpose: string, db?: Qu
       }
     },
   };
+}
+
+/** Groq's free tier allows each model this many tokens over the last 24 hours (GROQ_MODEL_DAILY_LIMIT). */
+export function groqModelDailyLimit(): number {
+  const n = Number(process.env.GROQ_MODEL_DAILY_LIMIT);
+  return Number.isInteger(n) && n > 0 ? n : 200_000;
+}
+/** The Groq models searches use, in the order they are tried when one runs out. */
+export const GROQ_SEARCH_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"] as const;
+export interface ModelAllowance { model: string; used: number; limit: number; left: number; blockedUntil: string | null }
+/**
+ * AI allowance per model as Groq counts it: tokens over the last 24 hours, per model. `blockedUntil` is set
+ * when Groq itself refused the model (it also counts use from other places with the same key, e.g. the
+ * hosted app), so it wins over this local estimate.
+ */
+export async function aiAllowance(db: Queryable = getDb(), blocked: { model: string; until: string }[] = []): Promise<{ models: ModelAllowance[]; left: number; groq: boolean }> {
+  const { rows } = await db.query<{ model: string; used: number }>(
+    `select model, coalesce(sum(tokens_in + tokens_out), 0)::int as used from llm_usage
+      where provider = 'groq' and ts > now() - interval '24 hours' group by model`,
+  );
+  const limit = groqModelDailyLimit();
+  const models = GROQ_SEARCH_MODELS.map((model) => {
+    const used = Number(rows.find((r) => r.model === model)?.used ?? 0);
+    const blockedUntil = blocked.find((b) => b.model === model)?.until ?? null;
+    return { model, used, limit, left: blockedUntil ? 0 : Math.max(0, limit - used), blockedUntil };
+  });
+  return { models, left: models.reduce((n, m) => n + m.left, 0), groq: Boolean(mvpEnv.groqApiKey()) };
 }

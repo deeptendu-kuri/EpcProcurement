@@ -19,7 +19,8 @@ const example: DashboardData = {
   pipeline: { found: 12, buyers: 9, verified: 3, likely: 6, emailed: 2, replied: 1, meetings: 1 },
   latestSearchId: "run-a",
   topLeads: [{ opportunityId: "opp-2", runId: "run-a", name: "KRR Engineering", country: "IN", product: "Steel plates", fit: 82, verification: "rating", email: null }],
-  allowance: { used: 150_000, limit: 400_000 },
+  allowance: { left: 250_000, models: [{ model: "openai/gpt-oss-120b", used: 150_000, limit: 200_000, left: 50_000, blockedUntil: null },
+    { model: "openai/gpt-oss-20b", used: 200_000, limit: 200_000, left: 0, blockedUntil: "2026-10-10T09:40:00.000Z" }, { model: "qwen/qwen3.8-27b", used: 0, limit: 200_000, left: 200_000, blockedUntil: null }] },
 };
 
 describe("Dashboard (docs/mvp/18 §3): today, pipeline and every search", () => {
@@ -57,6 +58,8 @@ describe("Dashboard (docs/mvp/18 §3): today, pipeline and every search", () => 
     expect(within(lead).getByText("Likely")).toBeTruthy();
     expect(within(lead).getByRole("link", { name: "Verify" }).getAttribute("href")).toBe("/crm?run=run-a&proof=likely");
     expect(screen.getByText("250k")).toBeTruthy();
+    expect(screen.getByText("out until 09:40 UTC")).toBeTruthy();
+    expect(screen.getByText("50k left")).toBeTruthy();
   });
   it("says so when nothing needs the user", async () => {
     data.value = { ...example, actions: { review: 0, meetings: [], nextMeeting: null, inProgress: 0, newBuyers: 0, toCheck: 0, running: [], paused: [], toVerify: 0 } };

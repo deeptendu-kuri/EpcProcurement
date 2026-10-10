@@ -10,7 +10,8 @@ import { listFunnelThreads } from '@/mvp/automation/engine';
 import { runMinutes, runUsage } from '@/mvp/research/usage';
 import type { RunRow } from '@/mvp/types';
 import { searchKind } from '@/components/mvp/run-steps';
-import { dailyBudget, usedToday } from '@/mvp/llm/quota';
+import { aiAllowance, type ModelAllowance } from '@/mvp/llm/quota';
+import { groqBlockedModels } from '@/mvp/llm/groq';
 import { EMAIL_LABELS } from '@/mvp/buyers';
 
 export interface DashboardSearch {
@@ -38,8 +39,8 @@ export interface DashboardData {
     running: { id: string; label: string }[]; paused: { id: string; label: string }[]; toVerify: number };
   pipeline: { found: number; buyers: number; verified: number; likely: number; emailed: number; replied: number; meetings: number };
   topLeads: DashboardLead[];
-  /** Free AI tokens used today and the daily allowance (null: no daily cap, e.g. the mock provider). */
-  allowance: { used: number; limit: number | null };
+  /** Free AI allowance per model over the last 24 hours, as Groq counts it (empty without a Groq key). */
+  allowance: { models: ModelAllowance[]; left: number };
   latestSearchId: string | null;
 }
 
@@ -54,8 +55,10 @@ export async function dashboardData(now = new Date()): Promise<DashboardData> {
   const productSearches = all.filter((r) => r.adhoc_query?.productId);
   const workflows = await searchWorkflowCounts(productSearches.map((r) => r.id));
   const usage = await runUsage(db, productSearches.map((r) => r.id)).catch(() => new Map());
-  const proof = new Map((await db.query<{ run_id: string; verified: number; likely: number }>(`select run_id, count(*) filter (where verification<>'rating')::int as verified,
-      count(*) filter (where verification='rating')::int as likely from search_opportunities where qualification<>'rejected' and run_id = any($1::uuid[]) group by run_id`,
+  // Counted per company, as Leads counts them: a company is verified when any of its leads in the search is.
+  const proof = new Map((await db.query<{ run_id: string; verified: number; likely: number }>(`select run_id, count(*) filter (where verified)::int as verified,
+      count(*) filter (where not verified)::int as likely from (select run_id, company_id, bool_or(verification<>'rating') as verified from search_opportunities
+      where qualification<>'rejected' and run_id = any($1::uuid[]) group by run_id, company_id) per_company group by run_id`,
     [productSearches.map((r) => r.id)])).rows.map((r) => [r.run_id, r]));
   const searches: DashboardSearch[] = [];
   for (const [index, run] of productSearches.entries()) {
@@ -81,8 +84,8 @@ export async function dashboardData(now = new Date()): Promise<DashboardData> {
      order by o.fit_score desc, o.created_at desc limit 10`, [now.toISOString()])).rows
     .map((r) => ({ opportunityId: r.id, runId: r.run_id, name: r.name, country: r.country, product: r.product_name, fit: Number(r.fit_score) || 0, verification: r.verification,
       email: r.state ? EMAIL_LABELS[r.state] ?? r.state : null }));
-  const limit = dailyBudget('groq');
-  const allowance = { used: await usedToday('groq', db).catch(() => 0), limit: Number.isFinite(limit) ? limit : null };
+  const ai = await aiAllowance(db, groqBlockedModels()).catch(() => null);
+  const allowance = ai?.groq ? { models: ai.models, left: ai.left } : { models: [], left: 0 };
   const kindOf = (r: RunRow) => searchKind(r.status, r.counters ?? {});
   const meetings: DashboardMeeting[] = threads.filter((t) => t.state === 'meeting_booked')
     .map((t) => ({ opportunityId: t.opportunity_id, company: t.company, product: t.product, start: t.meeting_start, meetUrl: t.meet_url }))

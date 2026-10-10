@@ -4,7 +4,8 @@ import type { RawDoc } from "@/mvp/pipeline/contracts";
 import type { RunInput } from "@/mvp/types";
 import { namesCompany } from "@/mvp/discovery/evidence";
 import { buyerPageCandidate } from "@/mvp/discovery/plan";
-import { addJob } from "./store";
+import { addJob, manualCheck } from "./store";
+import { verifyPriority } from "./shortlist";
 import { readLane, readLaneLimits } from "./registry";
 import { companyIdentityReason,nonCompanyDomain } from '@/mvp/sourcing/entities';
 import { genericServicePhrase, junkFoundName } from '@/mvp/sourcing/names';
@@ -109,16 +110,19 @@ export async function extendInvestigation(db:Db,runId:string,c:ResearchCandidate
   const prior=(await db.query<{text:string}>('select text from source_documents where id=any($1::uuid[])',[c.document_ids])).rows;
   if(!candidatePageIdentity(c,text)&&!prior.some(p=>candidatePageIdentity(c,p.text)))return false;
   await db.tx(async tx=>{
+    const manual=await manualCheck(tx,runId,c.id);
     await tx.query('update research_candidates set document_ids=array(select distinct unnest(document_ids || $2::uuid[])),updated_at=now() where id=$1',[c.id,[documentId]]);
     const jobs=(await tx.query<{payload:{raw:RawDoc}}>("select payload from research_jobs where run_id=$1 and stage='read' and payload->'raw'->'research'->>'candidateId'=$2",[runId,c.id])).rows;
     let slots=Math.max(0,3-jobs.length-(raw.research?.candidateId?0:1));
     for(const link of companyPageLinks(links,domain)){
       if(!slots||link.url===raw.url)continue;
       const next:RawDoc={...raw,url:link.url,title:null,text:null,research:{lane:'investigation',candidateId:c.id}};
-      if(await queueRead(tx,runId,next,budget,45))slots--;
+      if(await queueRead(tx,runId,next,budget,manual?2500:45))slots--;
     }
+    // A rated likely buyer is judged before more lists are read (see verifyPriority).
+    const rating=(await tx.query<{rating:number|null}>('select rating from research_candidates where id=$1',[c.id])).rows[0]?.rating;
     if(buyerPageCandidate(text,input.productId!)||prior.some(p=>buyerPageCandidate(p.text,input.productId!)))
-      await addJob(tx,runId,'analyse',`bundle:${c.id}`,{candidateId:c.id},30);
+      await addJob(tx,runId,'analyse',`bundle:${c.id}`,{candidateId:c.id},manual?2500:Math.max(30,verifyPriority(rating)));
   });
   return true;
 }

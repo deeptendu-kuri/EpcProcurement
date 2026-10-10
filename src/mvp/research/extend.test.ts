@@ -178,8 +178,15 @@ describe('AI rate limits during research',()=>{
   it('waits and retries a per-minute limit',async()=>{
     expect(await failingAnalysis('groq 429: Rate limit reached on tokens per minute (TPM)')).toEqual({state:'queued',later:true});
   });
-  it('still stops on a per-day limit',async()=>{
-    expect((await failingAnalysis('groq 429: Rate limit reached on tokens per day (TPD)')).state).toBe('paused');
+  it('waits for a per-day limit that frees within the hour, and says until when; the search keeps running',async()=>{
+    expect(await failingAnalysis('groq 429: Rate limit reached on tokens per day (TPD). Please try again in 20m58.8s.')).toEqual({state:'queued',later:true});
+    const note=(await db.query<{message:string}>("select message from run_events order by id desc limit 1")).rows[0].message;
+    expect(note).toMatch(/daily AI limit .* waits until about \d\d:\d\d UTC/);
+    expect((await db.query<{state:string}>("select state from research_sessions order by created_at desc limit 1")).rows[0].state).toBe('active');
+  });
+  it('stops with a plain reason when the per-day limit lasts longer than an hour',async()=>{
+    expect((await failingAnalysis('groq 429: Rate limit reached on tokens per day (TPD). Please try again in 3h2m1s.')).state).toBe('paused');
+    expect((await db.query<{stop_reason:string}>("select stop_reason from research_sessions order by created_at desc limit 1")).rows[0].stop_reason).toMatch(/daily AI limit is used up until about/);
   });
 });
 

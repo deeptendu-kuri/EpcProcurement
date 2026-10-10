@@ -8,7 +8,8 @@ import { registerCandidate,queueRead,domainOf,directorySeeds } from '@/mvp/resea
 import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tavily';
 import { getClientProfile } from '@/mvp/config/profile';
 import { queryTerms } from '@/mvp/pipeline/filter';
-import { researchProgress,reserveBudget,markBudget,addJob,type ResearchBudget } from '@/mvp/research/store';
+import { researchProgress,reserveBudget,markBudget,addJob,manualCheck,type ResearchBudget } from '@/mvp/research/store';
+import { verifyPriority } from '@/mvp/research/shortlist';
 import { junkCompanyReason } from './entities';
 import { junkReason } from './junk';
 import { junkFoundName, looksLikeSupplier } from './names';
@@ -34,6 +35,9 @@ export function officialSite<T extends {url:string}>(company:string,results:T[])
   // A leading acronym ("KRR Engineering", "A.K.K. Engineering") is the brand in its domain.
   const acronym=(company.trim().split(/\s+/)[0]??'').replace(/[^A-Za-z0-9]/g,'');
   if(/^[A-Z0-9]{3,6}$/.test(acronym))tokens.push(acronym.toLowerCase());
+  // The short name in brackets is often the brand in the domain: "Saudi Arabian Oil Company (Aramco)" → aramco.com.
+  for(const [,inner] of company.matchAll(/\(([^)]+)\)/g))for(const w of inner.split(/[^A-Za-z0-9]+/))
+    if(/^[A-Z0-9]{3,6}$/.test(w)||w.length>=4&&!GENERIC_NAME.has(w.toLowerCase())&&!LEGAL.has(w.toLowerCase()))tokens.push(w.toLowerCase());
   const initials=plain.filter(w=>!LEGAL.has(w)).map(w=>w[0]).join('');
   const amp=company.includes('&')?company.toLowerCase().split('&').map(s=>s.trim()[0]??'').join('n'):'';
   return results.find(r=>{
@@ -183,5 +187,8 @@ export async function lookupRoundupWebsite(db:Db,runId:string,input:RunInput,can
   const domain=domainOf(found.url);
   await db.query('update research_candidates set domain_hint=coalesce(domain_hint,$2) where id=$1',[candidate.id,domain]);
   const raw:RawDoc={...found,url:'https://'+domain+'/',title:null,text:null,fallbackText:null,research:{lane:'investigation',candidateId:candidate.id,sourcingLane:'roundup'}};
-  return {queued:await db.tx(tx=>queueRead(tx,runId,raw,budget,750))?1:0,cached};
+  // A company the user asked to check is read first; otherwise its rating decides (see verifyPriority).
+  const rating=(await db.query<{rating:number|null}>('select rating from research_candidates where id=$1',[candidate.id])).rows[0]?.rating;
+  const priority=await manualCheck(db,runId,candidate.id)?2500:Math.max(750,verifyPriority(rating));
+  return {queued:await db.tx(tx=>queueRead(tx,runId,raw,budget,priority))?1:0,cached};
 }

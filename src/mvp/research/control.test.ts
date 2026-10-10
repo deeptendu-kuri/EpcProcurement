@@ -35,7 +35,7 @@ describe("pause, resume and finish a search", () => {
     expect(await pauseResearchRun(db, id)).toBe(false);
     expect(await resumePausedRun(db, id)).toBe(true);
     expect(await sessionState(id)).toBe("active");
-    expect((await claimJob(db, id))?.key).toBe("b");
+    expect((await claimJob(db, id))?.key).toBe(running.key === "a" ? "b" : "a"); // the step not yet run
     expect(await resumePausedRun(db, id)).toBe(false);
   });
 
@@ -63,6 +63,29 @@ describe("pause, resume and finish a search", () => {
     await addLead(id, 3);
     expect(await autoPauseIfDue(db, id)).toBe(false);
     expect(await sessionState(id)).toBe("active");
+  });
+
+  it("says so when one rating pass saved more leads than asked for", async () => {
+    const id = await search({ query: "line pipe", pauseAfter: 1 });
+    await addLead(id, 1); await addLead(id, 2); await addLead(id, 3);
+    expect(await autoPauseIfDue(db, id)).toBe(true);
+    expect((await db.query<{ message: string }>("select message from run_events where run_id=$1 order by id desc limit 1", [id])).rows[0].message)
+      .toMatch(/Paused at 3 leads \(you asked for 1; one rating pass saved several at once\)/);
+  });
+
+  it("checks one company while paused: only its steps run and the search stays paused", async () => {
+    const { checkFoundCompany } = await import("./found");
+    const id = await search({ query: "line pipe", productId: "line-pipe" });
+    const company = (await db.query<{ id: string }>("insert into research_candidates (run_id, key, company) values ($1,'example-epc','Example EPC Company') returning id", [id])).rows[0].id;
+    await pauseResearchRun(db, id);
+    const result = await checkFoundCompany(db, id, company);
+    expect(result.message).toMatch(/while the search stays paused/);
+    expect(await sessionState(id)).toBe("paused");
+    const job = await claimJob(db, id, undefined, 4);
+    expect(job?.key).toBe(`official:${company}`);
+    expect((await db.query<{ priority: number }>("select priority from research_jobs where id=$1", [job!.id])).rows[0].priority).toBe(2500);
+    // The search's own steps ("a", "b") wait for Resume.
+    expect(await claimJob(db, id, undefined, 4)).toBeNull();
   });
 
   it("does nothing to a search without a lead target", async () => {

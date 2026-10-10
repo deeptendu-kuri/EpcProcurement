@@ -34,6 +34,9 @@ import {persistRoundupAwards} from '@/mvp/sourcing/roundup-triggers';
 import { extendResearchIfShort,retryAfterRateLimit } from './extend';
 import { REPEAT_STORY_PRIORITY,sameStory } from '@/mvp/sourcing/story';
 import { LLMHttpError,QuotaExceededError } from '@/mvp/llm/types';
+import { DAILY_LIMIT,retryAfterMs } from '@/mvp/llm/groq';
+/** Longest a step waits for Groq's daily allowance before the search stops (seconds). */
+const DAILY_WAIT_MAX_S=60*60;
 import { tedSource } from '@/mvp/pipeline/sources/ted';
 import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@/mvp/sourcing/roundup';
 import { rateCandidates } from './shortlist';
@@ -314,6 +317,19 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
     const perMinute=!(error instanceof QuotaExceededError)&&(error instanceof LLMHttpError&&error.status===429||error instanceof Error&&/\b429\b|rate.?limit/i.test(error.message))
       &&!(error instanceof Error&&/per day|\b(?:TPD|RPD)\b|daily/i.test(error.message));
     if(perMinute&&job.stage==='analyse'&&job.attempts<4){await retryAfterRateLimit(db,job);return {processed:true,retrying:true};}
+    // Groq's daily limit (per model, over the last 24 hours): only this step waits until the model frees
+    // up; the rest of the search carries on. A wait over an hour ends the search with a plain reason.
+    const daily=error instanceof LLMHttpError&&error.status===429&&DAILY_LIMIT.test(error.message);
+    if(daily&&job.stage==='analyse'){
+      const wait=Math.ceil((retryAfterMs(error.message)??10*60_000)/1000)+15;
+      const at=new Date(Date.now()+wait*1000).toISOString().slice(11,16);
+      if(wait<=DAILY_WAIT_MAX_S&&job.attempts<8){
+        await retryAfterRateLimit(db,job,wait,`Groq's free daily AI limit is used up for now; this step waits until about ${at} UTC. Other steps carry on; you can Finish now to keep what is found.`);
+        return {processed:true,retrying:true};
+      }
+      await parkJob(db,job,`Groq's free daily AI limit is used up until about ${at} UTC. Resume after that, or use a paid AI plan`);return {processed:true,paused:true};
+    }
+    if(error instanceof QuotaExceededError&&job.stage==='analyse'){await parkJob(db,job,`${error.message} Resume after that`);return {processed:true,paused:true};}
     const quota=error instanceof Error&&/quota|rate.?limit|429|budget/i.test(error.message);
     if(quota&&job.stage==='analyse'){await parkJob(db,job,'AI provider quota/rate limit: saved research is retained.');return {processed:true,paused:true};}
     const message=error instanceof Error?error.message:'';

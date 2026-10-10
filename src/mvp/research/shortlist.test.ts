@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type Db } from "@/mvp/db";
 import type { LLMProvider } from "@/mvp/llm/types";
-import { consistentRating, consistentType, heuristicRating, parseRatings, rateCandidates, ratingPrompt, ruleRating } from "./shortlist";
+import { consistentRating, consistentReason, consistentType, heuristicRating, parseRatings, rateCandidates, ratingPrompt, ruleRating } from "./shortlist";
 import { listFoundCompanies } from "./found";
 
 describe("shortlist rating rules (docs/mvp/18 §5)", () => {
@@ -112,7 +112,7 @@ describe("rating a search's companies", () => {
     expect(found.find((f) => f.name === "Lubrex FZE")).toMatchObject({ rating: 4, relevant: false });
     expect(found.find((f) => f.name === "Hindustan Steel Corporation")).toMatchObject({ relevant: false });
     const jobs = (await db.query<{ company: string; priority: number }>(`select c.company, j.priority from research_jobs j join research_candidates c on j.key = 'official:' || c.id where j.run_id=$1 order by j.priority desc`, [run])).rows;
-    expect(jobs[0]).toEqual({ company: "KRR Engineering Pvt. Ltd.", priority: 782 });
+    expect(jobs[0]).toEqual({ company: "KRR Engineering Pvt. Ltd.", priority: 1182 }); // a likely buyer is checked before more list searches (1000)
     expect(jobs.slice(1).every((j) => j.priority === 5)).toBe(true);
     expect((await rateCandidates(db, run, { productId: "plates" }, () => provider)).rated).toHaveLength(0); // never rated twice
   });
@@ -219,5 +219,26 @@ describe("fixes from the per-company eval, round 2", () => {
   });
   it("tells the AI a client commissioning projects is a buyer", () => {
     expect(ratingPrompt("line-pipe", []).system).toMatch(/a client that commissions projects .* buys the material/);
+  });
+});
+
+describe("fixes from the live Saudi search, 10 Oct", () => {
+  const product = "stainless / duplex pipe";
+  it("rates an owner the AI called a competitor as a buyer when its own reason says it uses the material", () => {
+    const judged = { rating: 5, role: "Water utility", reason: "Commissioning water treatment projects, likely uses stainless/duplex pipe", buyerType: "competitor" as const };
+    const row = { company: "Saudi Water Authority", identity_quote: "Saudi Water Authority awarded the desalination contract" };
+    expect(consistentType(judged, row, product)).toBe("owner");
+    expect(consistentRating(judged, row, product)).toBe(50);
+  });
+  it("keeps a pipe maker a competitor and does not show the AI's 'likely to buy'", () => {
+    const judged = { rating: 70, role: "Pipe company", reason: "EPIC is the same entity as c11, likely to buy stainless/duplex pipe", buyerType: "end_user" as const };
+    const row = { company: "East Pipes Integrated Company for Industry (EPIC)", identity_quote: "East Pipes Integrated Company for Industry (EPIC)" };
+    expect(consistentType(judged, row, product)).toBe("competitor");
+    expect(consistentRating(judged, row, product)).toBe(5);
+    expect(consistentReason(judged, row, product)).toBe("Makes or sells stainless / duplex pipe: a competitor for it, not a buyer.");
+  });
+  it("keeps a real maker a competitor even when the AI's reason mentions use", () => {
+    const judged = { rating: 5, role: "Steel pipe manufacturer", reason: "Manufactures pipe; uses steel coil", buyerType: "competitor" as const };
+    expect(consistentType(judged, { company: "Example Tubes Co", identity_quote: "Example Tubes Co" }, product)).toBe("competitor");
   });
 });

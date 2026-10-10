@@ -177,7 +177,25 @@ export function consistentType(r: Judged, row: JudgedRow, productName: string, o
   if (noun && new RegExp(`\\b${noun}s?\\b`, 'i').test(row.company) && !/\b(?:fabricat\w*|construct\w*|contract\w*|install\w*|engineering|erect\w*)\b/i.test(row.company)) return 'competitor';
   if (r.buyerType === 'reseller' || (TRADER.test(r.role) && sellsMaterial(r, product))) return resellersOn(opts) ? 'reseller' : 'competitor';
   if (NOT_BUYER.test(r.reason) && r.buyerType !== 'competitor') return 'not_buyer';
+  // Typed a competitor while its own reason says it uses the material and nothing says it makes or sells
+  // it ("Saudi Water Authority … likely uses stainless/duplex pipe"): an owner or user, not a maker.
+  if (r.buyerType === 'competitor' && USES.test(r.reason) && !MAKES.test(r.reason) && !MAKER.test(r.role) && !TRADER.test(r.role))
+    return OWNER_NAME.test(`${row.company} ${r.role}`) ? 'owner' : 'end_user';
   return r.buyerType ?? null;
+}
+const USES = /\b(?:uses?|buys?|needs?|purchas\w*|procur\w*|consum\w*|commission\w*|requires?)\b/i;
+const MAKES = /\b(?:manufactur\w*|produc\w*|makes?|mills?|sells?|suppl(?:y|ies|ier))\b/i;
+const OWNER_NAME = /\b(?:authority|ministry|municipal\w*|utilit\w*|water|electricity|power|energy|oil|gas|petroleum|corporation)\b/i;
+/** True when the guards turned an AI "competitor" into a buyer: its own reason said it uses the material. */
+const competitorOverruled = (r: Judged, type: BuyerType | null) => r.buyerType === 'competitor' && (type === 'owner' || type === 'end_user');
+/**
+ * The reason shown with a rating, consistent with the type after the guards: a maker or seller of the
+ * product never shows the AI's "likely to buy" ("EPIC … likely to buy stainless/duplex pipe").
+ */
+export function consistentReason(r: Judged, row: JudgedRow, productName: string, opts: { resellers?: boolean } = {}): string {
+  const type = consistentType(r, row, productName, opts);
+  if (type === 'competitor' && r.buyerType !== 'competitor') return `Makes or sells ${productName}: a competitor for it, not a buyer.`;
+  return r.reason;
 }
 /**
  * Keep the number consistent with the words: a rating cannot say "Strong" while its own reason or role
@@ -189,6 +207,9 @@ export function consistentRating(r: Judged, row: JudgedRow, productName: string,
   const type = consistentType(r, row, productName, opts);
   if (type === 'not_buyer' && (projectName(row.company) || placeOnlyName(row.company))) return 0;
   if (type === 'competitor') return Math.min(r.rating, 5);
+  // The AI rated it as a competitor, but its own reason says it uses the material: rate it as a likely buyer
+  // (50, "Good"); the caps below still apply, and its website check decides.
+  if (competitorOverruled(r, type)) r = { ...r, rating: Math.max(r.rating, 50) };
   // A source line that is only the name ("Desert Mechanical LLC.") says nothing about the work.
   const plain = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   const own = (row.identity_quote ?? '').trim();
@@ -293,11 +314,20 @@ async function save(db: Queryable, r: RatedCompany) {
  */
 export async function prioritiseRated(db: Queryable, runId: string, rated: Pick<RatedCompany, 'id' | 'rating'>[]) {
   for (const r of rated) {
-    const priority = r.rating >= LOOKUP_FLOOR ? 700 + r.rating : 5;
+    const priority = verifyPriority(r.rating);
     await db.query(`update research_jobs set priority=$3 where run_id=$1 and state='queued'
-      and (key='official:'||$2 or (stage='read' and payload->'raw'->'research'->>'candidateId'=$2))`, [runId, r.id, priority]);
+      and (key='official:'||$2 or key='bundle:'||$2 or (stage='read' and payload->'raw'->'research'->>'candidateId'=$2))`, [runId, r.id, priority]);
   }
 }
+/** Rated likely buyers are verified first. */
+export const VERIFY_FIRST = 45;
+/**
+ * Priority of checking one company (find its website, read it, judge it). Likely buyers go ahead of further
+ * list searches (1000) and list reading (950), so a search verifies leads as it goes instead of spending
+ * its AI on more names first; below award triggers (2000).
+ */
+export const verifyPriority = (rating: number | null | undefined) =>
+  rating == null ? 30 : rating >= VERIFY_FIRST ? 1100 + rating : rating >= LOOKUP_FLOOR ? 700 + rating : 5;
 
 /** The rating context of a search from its stored input. */
 type SearchInput = Partial<Pick<RunInput, 'productId' | 'query' | 'includeResellers'>>;

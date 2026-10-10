@@ -70,6 +70,10 @@ describe('names that are not buyers',()=>{
     expect(officialSite('EXKR Engineering Pvt. Ltd.',[{url:'https://www.exkr.example/products/pressure-vessels'}])).toBeTruthy();
     expect(officialSite('E.X.K. Engineering Sdn. Bhd.',[{url:'https://exkengineering.example/'}])).toBeTruthy();
     expect(officialSite('Example Plantation Sdn Bhd',[{url:'https://exkengineering.example/clients'}])).toBeUndefined();
+    // The short name in brackets is the brand in the domain.
+    expect(officialSite('Saudi Arabian Oil Company (Aramco)',[{url:'https://en.wikipedia.org/wiki/Saudi_Aramco'},{url:'https://www.aramco.com/en'}])?.url).toBe('https://www.aramco.com/en');
+    expect(officialSite('East Pipes Integrated Company for Industry (EPIC)',[{url:'https://epic.com.sa/'}])).toBeTruthy();
+    expect(officialSite('Example Water Authority (Company)',[{url:'https://company.example/'}])).toBeUndefined();
   });
 });
 

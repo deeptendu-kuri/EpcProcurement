@@ -14,10 +14,10 @@ import { isDemoMode, mvpEnv } from "@/mvp/config/env";
 import type { Queryable } from "@/mvp/db";
 import type { LLMRole } from "@/mvp/types";
 import { createCloudflareProvider } from "./cloudflare";
-import { createGroqProvider } from "./groq";
+import { DAILY_LIMIT, createGroqProvider } from "./groq";
 import { createMockProvider } from "./mock";
 import { withQuota } from "./quota";
-import type { LLMProvider, ProviderName } from "./types";
+import { LLMHttpError, QuotaExceededError, type LLMProvider, type ProviderName } from "./types";
 
 export * from "./types";
 export { isDemoMode };
@@ -79,7 +79,19 @@ export function getLLM(role: LLMRole, db?: Queryable, groqModel?: string): LLMPr
   const name = providerFor(role);
   let provider: LLMProvider;
   if (name === "groq") {
-    provider = createGroqProvider(mvpEnv.groqApiKey()!, modelFor(role, "groq", groqModel));
+    const groq = withQuota(createGroqProvider(mvpEnv.groqApiKey()!, modelFor(role, "groq", groqModel)), role, db);
+    if (!hasCloudflare()) return groq;
+    // When every Groq model is out for the day, Cloudflare answers instead (recorded as Cloudflare usage).
+    // Answers are quote-checked against the original text whichever provider wrote them.
+    const cloudflare = withQuota(createCloudflareProvider(mvpEnv.cloudflareAccountId()!, mvpEnv.cloudflareApiToken()!, modelFor(role, "cloudflare")), role, db);
+    return { name: "groq", model: groq.model, async complete(request) {
+      try { return await groq.complete(request); }
+      catch (error) {
+        const dayOut = error instanceof QuotaExceededError || error instanceof LLMHttpError && error.status === 429 && DAILY_LIMIT.test(error.message);
+        if (!dayOut) throw error;
+        return cloudflare.complete(request);
+      }
+    } };
   } else if (name === "cloudflare") {
     provider = createCloudflareProvider(mvpEnv.cloudflareAccountId()!, mvpEnv.cloudflareApiToken()!, modelFor(role, "cloudflare"));
   } else {

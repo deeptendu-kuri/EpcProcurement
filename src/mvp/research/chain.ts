@@ -12,6 +12,8 @@ import { getCatalogueItem } from '@/mvp/config/buyers-config';
 import { hasSpec, parseMaterialSpec, specUses } from '@/mvp/discovery/spec';
 import { addJob } from './store';
 
+/** Quick search (no extra rounds, smallest budget): it checks what it found instead of following chains. */
+export const isQuickSearch = (input: Pick<RunInput, 'researchMode' | 'extraRounds'>) => input.extraRounds === 0 && (input.researchMode ?? 'preview') === 'preview';
 /** Contractors and owners followed per search. */
 export const CHAIN_TOP = 5;
 /** Only well-rated contractors and owners are followed. */
@@ -29,6 +31,8 @@ export function chainQuery(company: string, input: Pick<RunInput, 'productId' | 
 /** Queue one subcontractor search for each of the top contractors and owners not followed yet. Returns how many. */
 export async function planChainSearches(db: Db, runId: string, input: RunInput): Promise<number> {
   if (!process.env.TAVILY_API_KEY?.trim() || !input.productId) return 0;
+  // A Quick search keeps its web searches for checking the companies it found (their own websites).
+  if (isQuickSearch(input)) return 0;
   const top = (await db.query<{ id: string; company: string }>(`select c.id,c.company from research_candidates c
     where c.run_id=$1 and c.rating_buyer_type in ('contractor','owner') and c.rating>=$2
       and not exists(select 1 from research_jobs j where j.run_id=c.run_id and j.key='chain:'||c.id::text)

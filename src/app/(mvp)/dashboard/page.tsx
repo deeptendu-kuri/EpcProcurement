@@ -105,7 +105,7 @@ export default async function DashboardPage() {
   ].filter(Boolean);
   const steps: [string, number, string?][] = [["Companies found", pipeline.found], ["Verified leads", pipeline.verified, "own website or listed work"], ["Likely leads", pipeline.likely, "to verify"],
     ["Emailed", pipeline.emailed], ["Replied", pipeline.replied], ["Meetings", pipeline.meetings]];
-  const { used, limit } = data.allowance;
+  const ai = data.allowance;
 
   return <div className="flex flex-col gap-8">
     <LiveRefresh active={active.length > 0} />
@@ -166,11 +166,16 @@ export default async function DashboardPage() {
         </div>
         <aside className="flex flex-col gap-8">
           <section aria-labelledby="allowance" className="card p-5">
-            <h2 id="allowance" className="text-[15px] font-semibold">AI allowance today</h2>
-            {limit ? <>
-              <p className="mt-2 text-[26px] font-semibold tabular-nums">{compactTokens(Math.max(0, limit - used))} <span className="text-[14px] font-normal text-[var(--muted)]">tokens left</span></p>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--subtle)]" aria-hidden><div className={`h-full rounded-full ${used / limit > 0.8 ? "bg-[var(--warn)]" : "bg-[var(--accent)]"}`} style={{ width: `${Math.min(100, Math.round((used / limit) * 100))}%` }} /></div>
-              <p className="mt-2 text-[12.5px] text-[var(--muted)]">{compactTokens(used)} of {compactTokens(limit)} used. A Quick search uses up to 60k. Resets at 00:00 UTC.</p>
+            <h2 id="allowance" className="text-[15px] font-semibold">AI allowance (last 24 hours)</h2>
+            {ai.models.length ? <>
+              <p className="mt-2 text-[26px] font-semibold tabular-nums">{compactTokens(ai.left)} <span className="text-[14px] font-normal text-[var(--muted)]">tokens left</span></p>
+              <ul className="mt-3 space-y-2.5">{ai.models.map((m) => (
+                <li key={m.model} className="text-[12.5px]">
+                  <div className="flex justify-between gap-2"><span className="text-[var(--text-2)]">{m.model.replace(/^(openai|qwen)\//, "")}</span>
+                    <span className="tabular-nums text-[var(--muted)]">{m.blockedUntil ? `out until ${m.blockedUntil.slice(11, 16)} UTC` : `${compactTokens(m.left)} left`}</span></div>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--subtle)]" aria-hidden><div className={`h-full rounded-full ${m.blockedUntil || m.used / m.limit > 0.8 ? "bg-[var(--warn)]" : "bg-[var(--accent)]"}`} style={{ width: `${m.blockedUntil ? 100 : Math.min(100, Math.round((m.used / m.limit) * 100))}%` }} /></div>
+                </li>))}</ul>
+              <p className="mt-3 text-[12.5px] text-[var(--muted)]">Groq gives each model {compactTokens(ai.models[0].limit)} tokens over any 24 hours; when one runs out the next is used. A Quick search uses up to 60k.{ai.left < 60_000 ? " Not enough left for a full Quick search now." : ""}</p>
             </> : <p className="mt-2 text-[13px] text-[var(--muted)]">No daily limit on this server.</p>}
           </section>
           <section aria-labelledby="meetings" className="flex flex-col gap-3">

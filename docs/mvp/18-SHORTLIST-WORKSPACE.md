@@ -100,3 +100,19 @@ Automatic email now also enrols the verified leads of a paused search; likely-on
 
 **Dashboard:** overview numbers (companies found, verified, likely, emailed, replied, meetings), cards for searches running or paused with their controls, Today (now with paused searches and likely leads to verify), best new leads this week, the day's AI allowance, meetings, and every search in a filterable table, 8 a page, with Open, Run again and Leads.
 
+
+## 7. Demo readiness fixes (10 Oct, after a live Saudi test)
+
+A live Quick search ("Welded Stainless Steel Pipes", Saudi Arabia) paused correctly but ended with 42 likely leads and none verified, because Groq's free daily limit (200k tokens per model over 24 hours) was reached and one refusal stopped the whole search. Fixes:
+
+| Issue | Fix |
+|---|---|
+| One AI refusal ended the search | A daily-limit refusal makes only that step wait until the model frees up (up to an hour), with the time shown; the rest of the search carries on. Longer waits stop the search with a plain reason. |
+| Models fell back to each other and ran out together | Groq models are tried in turn (gpt-oss-120b → gpt-oss-20b → qwen3.8-27b); a model Groq refused is remembered and not asked again until it frees up. Cloudflare is the last fallback once its keys are set (not set today). Usage is recorded for the model that answered. |
+| "Tokens left" counted both models per calendar day | Per model, over the last 24 hours, as Groq counts it, on the Dashboard; Find buyers warns when a search size needs more than is left. The default Groq guard (LLM_DAILY_TOKEN_BUDGET__GROQ) now covers all three models (600k). |
+| Checking a company's website came after reading more lists | Likely buyers (rated 45+) are looked up, read and judged before further list searches (priority 1100 + rating); a check the user asks for runs first (2500). Quick searches skip supply-chain following and keep their searches for checking. |
+| Verify restarted a paused search | A paused search runs only the steps of companies the user asked to check, and stays paused. |
+| Well-known companies had no website ("Saudi Arabian Oil Company (Aramco)") | The short name in brackets is matched against domains. |
+| An owner rated as a competitor while its reason said it uses the material | Rated as an owner (or user) at 50; a maker or seller never shows the AI's "likely to buy". |
+| "Pause after 1" paused at 3 without saying why | The message says one rating pass saved several at once. |
+| Dashboard and Leads counted likely leads differently | Both count companies. |

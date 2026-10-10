@@ -36,6 +36,13 @@ describe("bounded material research form",()=>{
     await screen.findByRole("alert");
     expect(api).toHaveBeenCalledWith("/api/mvp/runs",expect.objectContaining({body:expect.objectContaining({researchMode:"preview",extraRounds:0,targetCompanies:10,pauseAfter:12})}));
   });
+  it("warns when the free AI allowance cannot cover the chosen search size",()=>{
+    render(<FindForm {...props} aiLeft={40_000}/>);
+    expect(screen.getByRole("alert").textContent).toMatch(/about 40k tokens\. A Quick search needs up to 60k/);
+    cleanup();render(<FindForm {...props} aiLeft={300_000}/>);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText(/Free AI left \(last 24 hours\): about 300k tokens\./)).toBeTruthy();
+  });
   it("rejects invalid targets before submitting a paid research request",()=>{
     render(<FindForm {...props}/>);fireEvent.change(screen.getByLabelText("What do you supply?"),{target:{value:"cables"}});
     fireEvent.click(screen.getByRole("radio",{name:/^Deep/}));

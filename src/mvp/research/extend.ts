@@ -116,7 +116,7 @@ export async function extendResearchIfShort(db: Db, runId: string): Promise<bool
  * Release this job's unfinished AI reservations and try it again after a pause instead of ending the
  * search. Daily quota errors still stop the search as before.
  */
-export async function retryAfterRateLimit(db: Db, job: { id: string; run_id: string; lease_token: string | null; payload: Record<string, unknown> }, delaySeconds = 70) {
+export async function retryAfterRateLimit(db: Db, job: { id: string; run_id: string; lease_token: string | null; payload: Record<string, unknown> }, delaySeconds = 70, message?: string) {
   const documentId = typeof job.payload.documentId === 'string' ? job.payload.documentId : '';
   const candidateId = typeof job.payload.candidateId === 'string' ? job.payload.candidateId : '';
   await db.tx(async (tx) => {
@@ -125,5 +125,5 @@ export async function retryAfterRateLimit(db: Db, job: { id: string; run_id: str
     await tx.query(`update research_jobs set state='queued',lease_token=null,lease_until=null,available_at=now()+make_interval(secs=>$3),updated_at=now()
       where id=$1 and lease_token=$2`, [job.id, job.lease_token, delaySeconds]);
   });
-  await researchProgress(db, job.run_id, 'info', `AI provider is busy (per-minute limit); this step retries in about ${delaySeconds} seconds.`);
+  await researchProgress(db, job.run_id, 'info', message ?? `AI provider is busy (per-minute limit); this step retries in about ${delaySeconds} seconds.`);
 }

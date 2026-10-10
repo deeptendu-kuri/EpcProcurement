@@ -12,7 +12,7 @@ import { researchAiAllowance, type ExtendableBudget } from './extend';
 import { looksLikeSupplier, relevantFound } from '@/mvp/sourcing/names';
 import { getCatalogueItem } from '@/mvp/config/buyers-config';
 import { getLLM } from '@/mvp/llm';
-import { consistentRating, consistentType, rateCandidates, ruleRating, type BuyerType, type MatchStrength } from './shortlist';
+import { consistentRating, consistentReason, consistentType, rateCandidates, ruleRating, type BuyerType, type MatchStrength } from './shortlist';
 
 export type FoundStatus = 'saved' | 'checking' | 'not_checked' | 'no_website' | 'no_match' | 'unreadable';
 export interface FoundCompany {
@@ -125,7 +125,7 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
       // A rated company is relevant unless the rating says it is not a buyer.
       relevant: Boolean(opportunityId) || (rating !== null ? rating >= 10 : relevantFound(r.company, r.identity_quote, r.domain_hint, false, r.title) && !looksLikeSupplier(r.identity_quote)),
       likelyRole: likelyRole(r.company, r.identity_quote),
-      rating, ratingRole: r.rating_role, ratingReason: r.rating_reason,
+      rating, ratingRole: r.rating_role, ratingReason: r.rating_source === 'ai' && r.rating !== null ? consistentReason(judged, row, productName, opts) : r.rating_reason,
       alsoBuys: (r.rating_also ?? []).map((id) => getCatalogueItem(id)?.shortName ?? id),
       guessed: r.rating_source === 'rules' && !ruleRating(r.company, r.identity_quote, productName, opts),
       buyerType: opportunityId && (!buyerType || buyerType === 'not_buyer') ? null : buyerType, match: r.rating_match, worksUnder: r.works_under, verification: how });
@@ -136,9 +136,10 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
 
 interface Candidate { id: string; company: string; domain_hint: string | null; document_ids: string[]; state: string; reason: string | null }
 /** Queue the next real step for one company: analyse read pages, read its website, or find its website. */
-export async function queueCandidateCheck(tx: Queryable, runId: string, c: Candidate, budget: { maxPages: number }): Promise<boolean> {
+export async function queueCandidateCheck(tx: Queryable, runId: string, c: Candidate, budget: { maxPages: number }, priority?: number): Promise<boolean> {
+  // `priority` puts a check the user asked for ahead of everything else ("Verify", "Check now").
   const requeue = async (where: string, params: unknown[]) => (await tx.query(`update research_jobs set state='queued',result=null,error=null,attempts=0,
-      lease_token=null,lease_until=null,available_at=now(),updated_at=now() where run_id=$1 and state in ('done','paused','failed') and ${where} returning id`, [runId, ...params])).rows.length > 0;
+      lease_token=null,lease_until=null,available_at=now(),updated_at=now(),priority=coalesce($${params.length + 2}::int,priority) where run_id=$1 and state in ('done','paused','failed') and ${where} returning id`, [runId, ...params, priority ?? null])).rows.length > 0;
   let queued = false;
   if (!c.document_ids.length && c.domain_hint) {
     // Its looked-up site was already read and gave no company page: drop that guess and search again.
@@ -146,14 +147,14 @@ export async function queueCandidateCheck(tx: Queryable, runId: string, c: Candi
     if (read) { await tx.query('update research_candidates set domain_hint=null where id=$1', [c.id]); c = { ...c, domain_hint: null }; }
   }
   if (c.document_ids.length) {
-    queued = Boolean(await addJob(tx, runId, 'analyse', `bundle:${c.id}`, { candidateId: c.id }, 30))
+    queued = Boolean(await addJob(tx, runId, 'analyse', `bundle:${c.id}`, { candidateId: c.id }, priority ?? 30))
       || await requeue(`stage='analyse' and key=$2 and (result ? 'skipped' or state<>'done')`, [`bundle:${c.id}`]);
   } else if (c.domain_hint) {
     const raw: RawDoc = { sourceKey: 'company-investigation', sourceName: c.company, tier: 'B', url: `https://${c.domain_hint}/`, title: null, publishedAt: null, text: null, isSample: false,
       research: { lane: 'investigation', candidateId: c.id, sourcingLane: 'roundup' } };
-    queued = await requeue(`stage='read' and key=$2 and (result ? 'skipped' or state<>'done')`, [raw.url]) || await queueRead(tx, runId, raw, budget, 46);
+    queued = await requeue(`stage='read' and key=$2 and (result ? 'skipped' or state<>'done')`, [raw.url]) || await queueRead(tx, runId, raw, budget, priority ?? 46);
   } else {
-    queued = Boolean(await addJob(tx, runId, 'collect', `official:${c.id}`, { source: 'roundup-website', candidateId: c.id, sourcingLane: 'roundup' }, 760))
+    queued = Boolean(await addJob(tx, runId, 'collect', `official:${c.id}`, { source: 'roundup-website', candidateId: c.id, sourcingLane: 'roundup' }, priority ?? 760))
       // A repeated lookup reuses the cached search results, so it costs no new search credit.
       || await requeue(`stage='collect' and key=$2`, [`official:${c.id}`]);
   }
@@ -170,29 +171,36 @@ export async function requeueDeferredCandidates(db: Db, runId: string, budget: {
   return queued;
 }
 
+/** A check the user asked for runs before everything else in the search. */
+export const MANUAL_CHECK_PRIORITY = 2500;
 /** "Check now" for one listed company: a small extra allowance, then the normal evidence checks. */
 export async function checkFoundCompany(db: Db, runId: string, candidateId: string): Promise<{ queued: boolean; message: string }> {
   const c = (await db.query<Candidate>('select id,company,domain_hint,document_ids,state,reason from research_candidates where id=$1 and run_id=$2', [candidateId, runId])).rows[0];
   if (!c) throw new Error('Company not found in this search.');
   const allowance = await researchAiAllowance(db);
   if (allowance < 8_000) return { queued: false, message: "Today's AI allowance is kept for email replies. Try again tomorrow." };
+  let paused = false;
   const queued = await db.tx(async (tx) => {
-    const session = (await tx.query<{ budget: ExtendableBudget }>('select budget from research_sessions where run_id=$1 for update', [runId])).rows[0];
+    const session = (await tx.query<{ budget: ExtendableBudget & { manualChecks?: string[] }; state: string }>('select budget,state from research_sessions where run_id=$1 for update', [runId])).rows[0];
     if (!session) throw new Error('This search has no saved research to continue.');
+    paused = session.state === 'paused';
     const deep = MODE_BUDGETS.deep, b = session.budget;
     // Room for this company's own website search, a few pages and one AI analysis.
+    // manualChecks: companies the user asked to check; a paused search runs only their steps (claimJob).
     const next = { ...b, searchQueries: Math.min(deep.searchQueries, b.searchQueries + 1), maxPages: Math.min(deep.maxPages, b.maxPages + 4),
-      maxAiPages: Math.min(deep.maxAiPages, b.maxAiPages + 1), maxAiTokens: Math.min(deep.maxAiTokens, b.maxAiTokens + Math.min(15_000, allowance)) };
+      maxAiPages: Math.min(deep.maxAiPages, b.maxAiPages + 1), maxAiTokens: Math.min(deep.maxAiTokens, b.maxAiTokens + Math.min(15_000, allowance)),
+      manualChecks: [...new Set([...(b.manualChecks ?? []), c.id])] };
     await tx.query('update research_sessions set budget=$2::jsonb where run_id=$1', [runId, JSON.stringify(next)]);
-    const ok = await queueCandidateCheck(tx, runId, c, next);
-    if (ok) {
+    const ok = await queueCandidateCheck(tx, runId, c, next, MANUAL_CHECK_PRIORITY);
+    // A paused search stays paused: only this company is checked.
+    if (ok && !paused) {
       await tx.query("update research_sessions set state='active',stop_reason=null,updated_at=now() where run_id=$1 and state<>'cancelled'", [runId]);
       await tx.query("update runs set status='running',finished_at=null where id=$1 and status in ('done','failed')", [runId]);
     }
     return ok;
   });
-  if (queued) await researchProgress(db, runId, 'info', `Checking ${c.company}: website, work and contacts. It is not a buyer until its own pages show matching work.`);
-  return { queued, message: queued ? `Checking ${c.company}. Results appear here and in the tables when done.` : `${c.company} was already checked; see its status.` };
+  if (queued) await researchProgress(db, runId, 'info', `Checking ${c.company}: website, work and contacts.${paused ? ' The search stays paused.' : ''} It is not a buyer until its own pages show matching work.`);
+  return { queued, message: queued ? `Checking ${c.company}${paused ? ' while the search stays paused' : ''}. Results appear here and in the tables when done.` : `${c.company} was already checked; see its status.` };
 }
 
 /** "Check next 5": the same per-company check for several listed companies, stopping if the AI allowance runs out. */

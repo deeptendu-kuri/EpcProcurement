@@ -14,6 +14,8 @@ import {funnelStatus} from '@/mvp/automation/config';
 import {AutomationReadiness} from '@/components/mvp/outreach/automation-readiness';
 import { SearchLiveWorkspace } from "@/components/mvp/research/search-live-workspace";
 import { searchWorkspace } from "@/mvp/research/workspace";
+import { aiAllowance } from "@/mvp/llm/quota";
+import { groqBlockedModels } from "@/mvp/llm/groq";
 
 interface FindPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -46,6 +48,8 @@ export default async function FindPage({ searchParams }: FindPageProps) {
   }
   const [saved, selectedRun,automation] = await Promise.all([listSavedSearches(), runParam ?? againParam ? getRun((runParam ?? againParam)!) : Promise.resolve(null),funnelStatus()]);
   const suggestions = catalogueOptions().slice(0, 8).map(product => product.name);
+  // Warn before a search starts if the free AI allowance cannot cover it (Groq counts the last 24 hours, per model).
+  const ai = await aiAllowance(undefined, groqBlockedModels()).catch(() => null);
 
   return (
     <div className="flex flex-col gap-5">
@@ -59,6 +63,7 @@ export default async function FindPage({ searchParams }: FindPageProps) {
         initialRunId={runParam}
         initialTicketId={ticketParam}
         initialInput={selectedRun?.adhoc_query ?? null}
+        aiLeft={ai?.groq ? ai.left : null}
       />
       <details className="card p-4"><summary className="cursor-pointer text-sm font-semibold">Scheduled searches ({saved.length})</summary><div className="mt-4"><SavedSearchesList searches={saved} /></div></details>
       <Link href="/dashboard" className="self-start text-sm text-[var(--muted)] underline">See all your searches on the Dashboard</Link>

@@ -22,6 +22,8 @@ export interface LLMResponse {
   text: string;
   tokensIn: number;
   tokensOut: number;
+  /** The model that answered, when it differs from the one asked for (a daily-limit fallback). */
+  model?: string;
 }
 
 export type ProviderName = "groq" | "cloudflare" | "mock";

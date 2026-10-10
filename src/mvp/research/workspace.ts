@@ -72,7 +72,7 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
   if (!run) return null;
   const input = run.adhoc_query;
   const open = run.status === 'running' || run.status === 'queued';
-  const [usage, companies, events, buyers, perCountry, session, leads] = await Promise.all([
+  const [usage, companies, events, buyers, perCountry, session, leads, queue] = await Promise.all([
     runUsage(db, [runId]).then((m) => m.get(runId)),
     listFoundCompanies(db, runId).catch(() => [] as FoundCompany[]),
     db.query<{ id: number; ts: string; stage: string; message: string }>(`select id,ts::text,stage,message from run_events where run_id=$1 order by id desc limit 30`, [runId]).then((r) => r.rows),
@@ -86,6 +86,10 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
       from research_jobs where run_id=$1 and stage='collect' and coalesce(payload->>'market',payload->'query'->>'market') is not null group by 1`, [runId]).then((r) => r.rows),
     db.query<{ state: string }>('select state from research_sessions where run_id=$1', [runId]).then((r) => r.rows[0] ?? null),
     db.query<{ n: number }>("select count(*)::int as n from search_opportunities where run_id=$1 and qualification<>'rejected'", [runId]).then((r) => r.rows[0].n),
+    // Steps waiting for a later time (an AI limit): nothing runs and nothing is due yet.
+    db.query<{ running: number; due: number; next: string | null }>(`select count(*) filter (where state='running')::int as running,
+      count(*) filter (where state='queued' and available_at<=now())::int as due, min(available_at) filter (where state='queued')::text as next
+      from research_jobs where run_id=$1`, [runId]).then((r) => r.rows[0]),
   ]);
   const paused = open && session?.state === 'paused';
   const running = open && !paused;
@@ -96,7 +100,9 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
     run: { id: run.id, query: input?.query ?? 'Search', productId: input?.productId ?? null, product: input?.productId ? getCatalogueItem(input.productId)?.shortName ?? null : null,
       markets: input?.markets ?? [], status: run.status, statusText: runStatusText(run.status, counters), createdAt: run.created_at, finishedAt: run.finished_at,
       error: run.error, stopReason: counters.researchStopReason ?? null },
-    phase: paused ? 'Paused' : running ? (latestStage ? PHASES[latestStage] : 'Starting') : run.status === 'done' ? 'Finished' : 'Stopped',
+    phase: paused ? 'Paused' : running && !queue.running && !queue.due && queue.next && Date.parse(queue.next) > now.getTime()
+      ? `Waiting for AI allowance until about ${new Date(queue.next).toISOString().slice(11, 16)} UTC`
+      : running ? (latestStage ? PHASES[latestStage] : 'Starting') : run.status === 'done' ? 'Finished' : 'Stopped',
     running,
     paused,
     pauseAfter: input?.pauseAfter ?? null,

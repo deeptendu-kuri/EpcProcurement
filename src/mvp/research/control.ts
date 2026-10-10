@@ -72,5 +72,7 @@ export async function autoPauseIfDue(db: Db, runId: string): Promise<boolean> {
   const saved = await leadsSaved(db, runId);
   if (saved < wanted) return false;
   await db.query(`update research_sessions set budget=budget||'{"autoPaused":true}'::jsonb where run_id=$1`, [runId]);
-  return pauseResearchRun(db, runId, `Paused at ${saved} leads, as you asked. Review them, then resume or finish.`);
+  // One rating pass can save several leads at once, so the count may pass the number asked for.
+  const asked = saved > wanted ? ` (you asked for ${wanted}; one rating pass saved several at once)` : ', as you asked';
+  return pauseResearchRun(db, runId, `Paused at ${saved} leads${asked}. Review them, then resume or finish.`);
 }
