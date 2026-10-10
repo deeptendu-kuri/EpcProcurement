@@ -51,6 +51,18 @@ describe("Leads table columns (docs/mvp/18 §2)", () => {
     expect(button.disabled).toBe(true);
     expect(button.title).toBe("No saved opportunity for this search yet");
   });
+  it("shows a work-based search's proof as bullets: their work and why it needs the item (docs/mvp/20)", () => {
+    show([{ ...row, need: { work: "KPIL received a Letter of Award for the EPC of a gas pipeline project in the UAE.", why: "A gas pipeline is built from line pipe." } }]);
+    const bullets = within(screen.getByTestId("need-bullets")).getAllByRole("listitem").map((li) => li.textContent);
+    expect(bullets).toEqual(["Their work: KPIL received a Letter of Award for the EPC of a gas pipeline project in the UAE.", "Why: A gas pipeline is built from line pipe."]);
+    expect(screen.queryByText("Won a gas pipeline contract")).toBeNull();
+  });
+  it("reads the need proof out of a work-based search's reason", async () => {
+    const { needOf } = await import("@/mvp/buyers");
+    expect(needOf("KPIL received a Letter of Award. Why it needs Line pipe (API 5L): A gas pipeline is built from line pipe."))
+      .toEqual({ work: "KPIL received a Letter of Award.", why: "A gas pipeline is built from line pipe." });
+    expect(needOf("Won a contract. Potential need: Station valves")).toBeNull();
+  });
   it("turns the 0–100 fit into a word", () => {
     expect([80, 50, 20, 0].map((n) => ratingWord(n).word)).toEqual(["Strong", "Good", "Possible", "Not rated"]);
   });

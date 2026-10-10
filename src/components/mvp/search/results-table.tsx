@@ -213,7 +213,13 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                 <td className={TD}>
                   {product ? <div className="font-semibold text-[var(--text)]">{product}</div> : <div className="text-[var(--muted)]">Nothing matched yet</div>}
                   {fitNote ? <div className={`mt-0.5 text-[12.5px] font-medium ${row.verification === "rating" ? "text-[var(--warn)]" : "text-[var(--accent)]"}`}>{fitNote}</div> : null}
-                  {row.buyingReason ? <p className="mt-1 line-clamp-2 text-[13px] text-[var(--text-2)]" title={row.buyingReason}>{row.buyingReason}</p>
+                  {row.need ? (
+                    // docs/mvp/20: the need check's proof, as two short bullets.
+                    <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[13px] text-[var(--text-2)]" data-testid="need-bullets">
+                      <li className="line-clamp-2" title={row.need.work}><b className="font-semibold text-[var(--text)]">Their work:</b> {row.need.work}</li>
+                      {row.need.why ? <li className="line-clamp-2" title={row.need.why}><b className="font-semibold text-[var(--text)]">Why:</b> {row.need.why}</li> : null}
+                    </ul>
+                  ) : row.buyingReason ? <p className="mt-1 line-clamp-2 text-[13px] text-[var(--text-2)]" title={row.buyingReason}>{row.buyingReason}</p>
                     : <p className="mt-1 text-[13px] text-[var(--muted)]">{tier > 1 ? "In the supply chain of this deal" : "Reason not known yet"}</p>}
                   {moreDeals ? <div className="mt-1 text-[12px] font-semibold text-[var(--text-2)]">+{moreDeals} more {moreDeals === 1 ? "deal" : "deals"}</div> : null}
                   {row.competitorNote ? (

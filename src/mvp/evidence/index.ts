@@ -9,6 +9,7 @@ import {sentenceFor} from '@/mvp/buyers/load';
 import {buildTeam} from '@/mvp/buyers/team';
 import {applicationSentence} from '@/mvp/discovery/application';
 import type {EvidenceDrawerView,SourceCard,LeadRow,Trigger} from '@/mvp/buyers/types';
+import {needCard} from './need-card';
 
 interface SourceSql {id:string;document_id:string;quote:string;text:string;url:string;title:string|null;published_at:string|null;source_key:string;fields:string[];}
 type Proves=SourceCard['quotes'][number]['proves'];
@@ -132,7 +133,13 @@ async function withLeadContext(db:Queryable,view:EvidenceDrawerView,companyId:st
   const level=opp?.verification==='listing'?'listing':opp?.verification==='rating'?'likely':'verified';
   const rated=await ratingFor(db,opp).catch(()=>null);
   const recent=(await triggersForCompany(db,companyId,run!=='all'?run:undefined)).sort(newestFirst);
-  return {...view,proof:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent};
+  return {...view,proof:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent,need:await needFor(db,opp?.run_id??(run!=='all'?run:null),view.header.name)};
+}
+/** docs/mvp/20: the "Why they are a buyer" card, when the lead's search was a work-based search. */
+async function needFor(db:Queryable,runId:string|null,company:string){
+  if(!runId)return null;
+  const brief=(await db.query<{brief:{item?:string}|null}>("select adhoc_query->'brief' as brief from runs where id=$1",[runId])).rows[0]?.brief;
+  return brief?.item?needCard(db,runId,company,brief.item).catch(()=>null):null;
 }
 /**
  * A lead saved from the shortlist (docs/mvp/19 §6): no checked quote yet, so the panel shows why the search
@@ -160,5 +167,5 @@ async function likelyLeadView(db:Queryable,companyId:string,run:string):Promise<
   const header:LeadRow={opportunityId:opp.id,companyId,name:opp.name,whatTheyDo:rated?.rating.role??'',trigger:strongestTrigger(triggers),operatingCountry:opp.country,hqCountry:null,
     sellSummary:opp.product_name,fitScore:Math.max(Number(opp.fit_score)||0,rated?.rating.score??0),howSure:'low',stage:'check',contactsFound:0,contactsTotal:team.length,sourceCount:sources.length,status:'likely',isSample:false};
   return {header,why:rated?.rating.reason??opp.buying_reason,application:null,sources,related:{above:[],below:[]},contacts:team,activity:notes,
-    proof:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent:triggers};
+    proof:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent:triggers,need:await needFor(db,opp.run_id,opp.name)};
 }

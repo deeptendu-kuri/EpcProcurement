@@ -10,6 +10,7 @@
 import { z } from 'zod';
 import type { Db, Queryable } from '@/mvp/db';
 import type { LLMProvider } from '@/mvp/llm/types';
+import type { SearchBrief } from '@/mvp/discovery/brief';
 import type { RunInput } from '@/mvp/types';
 import { getCatalogue, getCatalogueItem } from '@/mvp/config/buyers-config';
 import { whoBuys } from '@/mvp/discovery/material-catalogue';
@@ -43,7 +44,9 @@ export interface RatedCompany {
 }
 export interface RateRow { id: string; company: string; identity_quote: string | null; title: string | null }
 /** What is being rated for: the product, the words typed (for the exact variant) and whether resellers count. */
-export interface RateContext { productId: string; query?: string; resellers?: boolean; /** Searched country codes. */ markets?: string[] }
+export interface RateContext { productId: string; query?: string; resellers?: boolean; /** Searched country codes. */ markets?: string[];
+  /** docs/mvp/20: the work that buys the item; a company whose own work is none of it is not a lead. */
+  brief?: SearchBrief }
 type Row = RateRow;
 
 const clip = (s: string | null | undefined, n: number) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -115,7 +118,7 @@ export function heuristicRating(name: string, quote: string | null, _title: stri
 
 const answer = z.object({ companies: z.array(z.object({
   id: z.string(), rating: z.coerce.number(), role: z.string().default(''), reason: z.string().default(''), also: z.array(z.string()).default([]),
-  type: z.string().optional(), match: z.string().optional(),
+  type: z.string().optional(), match: z.string().optional(), use: z.string().nullable().optional(),
 })) });
 
 /** The AI prompt: judge buying likelihood and buyer type only from the given words; never invent. */
@@ -150,10 +153,12 @@ export function ratingPrompt(productId: string, rows: Row[], ctx: Omit<RateConte
       '- a company named only because it signed an MoU, cooperation or study with another company is a weak lead (at most 40);',
       '- a project, field, plant or facility name is not a company ("Rabigh 4 IWP", "Ras Al-Khair", an airport): rate 0, type not_buyer;',
       ...(ctx.markets?.length ? [`- the supplier sells in ${ctx.markets.map(countryNameOf).join(', ')}: a company that clearly works only in other countries is rated at most 30, and its reason says "Outside the searched countries";`] : []),
+      ...(ctx.brief?.source === 'ai' ? [`- this item is bought for this work: ${ctx.brief.uses.map((u) => `${u.name} (${u.why})`).join('; ')}${ctx.brief.mustHave.length ? `; it must meet: ${ctx.brief.mustHave.join(', ')}` : ''}. Not buyers: ${ctx.brief.notBuyers.join('; ') || 'none listed'}.`,
+        '- "use": the name of the work above that this company itself does, or null. A company whose own work is none of it is rated at most 30 ("Not this work"), however close it looks;'] : []),
       'Rate above 75 only when the company\'s own sentence, or well-known facts about the company, show work that uses the material. Do not invent projects, sizes or facts.',
       'Ratings: 70-100 clearly uses this material; 45-69 plausible; 10-44 weak or unclear; 0-9 not a buyer.',
       `"role": a short plain description such as "Pressure vessel fabricator" or "Pipeline EPC contractor". "reason": one short sentence saying why they would buy ${name}, or why not. "also": ids from the catalogue list of other products they would likely buy (at most 4).`,
-      'Answer JSON only: {"companies":[{"id","rating","type","match","role","reason","also"}]} with one entry per input company.',
+      `Answer JSON only: {"companies":[{"id","rating","type","match",${ctx.brief?.source === 'ai' ? '"use",' : ''}"role","reason","also"}]} with one entry per input company.`,
     ].join('\n'),
     user: JSON.stringify({ product: brief, catalogue: others, companies: rows.map((r, i) => ({ id: `c${i + 1}`, name: clip(r.company, 120), said: clip(r.identity_quote, 240), page: clip(r.title, 110) })) }),
   };
@@ -312,7 +317,7 @@ const isBareRow = (row: Pick<Row, 'company' | 'identity_quote'>) => {
   return (!row.identity_quote?.trim() || plain(row.identity_quote) === plain(row.company)) && !WORK_WORD.test(row.company);
 };
 /** Parse and bound the AI answer; unknown ids, types and catalogue ids are dropped. */
-export function parseRatings(text: string, rows: Row[], productId: string, opts: { resellers?: boolean } = {}): RatedCompany[] {
+export function parseRatings(text: string, rows: Row[], productId: string, opts: { resellers?: boolean; brief?: SearchBrief } = {}): RatedCompany[] {
   const parsed = answer.safeParse(JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)));
   if (!parsed.success) throw new Error('Rating answer was not in the expected form.');
   const ids = new Set(getCatalogue().items.map((i) => i.id));
@@ -331,6 +336,12 @@ export function parseRatings(text: string, rows: Row[], productId: string, opts:
       return other && isBareRow(other) && clip(o.reason, 220).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '') === plainReason;
     }).length >= 3;
     const judged = { rating: Math.max(0, Math.min(100, Math.round(c.rating))), role: clip(c.role, 60) || 'Not clear yet', reason: `${echoed ? PAGE_CONTEXT : ''}${clip(c.reason, 220)}`, buyerType: typed };
+    // docs/mvp/20: in a work-based search a company whose own work is none of the brief's is not a lead; the cap
+    // is kept in the stored (raw) rating so the read-time checks keep it too.
+    if (opts.brief?.source === 'ai' && !opts.brief.uses.some((u) => u.name === (c.use ?? '').trim())) {
+      judged.rating = Math.min(judged.rating, 30);
+      if (!/^Not this work/.test(judged.reason)) judged.reason = `Not this work: ${judged.reason}`.slice(0, 240);
+    }
     const raw = judged.rating;
     const rating = consistentRating(judged, row, productName, opts);
     const buyerType = consistentType(judged, row, productName, opts);
@@ -419,9 +430,9 @@ export const verifyPriority = (rating: number | null | undefined, type?: BuyerTy
   : rating == null ? 30 : rating >= VERIFY_FIRST ? 1100 + rating : rating >= LOOKUP_FLOOR ? 700 + rating : 5;
 
 /** The rating context of a search from its stored input. */
-type SearchInput = Partial<Pick<RunInput, 'productId' | 'query' | 'includeResellers' | 'markets'>>;
+type SearchInput = Partial<Pick<RunInput, 'productId' | 'query' | 'includeResellers' | 'markets' | 'brief'>>;
 export const rateContext = (input: SearchInput): RateContext =>
-  ({ productId: input.productId!, query: input.query, resellers: input.includeResellers !== false, markets: input.markets });
+  ({ productId: input.productId!, query: input.query, resellers: input.includeResellers !== false, markets: input.markets, ...(input.brief?.source === 'ai' ? { brief: input.brief } : {}) });
 
 /**
  * Rate up to `limit` unrated companies of a search and save the ratings. With an AI provider, plain-rule

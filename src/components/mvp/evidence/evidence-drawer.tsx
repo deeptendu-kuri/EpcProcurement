@@ -12,6 +12,7 @@ import {AddContactModal} from '../buyers/add-contact-modal';
 import {addContact} from '../buyers/chain-api';
 import {SourceCards} from './source-card';
 import {LeadIntelligenceSummary} from './lead-intelligence-summary';
+import {NeedProof} from './need-proof';
 
 const capitalise=(text:string)=>text.charAt(0).toUpperCase()+text.slice(1);
 const PROOF_LABEL={verified:'Verified',listing:'Its listed work',likely:'Likely buyer, not verified'} as const;
@@ -77,6 +78,7 @@ export function EvidenceDrawer({target,onClose,onTarget,onNext,onPrevious,return
     {view?<div className="space-y-6 p-5"><header><h3 className="text-xl font-bold">{view.header.name}</h3><p className="mt-1 text-sm text-[var(--muted)]">{view.header.whatTheyDo}{view.header.operatingCountry?` · Work in ${marketName(view.header.operatingCountry)}`:''}</p><div className="mt-3 flex flex-wrap gap-2">{view.header.trigger?<span className="pill">{triggerKindLabel(view.header.trigger.kind)}</span>:null}{view.header.trigger?.date?<span className="pill">{view.header.trigger.date}</span>:null}<span className="pill" title={view.header.fitScore>0?'Priority score from the evidence':'No contract or order evidence to score yet'}>{BUYER_STAGE_LABELS[view.header.stage]}{view.header.fitScore>0?` · ${view.header.fitScore}`:' · not scored'}</span></div><div className="mt-4 flex flex-wrap gap-2">{workspace?<Link className="btn btn-primary btn-sm" href={workspace}>Open workspace</Link>:<span className="text-xs">Related company · no saved product opportunity</span>}{target.leadId&&!target.leadId.startsWith('derived:')?<button onClick={()=>setList(true)} className="btn btn-secondary btn-sm">Add to list</button>:null}{workspace?<button onClick={()=>void reject()} className="btn btn-secondary btn-sm">Not relevant</button>:null}</div></header>
       {actionError?<p role="alert">{actionError}</p>:null}
       {view.proof?<p data-testid="proof-level" className={`rounded-lg px-3 py-2 text-sm ${PROOF_TONE[view.proof.level]}`}><strong>{PROOF_LABEL[view.proof.level]}.</strong> {capitalise(view.proof.note.replace(/^[^:]+:\s*/,''))}</p>:null}
+      {view.need?<NeedProof need={view.need}/>:null}
       {view.proof?.level==='likely'?null:<LeadIntelligenceSummary lead={view.header} leadId={target.leadId} workspace={workspace}/>}
       {view.rating?<section data-testid="rating"><h3 className="font-bold">Why the search rated it a buyer</h3>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">{view.rating.score!==null?<span className="pill">Rating {view.rating.score}</span>:null}{view.rating.buyerType?<span className="pill">{BUYER_TYPE_WORD[view.rating.buyerType]??view.rating.buyerType}</span>:null}{view.rating.role?<span className="text-[var(--text-2)]">{view.rating.role}</span>:null}</div>

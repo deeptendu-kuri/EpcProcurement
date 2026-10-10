@@ -318,3 +318,29 @@ describe("rules from the independent web audit (10 Oct)", () => {
     expect(consistentRating({ rating: 45, role: "Technology commercialization entity", reason: "TAQNIA commercializes KACST technologies; it may build pilot plants.", buyerType: "end_user" as const }, { company: "TAQNIA", identity_quote: "TAQNIA" }, product)).toBe(20);
   });
 });
+
+describe("rating in a work-based search (docs/mvp/20)", () => {
+  const brief = { version: 1, item: "Cryogenic valves", mustHave: ["−196 °C service"], buying: "project" as const, source: "ai" as const, productId: "gate-globe-check",
+    uses: [{ name: "LNG liquefaction plant", newsWords: ["LNG"], why: "LNG is handled at −162 °C.", countries: [], localWords: {} },
+      { name: "air separation plant", newsWords: ["air separation"], why: "Liquid oxygen is stored at −196 °C.", countries: [], localWords: {} }],
+    buyerRoles: [], notBuyers: ["water networks", "plumbing"], owners: [], places: {} };
+  const rows = [{ id: "0", company: "Example LNG Constructors", identity_quote: "Example LNG Constructors builds LNG trains", title: "LNG contractors" },
+    { id: "1", company: "Example Plumbing LLC", identity_quote: "Example Plumbing LLC installs water and sewage pipes", title: "Contractors in Norway" }];
+  it("tells the AI the work that buys the item and asks which of it each company does", () => {
+    const system = ratingPrompt("gate-globe-check", rows, { brief }).system;
+    expect(system).toMatch(/this item is bought for this work: LNG liquefaction plant \(LNG is handled at −162 °C\.\); air separation plant/);
+    expect(system).toMatch(/Not buyers: water networks; plumbing/);
+    expect(system).toMatch(/"use": the name of the work above that this company itself does/);
+    expect(ratingPrompt("gate-globe-check", rows, {}).system).not.toMatch(/"use"/);
+  });
+  it("keeps a company doing the work and holds back one doing other work, however close (the Dovre case)", () => {
+    const text = JSON.stringify({ companies: [
+      { id: "c1", rating: 80, type: "contractor", use: "LNG liquefaction plant", role: "LNG EPC contractor", reason: "Builds LNG trains." },
+      { id: "c2", rating: 60, type: "contractor", use: null, role: "Water and sewage contractor", reason: "Installs pipelines with valves." }] });
+    const rated = parseRatings(text, rows, "gate-globe-check", { brief });
+    expect(rated.map((r) => [r.rating, r.raw])).toEqual([[80, 80], [30, 30]]);
+    expect(rated[1].reason).toMatch(/^Not this work: /);
+    // Without a brief, today's rating stands.
+    expect(parseRatings(text, rows, "gate-globe-check", {})[1].rating).toBe(60);
+  });
+});

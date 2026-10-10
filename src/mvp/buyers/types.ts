@@ -41,6 +41,25 @@ export interface EvidenceDrawerView {
   rating?: { score: number | null; role: string | null; reason: string | null; buyerType: string | null; candidateId: string; runId: string; checkable: boolean; status: string } | null;
   /** Contracts, orders and regular work found for the company, newest first, each with its source. */
   recent?: Trigger[];
+  /** docs/mvp/20: why it is a buyer of the searched item, from the need check, shown as bullet points. */
+  need?: NeedCard | null;
+}
+/** The need check's proof for one lead (docs/mvp/20 §8): its work, why that work needs the item, and what was checked. */
+export interface NeedCard {
+  item: string;
+  /** Its work, the sentence copied from the source. */
+  work: string;
+  /** Why that work needs the item. */
+  why: string;
+  use: string | null; project: string | null; date: string | null;
+  window: 'buying now' | 'buying soon' | 'check date';
+  role: string | null; country: string | null;
+  url: string | null; source: string | null;
+  /** A competitor supplying the item to the same work, when the news names one. */
+  competitor: string | null;
+  checks: string[];
+  /** Further accepted sources for the same company in this search. */
+  more: number;
 }
 
 export type BuyerRole = 'owner' | 'epc_contractor' | 'subcontractor' | 'manufacturer' | 'fabricator' | 'distributor';
@@ -119,6 +138,8 @@ export interface BuyerRow { /* list row: subset of BuyerView */
   searchFit?: 'explicit' | 'potential' | null;
   /** Doc 19: how the lead is proven: own website, its listed work, or only the shortlist rating. */
   verification?: 'website' | 'listing' | 'rating' | null;
+  /** docs/mvp/20: from the need check of a work-based search: its work (the source's sentence) and why it needs the item. */
+  need?: { work: string; why: string } | null;
 }
 export const DERIVED_PREFIX = 'derived:';
 export function isDerivedLeadId(id: string): boolean { return id.startsWith(DERIVED_PREFIX); }
