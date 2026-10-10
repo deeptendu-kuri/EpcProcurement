@@ -6,6 +6,7 @@ import { hasSpec, parseMaterialSpec, specUses } from '@/mvp/discovery/spec';
 import type { ResearchMode, PlannedBuyerQuery } from '@/mvp/discovery/plan';
 import { RESEARCH_SOURCES } from '@/mvp/research/registry';
 import { TED_COUNTRIES } from '@/mvp/pipeline/sources/ted';
+import { usesFor, type SearchBrief } from '@/mvp/discovery/brief';
 
 export type SourcingLane = 'trigger' | 'roundup' | 'capability';
 export interface SourceTask {
@@ -13,8 +14,12 @@ export interface SourceTask {
   query?:string;url?:string;topic?:'news'|'general';days?:number;registryId?:string;includeDomains?:string[];
   /** local-news: what to translate; gdelt-country: English words to match in any language. */
   material?:string;work?:string;words?:string[];
+  /** local-news from a search brief: the query in the country's own words, used as is (no translation). */
+  localQuery?:string;localWords?:string[];
 }
-export interface SourcePlanInput {productId:string;keyword?:string;markets:string[];mode:ResearchMode;lanes?:SourcingLane[];includeResellers?:boolean}
+export interface SourcePlanInput {productId:string;keyword?:string;markets:string[];mode:ResearchMode;lanes?:SourcingLane[];includeResellers?:boolean;
+  /** docs/mvp/20: searches built from the work that uses the item, per country; absent = the catalogue plan. */
+  brief?:SearchBrief}
 // Companies found by the work they do share the list tier with contractor lists (doc 19): regular buyers
 // get a fair share of the search allowance instead of what is left after news and lists.
 const BASE_PRIORITY:Record<SourcingLane,number>={trigger:2000,roundup:1000,capability:1000};
@@ -53,6 +58,34 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
       tasks.push({id:`hybrid-v2:${input.productId}:${code}:${lane}:${source}:${n}`,lane,source,market:code,priority:BASE_PRIORITY[lane],round,order,...extra});
     };
     const activity=activities[0];
+    if(input.brief){
+      // docs/mvp/20: this country's own uses (they differ between countries), searched by their headline words.
+      const brief=input.brief,work=usesFor(brief,code,4);
+      if(!work.length)return;
+      const words=(n:number)=>work[n].newsWords.slice(0,2).join(' ');
+      // ── trigger: awards for the work that uses the item, in English, the country's language, GDELT and tenders ──
+      work.forEach((_,n)=>add('trigger','bing-query',n,{query:`${words(n)} contract awarded ${name}`}));
+      add('trigger','tavily',0,{query:`${words(0)} EPC contract awarded ${name}`,topic:'news',days:540});
+      if(work[1])add('trigger','tavily',1,{query:`${words(1)} contract awarded ${name}`,topic:'news',days:540});
+      const local=work.find(u=>u.localWords[code]?.length);
+      add('trigger','local-news',0,{query:`${words(0)} contract ${name}`,material:work[0].newsWords[0],work:work[0].name,
+        ...(local?{localQuery:`${local.localWords[code].slice(0,3).join(' ')} ${brief.places[code]?.[0]??name}`,localWords:local.localWords[code]}:{})});
+      add('trigger','gdelt-country',0,{words:work.flatMap(u=>u.newsWords).slice(0,4)});
+      if(TED_COUNTRIES[code])add('trigger','ted',0,{});
+      // Rule 7: steadily bought items come from plants being maintained: the owners' maintenance contracts.
+      if(brief.buying!=='project'){
+        add('trigger','bing-query',work.length,{query:`shutdown turnaround maintenance contract ${name}`});
+        if(order===0)brief.owners.slice(0,2).forEach((owner,n)=>add('trigger','tavily',2+n,{query:`${owner} maintenance services contract awarded`,topic:'news',days:540}));
+      }
+      // ── roundup and capability: companies whose regular work is this work ──
+      for(const [n,registry] of RESEARCH_SOURCES.filter(r=>r.country===code&&r.materials.includes(input.productId)&&r.permission==='public-listing').entries()){
+        add('roundup','registry',n,{url:registry.url,registryId:registry.id,priority:1950,includeDomains:[new URL(registry.url).hostname.replace(/^www\./,'')]});
+      }
+      add('roundup','tavily',0,{query:`${work[0].name} contractors ${name} list top companies`,topic:'general'});
+      if(input.includeResellers!==false)add('roundup','tavily',1,{query:`${material} stockists suppliers ${name}`,topic:'general'});
+      work.slice(0,2).forEach((use,n)=>add('capability','tavily',n,{query:`${use.name} contractor ${name} projects`,topic:'general'}));
+      return;
+    }
     // ── trigger: awards and orders ──
     const piping=PIPING_PRODUCTS.has(input.productId);
     if(piping)PROJECT_AWARD_QUERIES.forEach((words,n)=>add('trigger','bing-query',n,{query:`${words} ${name}`}));

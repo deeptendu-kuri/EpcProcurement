@@ -24,6 +24,21 @@ export async function addJob(tx:Queryable,runId:string,stage:ResearchJob['stage'
   if(job)await tx.query(`insert into research_outbox(run_id,job_id,dedupe_key) values($1,$2,$3) on conflict do nothing`,[runId,job.id,`job:${job.id}:0`]);
   return job?.id??null;
 }
+/** docs/mvp/20: searches built from the work that uses the item (MVP_WORK_SEARCH=on); off = the catalogue plan. */
+export const workSearchOn=()=>process.env.MVP_WORK_SEARCH?.trim().toLowerCase()==='on';
+/** The brief comes before every search of its run. */
+export const BRIEF_PRIORITY=9000;
+/** The collect jobs of a run's search plan (with its brief, when written). */
+export function plannedCollectJobs(input:RunInput,budget:ResearchBudget):{stage:'collect';key:string;payload:unknown;priority:number}[] {
+  const web=Boolean(process.env.TAVILY_API_KEY?.trim());
+  const plan=sourcePlan({productId:input.productId!,keyword:input.query,markets:input.markets,mode:budget.mode,lanes:input.lanes,includeResellers:input.includeResellers,brief:input.brief});
+  return plan.filter(task=>task.source!=='tavily'||web).map(task=>({stage:'collect' as const,key:task.id,priority:task.priority,payload:
+    task.source==='registry'&&task.registryId!=='dewa-contractor-list'?{source:'registry',sourcingLane:task.lane,registryId:task.registryId,market:task.market}:
+    task.source==='registry'?{source:'directory-seed',sourcingLane:task.lane,raw:{sourceKey:`directory:${task.registryId}`,sourceName:'Official contractor listing',tier:'A',url:task.url,title:null,publishedAt:null,text:null,isSample:false,research:{lane:'directory',sourcingLane:task.lane,registryId:task.registryId}}}:
+    task.source==='tavily'?{source:'tavily',sourcingLane:task.lane,query:tavilyTask(task)}:
+    {source:task.source,sourcingLane:task.lane,market:task.market,query:task.query,...(task.material?{material:task.material,work:task.work}:{}),...(task.words?{words:task.words}:{}),
+      ...(task.localQuery?{localQuery:task.localQuery,localWords:task.localWords}:{})}}));
+}
 export async function createResearchRun(input:RunInput,db:Db=getDb()):Promise<string> {
   if(!input.productId||input.offline)throw new Error('Durable research requires a live product search.');
   const material=resolveMaterial(input.query,input.productId);if(material.status!=='resolved')throw new Error(material.question??'Clarify the material before research.');
@@ -31,16 +46,9 @@ export async function createResearchRun(input:RunInput,db:Db=getDb()):Promise<st
   return db.tx(async tx=>{
     const run=(await tx.query<{id:string}>(`insert into runs(adhoc_query,status,counters) values($1::jsonb,'queued','{}') returning id`,[JSON.stringify(input)])).rows[0];
     await tx.query('insert into research_sessions(run_id,budget) values($1,$2::jsonb)',[run.id,JSON.stringify(budget)]);
-    const web=Boolean(process.env.TAVILY_API_KEY?.trim());
-    const plan=sourcePlan({productId:input.productId!,keyword:input.query,markets:input.markets,mode:budget.mode,lanes:input.lanes,includeResellers:input.includeResellers});
-    for(const task of plan){
-      if(task.source==='tavily'&&!web)continue;
-      const payload=task.source==='registry'&&task.registryId!=='dewa-contractor-list'?{source:'registry',sourcingLane:task.lane,registryId:task.registryId,market:task.market}:
-        task.source==='registry'?{source:'directory-seed',sourcingLane:task.lane,raw:{sourceKey:`directory:${task.registryId}`,sourceName:'Official contractor listing',tier:'A',url:task.url,title:null,publishedAt:null,text:null,isSample:false,research:{lane:'directory',sourcingLane:task.lane,registryId:task.registryId}}}:
-        task.source==='tavily'?{source:'tavily',sourcingLane:task.lane,query:tavilyTask(task)}:
-        {source:task.source,sourcingLane:task.lane,market:task.market,query:task.query,...(task.material?{material:task.material,work:task.work}:{}),...(task.words?{words:task.words}:{})};
-      await addJob(tx,run.id,'collect',task.id,payload,task.priority);
-    }
+    // docs/mvp/20: work-based search writes the search brief first; its step then plans the searches.
+    if(workSearchOn())await addJob(tx,run.id,'analyse','brief',{kind:'analyse:brief'},BRIEF_PRIORITY);
+    else for(const job of plannedCollectJobs(input,budget))await addJob(tx,run.id,job.stage,job.key,job.payload,job.priority);
     for(const source of SOURCING_REGISTRY.filter(s=>s.reviewRequired&&input.markets.includes(s.market)))await tx.query("insert into run_events(run_id,stage,message,counters) values($1,'info',$2,'{}')",[run.id,`Registry coverage warning (${source.id}): ${source.note}`]);
     // Optional public feeds add coverage, never replace the trigger-first plan.
     const news=process.env.MVP_RESEARCH_NEWS==='on';

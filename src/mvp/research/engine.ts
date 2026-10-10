@@ -12,7 +12,8 @@ import { gdeltSource } from '@/mvp/pipeline/sources/gdelt';
 import { rssSource } from '@/mvp/pipeline/sources/rss';
 import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tavily';
 import { collectBingQuery,collectRssFeed,collectLocalNews,collectGdeltCountry} from './sources';
-import type { ResearchBudget, ResearchJob } from './store';
+import { plannedCollectJobs, type ResearchBudget, type ResearchJob } from './store';
+import { getSearchBrief, type GroundFn } from '@/mvp/discovery/brief';
 import { autoPauseIfDue } from './control';
 import { clearBuyerCache } from '@/mvp/buyers/load';
 import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
@@ -207,6 +208,35 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
       await markBudget(db,job.run_id,'read',job.key,'completed');
       await researchProgress(db,job.run_id,'read',`Original page saved${candidate?' for company/material analysis':''}.`);
     }else if(job.stage==='analyse'){
+      if(job.payload.kind==='analyse:brief'){
+        // docs/mvp/20: the search brief, grounded in recent news from his countries (budgeted, cached searches),
+        // then the run's searches are planned from it. Without AI, the catalogue brief keeps today's plan.
+        const ctx:SourceContext={db,runId:job.run_id,input,profile:getClientProfile(),terms:queryTerms(input.query),log:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)};
+        const web=Boolean(process.env.TAVILY_API_KEY?.trim());
+        const ground:GroundFn|null=web?async(query,market)=>{
+          const key=`brief-ground:${market}`;
+          const planned={key,market,lane:'news' as const,activityIndex:0,query,topic:'news' as const,days:365};
+          let docs=await cachedTavilyQuery(ctx,planned);
+          if(docs===null){
+            if(await reserveBudget(db,job.run_id,'search',key,1,session.budget.searchQueries)!=='reserved')return [];
+            try{docs=await collectTavilyQuery(ctx,planned);await markBudget(db,job.run_id,'search',key,'completed');}
+            catch{await markBudget(db,job.run_id,'search',key,'unknown');return [];}
+          }
+          return docs.map(d=>({title:d.title??'',snippet:(d.text??'').slice(0,300),date:d.publishedAt?.slice(0,10)??null}));
+        }:null;
+        const provider=budgetedAwardProviders(db,job.run_id,'brief',session.budget).provider('extract_a','openai/gpt-oss-120b');
+        const brief=await getSearchBrief(db,{material:input.query,markets:input.markets,productId:input.productId??null},provider,ground,job.run_id);
+        const planned={...input,brief};
+        const jobs=plannedCollectJobs(planned,session.budget);
+        if(!await db.tx(async tx=>{
+          if(!await owned(tx,job))return false;
+          await tx.query(`update runs set adhoc_query=adhoc_query||jsonb_build_object('brief',$2::jsonb) where id=$1`,[job.run_id,JSON.stringify(brief)]);
+          return true;
+        }))return {processed:true,stale:true};
+        await completeJob(db,job,{brief:{source:brief.source,uses:brief.uses.map(u=>u.name)}},jobs);
+        await researchProgress(db,job.run_id,'check',`Looking for companies doing: ${brief.uses.map(u=>u.name).join(' · ')}${brief.notBuyers.length?`. Not: ${brief.notBuyers.slice(0,3).join(' · ')}`:''}. ${jobs.length} searches planned.`);
+        return {processed:true};
+      }
       if(job.payload.kind==='analyse:roundup'){
         const id=String(job.payload.documentId);
         const doc=(await db.query<{id:string;text:string}>('select id,text from source_documents where id=$1',[id])).rows[0];

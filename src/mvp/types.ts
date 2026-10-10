@@ -32,6 +32,8 @@ export interface RunInput {
   pauseAfter?: number;
   /** Extra rounds allowed when fewer buyers than the target are verified (0 = a quick search). Absent = the server setting. */
   extraRounds?: number;
+  /** docs/mvp/20: the search brief, written by the run's first step when work-based search is on. */
+  brief?: import("@/mvp/discovery/brief").SearchBrief;
 }
 
 export interface SubScore {

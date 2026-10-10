@@ -17,7 +17,10 @@ import {PIPING_PRODUCTS} from '@/mvp/sourcing/plan';
 export const PIPING_PROJECT_SCOPE=['refinery','refineries','petrochemical','petrochemicals','gas processing','gas plant','lng','gas field','oil field','oilfield',
   'desalination','water treatment','sewage treatment','wastewater treatment','power plant','power station','combined cycle','iwp','ipp','fertilizer plant','ammonia plant',
   'offshore','onshore','tank farm','مصفاة','تحلية','محطة','بتروكيماويات','معالجة'];
-const scopeFor=(ctx:SourceContext)=>[...scopeTermsFor(ctx.profile,ctx.terms),...(PIPING_PRODUCTS.has(ctx.input.productId??'')?PIPING_PROJECT_SCOPE:[])];
+// docs/mvp/20: with a search brief, the work's headline words (English and each country's own) count as scope.
+// Owner names alone never do (rule 2): they pull in an owner's unrelated projects.
+const briefScope=(ctx:SourceContext)=>ctx.input.brief?ctx.input.brief.uses.flatMap(u=>[...u.newsWords,...Object.values(u.localWords).flat()]).map(w=>w.toLowerCase()):[];
+const scopeFor=(ctx:SourceContext)=>[...scopeTermsFor(ctx.profile,ctx.terms),...(PIPING_PRODUCTS.has(ctx.input.productId??'')?PIPING_PROJECT_SCOPE:[]),...briefScope(ctx)];
 export const buying=(blurb:string,ctx:SourceContext)=>[...ACTION_TERMS.en,...ACTION_TERMS.ar,...ACTION_TERMS.ms].some(t=>hasTerm(blurb,t))&&Boolean(findScope(blurb,scopeFor(ctx)));
 export async function collectBingQuery(ctx:SourceContext,market:string,query:string):Promise<RawDoc[]> {
   await politeWait('www.bing.com',2000);
@@ -38,20 +41,23 @@ export async function collectRssFeed(ctx:SourceContext,url:string):Promise<RawDo
  * the material and award words translated once per language (term_cache). English countries use their
  * English market with the country name in the query. Results carry the searched country.
  */
-export async function collectLocalNews(ctx:SourceContext,payload:{market:string;query:string;material:string;work:string}):Promise<RawDoc[]> {
+export async function collectLocalNews(ctx:SourceContext,payload:{market:string;query:string;material:string;work:string;localQuery?:string;localWords?:string[]}):Promise<RawDoc[]> {
   const lang=countryLanguage(payload.market);
-  const provider=ctx.db?getLLM('triage',ctx.db):null;
-  const terms=ctx.db&&lang!=='en'?await localTerms(ctx.db,lang,payload.material,payload.work,provider,ctx.runId):null;
-  const query=terms?localNewsQuery(terms):payload.query;
-  const mkt=bingMarket(payload.market,terms?'local':'en');
+  // A search brief already gives the words local news uses ("vann avløp Norge"): no translation needed.
+  const own=Boolean(payload.localQuery)&&lang!=='en';
+  const provider=ctx.db&&!own?getLLM('triage',ctx.db):null;
+  const terms=ctx.db&&lang!=='en'&&!own?await localTerms(ctx.db,lang,payload.material,payload.work,provider,ctx.runId):null;
+  const query=own?payload.localQuery!:terms?localNewsQuery(terms):payload.query;
+  const mkt=bingMarket(payload.market,terms||own?'local':'en');
   await politeWait('www.bing.com',2000);
   const res=await getText(`${BING_NEWS_URL}?${new URLSearchParams({q:query,format:'rss',mkt})}`,'application/rss+xml, application/xml, text/xml',15000);
   if(!res.ok)throw new Error(`Local news HTTP ${res.status}`);
-  const local=terms?[terms.material,terms.awarded,terms.tender,terms.work].flatMap(t=>t.toLowerCase().split(/\s+/)).filter(w=>w.length>=3):[];
+  const local=own?(payload.localWords??[]).flatMap(t=>t.toLowerCase().split(/\s+/)).filter(w=>w.length>=3)
+    :terms?[terms.material,terms.awarded,terms.tender,terms.work].flatMap(t=>t.toLowerCase().split(/\s+/)).filter(w=>w.length>=3):[];
   const relevant=(blurb:string)=>buying(blurb,ctx)||local.some(w=>blurb.toLowerCase().includes(w));
-  await ctx.log(`${payload.market}: local news (${mkt}${terms?`, ${lang}`:''}) "${query}".`);
+  await ctx.log(`${payload.market}: local news (${mkt}${terms||own?`, ${lang}`:''}) "${query}".`);
   return parseBingRss(res.text).filter(item=>relevant(`${item.title}\n${item.description}`)).slice(0,8).map(item=>({sourceKey:`bing:${hostOf(item.url)??'news'}`,sourceName:`Local news · ${item.source??hostOf(item.url)??'Bing'}`,tier:'B',
-    publisherKey:publisherKeyFor(item.url),url:item.url,title:decodeRefs(item.title),publishedAt:item.published,text:null,market:payload.market,language:terms?lang:'en',isSample:false}));
+    publisherKey:publisherKeyFor(item.url),url:item.url,title:decodeRefs(item.title),publishedAt:item.published,text:null,market:payload.market,language:terms||own?lang:'en',isSample:false}));
 }
 
 /** Feeds sometimes double-escape characters ("&#228;" for "ä"). */
