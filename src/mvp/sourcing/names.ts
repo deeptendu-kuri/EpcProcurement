@@ -30,7 +30,9 @@ const SERVICE_WORDS = new Set(['pressure', 'vessel', 'vessels', 'fabrication', '
   // Service page titles seen on company sites ("General Fabrication & Welding", "Piping Fabrication",
   // "Processing and fabrication of custom wear parts in UAE").
   'general', 'piping', 'processing', 'custom', 'wear', 'parts', 'erection', 'spool', 'spools', 'specialized', 'specialised', 'contracting', 'design',
-  'inspection', 'testing', 'coating', 'painting', 'insulation', 'commissioning', 'procurement', 'project', 'projects', 'fittings', 'flanges', 'valves', 'portfolio', 'category']);
+  'inspection', 'testing', 'coating', 'painting', 'insulation', 'commissioning', 'procurement', 'project', 'projects', 'fittings', 'flanges', 'valves', 'portfolio', 'category',
+  // Building-services headings ("MEP Contracting", "HVAC & Plumbing Works").
+  'mep', 'hvac', 'plumbing', 'firefighting', 'fire', 'fighting', 'electromechanical']);
 // Places that often end a page title ("Pressure Vessel Manufacturer UAE").
 const PLACE_WORDS = new Set(['uae', 'ksa', 'gcc', 'dubai', 'abu', 'dhabi', 'sharjah', 'ajman', 'india', 'indian', 'malaysia', 'saudi', 'arabia', 'qatar', 'oman',
   'kuwait', 'bahrain', 'norway', 'middle', 'east', 'emirates', 'mumbai', 'delhi', 'chennai', 'kuala', 'lumpur', 'riyadh', 'jeddah', 'dammam', 'doha', 'muscat', 'gujarat']);

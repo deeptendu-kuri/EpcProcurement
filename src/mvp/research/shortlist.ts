@@ -14,7 +14,11 @@ import type { RunInput } from '@/mvp/types';
 import { getCatalogue, getCatalogueItem } from '@/mvp/config/buyers-config';
 import { whoBuys } from '@/mvp/discovery/material-catalogue';
 import { parseMaterialSpec, specBrief } from '@/mvp/discovery/spec';
-import { junkFoundName, looksLikeSupplier } from '@/mvp/sourcing/names';
+import { genericServicePhrase, junkFoundName, looksLikeSupplier } from '@/mvp/sourcing/names';
+import { nonCompanyDomain } from '@/mvp/sourcing/entities';
+import { countriesInQuote } from '@/mvp/discovery/locations';
+import { COUNTRIES } from '@/mvp/config/countries';
+const countryNameOf = (code: string) => COUNTRIES.find((c) => c.code === code)?.name ?? code;
 
 /** Small batches: with 40 names the model skipped some and let one page's context bleed into others. */
 export const RATING_BATCH = 20;
@@ -39,7 +43,7 @@ export interface RatedCompany {
 }
 export interface RateRow { id: string; company: string; identity_quote: string | null; title: string | null }
 /** What is being rated for: the product, the words typed (for the exact variant) and whether resellers count. */
-export interface RateContext { productId: string; query?: string; resellers?: boolean }
+export interface RateContext { productId: string; query?: string; resellers?: boolean; /** Searched country codes. */ markets?: string[] }
 type Row = RateRow;
 
 const clip = (s: string | null | undefined, n: number) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -49,11 +53,17 @@ const nameOf = (productId: string) => getCatalogueItem(productId)?.shortName || 
 // Gulf place and company-form words: "JURF AJMAN UAE", "AL SAJJA SHARJAH UAE" are places, not companies.
 const PLACE_OR_FORM = new Set(['uae', 'ksa', 'gcc', 'dubai', 'abu', 'dhabi', 'sharjah', 'ajman', 'ras', 'al', 'khaimah', 'rak', 'hamriyah', 'jurf', 'ghail', 'sajja', 'jebel', 'ali',
   'fujairah', 'umm', 'quwain', 'qatar', 'doha', 'oman', 'muscat', 'saudi', 'arabia', 'riyadh', 'jeddah', 'dammam', 'jubail', 'india', 'malaysia', 'norway',
-  'fze', 'fzc', 'fzco', 'llc', 'ind', 'area', 'industrial', 'zone', 'free', 'city']);
+  'fze', 'fzc', 'fzco', 'llc', 'ind', 'area', 'industrial', 'zone', 'free', 'city',
+  // Saudi and Gulf plant sites, and a plant's phase number ("Ras Al-Khair", "Yanbu III", "Al-Khobar I", "Qassim 1").
+  'rabigh', 'shuaibah', 'shoaiba', 'shoaibah', 'yanbu', 'qassim', 'khobar', 'jazan', 'jizan', 'hajr', 'khair', 'shuqaiq', 'taweelah', 'hassyan', 'mirfa',
+  'ghubrah', 'tabuk', 'makkah', 'mecca', 'madinah', 'medina', 'neom', 'kuwait', 'bahrain', 'i', 'ii', 'iii', 'iv', 'v', 'vi']);
 /** A project, field or facility named in the news ("Ichthys LNG Project", "Marjan Increment … Package 4"), not a company. */
 export function projectName(name: string): boolean {
   // "Natural Gas Development Project Offshore Brunei": a project word and no company form anywhere.
-  if (/\b(?:project|development project|field development)\b/i.test(name) && !/\b(?:ltd|limited|llc|inc|corp(?:oration)?|company|co|group|plc|gmbh|ag|sa|sdn|bhd|pvt|fze|wll|holdings?)\b\.?/i.test(name)) return true;
+  const companyForm = /\b(?:ltd|limited|llc|inc|corp(?:oration)?|company|co|group|plc|gmbh|ag|sa|sdn|bhd|pvt|fze|wll|holdings?)\b\.?/i.test(name);
+  if (/\b(?:project|development project|field development)\b/i.test(name) && !companyForm) return true;
+  // Power and water plants and other facilities: "Rabigh 4 IWP", "Jazan IGCC", "Hajr IPP", "… International Airport".
+  if (/\b(?:IWP|IPP|IWPP|ISTP|IWTP|IGCC|CCGT|SWRO|airport|desalination plant|power plant|power station)\b/i.test(name) && !companyForm) return true;
   return /\b(?:projects?|development|facilit(?:y|ies)|fpu|fpso|oss|expansion|increment|package \d+|train \d+|field|fields|platform removal|decommissioning|wind farms?|terminal)\b\s*(?:\(|$|[-–—,])/i.test(name.trim());
 }
 /** A name made only of place and company-form words. */
@@ -124,19 +134,22 @@ export function ratingPrompt(productId: string, rows: Row[], ctx: Omit<RateConte
       '- end_user: uses it in its own work (fabricators, spool and workshop shops, plant builders, plant operators doing maintenance);',
       '- contractor: a main or EPC contractor that buys for its projects or passes the work to subcontractors;',
       '- subcontractor: a piping, mechanical, installation or fabrication subcontractor working under a main contractor;',
-      '- owner: a plant, pipeline or utility owner/operator. Owners that commission projects usually buy the material for them (owner-furnished material) or for maintenance: rate 55-80 when their business uses it, never 0 just because they are a client of a contractor;',
+      '- owner: a company that owns and operates plants, pipelines or utilities and commissions projects from EPC contractors. Owners buy mostly through their contractors: rate 40-55 when their business uses it, never 0 just because they are a client of a contractor. A project company or plant (SPV) is not an owner of its own: not_buyer;',
+      '- marine, dredging, offshore and energy groups that build projects for others (for example NMDC) are contractors, not owners;',
       resellers
         ? `- reseller: a stockist, trader or distributor that buys ${name} to supply contractors and projects (a buyer for this supplier; rate at most 65);`
         : `- reseller: stockists, traders and distributors of ${name} are competitors here (rate 0-5, type competitor);`,
       `- competitor: makers and mills of ${name};`,
-      '- not_buyer: certifiers, inspectors, standards bodies, regulations, publishers, software or web agencies, social networks, banks, government departments, academic institutes, fuel/oil/lubricant traders, anything that is not a company.',
+      '- not_buyer: certifiers, inspectors, standards bodies, regulations, publishers, software or web agencies, social networks, banks, government departments, academic institutes, fuel/oil/lubricant traders, anything that is not a company;',
+      '- also not_buyer: investors and investment or holding companies, offtakers and procurement/PPP agencies, engineering consultants, project-management firms and owner engineers, technology licensors, equipment makers (OEMs such as turbine, pump or membrane makers), recruiters, real-estate developers, and companies that no longer exist (bankrupt or merged);',
       `"match": "named" when its own words name this exact variant or standard, "product" when they name the product, "work" when only its work implies it, "none" otherwise.`,
       'Judge each company separately, from its own name and its own sentence ("said"). The page title ("page") only tells you which page or list the name was on:',
       '- a name in a list titled "X manufacturers" or "X contractors" is probably such a company (rate it 50-70 unless its own words or well-known facts say more or less);',
       "- names on one company's website (its clients, partners, projects, staff history) are that company's customers or contacts, not makers of what the page is about; judge them by who they are: a client that commissions projects (an oil, gas, water or power company) buys the material for them (type owner), while traders and service firms on such a list do not;",
       '- composite or aluminium cylinders and vessels do not use steel plate or steel pipe;',
       '- a company named only because it signed an MoU, cooperation or study with another company is a weak lead (at most 40);',
-      '- a project, field or facility name is not a company (rate 0, type not_buyer).',
+      '- a project, field, plant or facility name is not a company ("Rabigh 4 IWP", "Ras Al-Khair", an airport): rate 0, type not_buyer;',
+      ...(ctx.markets?.length ? [`- the supplier sells in ${ctx.markets.map(countryNameOf).join(', ')}: a company that clearly works only in other countries is rated at most 30, and its reason says "Outside the searched countries";`] : []),
       'Rate above 75 only when the company\'s own sentence, or well-known facts about the company, show work that uses the material. Do not invent projects, sizes or facts.',
       'Ratings: 70-100 clearly uses this material; 45-69 plausible; 10-44 weak or unclear; 0-9 not a buyer.',
       `"role": a short plain description such as "Pressure vessel fabricator" or "Pipeline EPC contractor". "reason": one short sentence saying why they would buy ${name}, or why not. "also": ids from the catalogue list of other products they would likely buy (at most 4).`,
@@ -161,15 +174,47 @@ const OTHER_MATERIAL = /\b(?:composite|alumin(?:i)?um|plastics?|grp|frp|hdpe|pvc
 export const PAGE_CONTEXT = 'Page context only: ';
 const WORK_WORD = /\b(?:fabricat\w*|engineering|kejuruteraan|ingenier\w*|ingenieur\w*|vessels?|tanks?|boilers?|steel|construct\w*|contract\w*|piping|pipeline|structur\w*|marine|shipyard|heavy industr\w*|epc|projects?)\b/i;
 type Judged = Pick<RatedCompany, 'rating' | 'role' | 'reason'> & { buyerType?: BuyerType | null; also?: string[] };
-type JudgedRow = Pick<Row, 'company' | 'identity_quote'> & { title?: string | null };
+type JudgedRow = Pick<Row, 'company' | 'identity_quote'> & { title?: string | null; url?: string | null; domain?: string | null };
+/** What the rules may know about the search: the stockist setting and the searched countries. */
+export interface ConsistencyOptions { resellers?: boolean; markets?: string[] }
+/**
+ * Organisations that do not buy the material themselves (web audit, 10 Oct): investors, holding companies,
+ * offtakers and procurement agencies, government and research bodies, consultants and project managers,
+ * technology licensors, recruiters, real-estate developers.
+ */
+const NON_BUYER_ORG = /\b(?:investment|investors?|holding compan\w*|fund|banks?|off-?takers?|procurement agency|ppp agency|regulat\w*|ministry|government (?:agency|body)|research|institutes?|universit\w*|academ\w*|consult\w*|advis\w*|project management|programme management|owner'?s engineer|licensors?|technology (?:provider|licen\w*|company|package|developer)|recruit\w*|staffing|real[- ]estate|property developer)\b/i;
+/** Well-known names that are not pipe buyers: consultants, equipment makers, defunct contractors. */
+const KNOWN_NON_BUYER = /^(?:aecom|black\s*&\s*veatch|jacobs|wsp|atkins(?:realis)?|mott macdonald|fichtner|parsons|arcadis|dar al[- ]handasah|siemens(?: energy)?|alstom|general electric|ge vernova|abb|schneider electric|honeywell|emerson|mitsubishi power|abengoa)\b/i;
+/** Its own line says it receives or invites bids, or awards a contract: the procuring owner or agency, not a contractor. */
+const AWARDS_WORK = /\b(?:receives?|invites?|qualif(?:y|ies)|shortlists?)\s+(?:\w+\s+){0,2}(?:bids?|bidders|offers)\b|\bawards?\s+(?:\w+\s+){0,4}(?:contract|deal|package)\b/i;
+/** Its own line is a technology or licence deal, not construction work. */
+const TECH_DEAL = /\b(?:technology (?:package|licen\w*|contract|agreement)|licen[cs]e (?:agreement|deal)|process licen\w*)\b/i;
+/** The web address or the page it was named on says it sells the material: a pipe mill or stockist. */
+const SELLER_DOMAIN = /(?:pipe|tube|steel|fitting|flange|valve)s?(?:mill|factory|industr\w*|company|co)?$/i;
+const hostOf = (url: string | null | undefined) => { if (!url) return null; try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; } };
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const productNoun = (productName: string) => (productName.toLowerCase().match(/[a-z]+/g) ?? []).pop()?.replace(/s$/, '') ?? '';
 const sellsMaterial = (r: Judged, product: string) => MATERIAL_WORD.test(r.role) || r.role.toLowerCase().includes(product.split(' ').pop() ?? product);
 /** The buyer type after the guards: a seller of the material is a reseller or a competitor depending on the setting. */
-export function consistentType(r: Judged, row: JudgedRow, productName: string, opts: { resellers?: boolean } = {}): BuyerType | null {
+export function consistentType(r: Judged, row: JudgedRow, productName: string, opts: ConsistencyOptions = {}): BuyerType | null {
   const product = productName.toLowerCase().replace(/s$/, '');
   const noun = productNoun(productName);
   if (projectName(row.company) || placeOnlyName(row.company)) return 'not_buyer';
+  // A service heading or a recruiter, job board or news site is not a buyer ("MEP Contracting", "Progressive").
+  // The page it was named on counts only when that page is its own (its name leads the address, as with
+  // "Progressive" on progressiverecruitment.com); a company named in a news article is not the publisher.
+  const sourceHost = hostOf(row.url);
+  const firstWord = (row.company.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])[0];
+  const ownPage = sourceHost && firstWord && sourceHost.startsWith(firstWord) ? sourceHost : null;
+  if (genericServicePhrase(row.company) || [row.domain, ownPage].some((d) => d && nonCompanyDomain(d))) return 'not_buyer';
+  if (KNOWN_NON_BUYER.test(row.company.trim()) || NON_BUYER_ORG.test(r.role) || TECH_DEAL.test(row.identity_quote ?? '')) return 'not_buyer';
+  // A maker whose web address names the material is a mill, even when it also fabricates ("Al Gharbia" on algharbiapipe.com).
+  const label = (row.domain ?? hostOf(row.url) ?? '').toLowerCase().replace(/^www\./, '').split('.')[0];
+  if (MAKER.test(r.role) && label && SELLER_DOMAIN.test(label.replace(/[^a-z]/g, ''))) return 'competitor';
   if (MAKER.test(r.role) && sellsMaterial(r, product) && !/fabricat/i.test(r.role)) return 'competitor';
+  // It receives bids or awards the contract: the procuring owner or agency, never a contractor.
+  if (AWARDS_WORK.test(row.identity_quote ?? '') && new RegExp(`^\\W*${escapeRe(row.company.split(/\s+/)[0] ?? '')}`, 'i').test(row.identity_quote ?? '')
+    && (r.buyerType === 'contractor' || r.buyerType === 'subcontractor')) return 'owner';
   // Its own words say it manufactures the product ("biggest stainless steel pipe suppliers and manufacturers"),
   // or its name is the product ("East Pipes"): a maker, not a buyer.
   const own = row.identity_quote ?? '';
@@ -186,13 +231,25 @@ export function consistentType(r: Judged, row: JudgedRow, productName: string, o
 const USES = /\b(?:uses?|buys?|needs?|purchas\w*|procur\w*|consum\w*|commission\w*|requires?)\b/i;
 const MAKES = /\b(?:manufactur\w*|produc\w*|makes?|mills?|sells?|suppl(?:y|ies|ier))\b/i;
 const OWNER_NAME = /\b(?:authority|ministry|municipal\w*|utilit\w*|water|electricity|power|energy|oil|gas|petroleum|corporation)\b/i;
+/** Owners (plant, pipeline, utility owners) buy mostly through their EPCs: listed as project owners, ranked below buyers. */
+export const OWNER_CEILING = 55;
+/**
+ * Works only outside the searched countries: the AI said so ("Outside UAE…"), or its own line names
+ * countries and none of them is searched ("Located … in Israel" for a Saudi search).
+ */
+export function outsideMarkets(r: Pick<Judged, 'reason'>, row: Pick<JudgedRow, 'company' | 'identity_quote'>, markets?: string[]): boolean {
+  if (!markets?.length) return false;
+  if (/\boutside (?:the )?(?:searched|selected|target|chosen) countr|\bonly (?:works|operates|active) (?:in|outside)\b/i.test(r.reason)) return true;
+  const named = countriesInQuote(row.identity_quote ?? '', [row.company]);
+  return named.length > 0 && !named.some((c) => markets.includes(c));
+}
 /** True when the guards turned an AI "competitor" into a buyer: its own reason said it uses the material. */
 const competitorOverruled = (r: Judged, type: BuyerType | null) => r.buyerType === 'competitor' && (type === 'owner' || type === 'end_user');
 /**
  * The reason shown with a rating, consistent with the type after the guards: a maker or seller of the
  * product never shows the AI's "likely to buy" ("EPIC … likely to buy stainless/duplex pipe").
  */
-export function consistentReason(r: Judged, row: JudgedRow, productName: string, opts: { resellers?: boolean } = {}): string {
+export function consistentReason(r: Judged, row: JudgedRow, productName: string, opts: ConsistencyOptions = {}): string {
   const type = consistentType(r, row, productName, opts);
   if (type === 'competitor' && r.buyerType !== 'competitor') return `Makes or sells ${productName}: a competitor for it, not a buyer.`;
   return r.reason;
@@ -203,10 +260,14 @@ export function consistentReason(r: Judged, row: JudgedRow, productName: string,
  * competitors when he does not sell to them); fuel traders and composite makers stay low; and a bare
  * name with no work in it cannot be rated above 50 (well-known names still reach "Good").
  */
-export function consistentRating(r: Judged, row: JudgedRow, productName: string, opts: { resellers?: boolean } = {}): number {
+export function consistentRating(r: Judged, row: JudgedRow, productName: string, opts: ConsistencyOptions = {}): number {
   const type = consistentType(r, row, productName, opts);
   if (type === 'not_buyer' && (projectName(row.company) || placeOnlyName(row.company))) return 0;
   if (type === 'competitor') return Math.min(r.rating, 5);
+  // Works only outside the searched countries: its own line names other countries only, or the AI says so.
+  if (outsideMarkets(r, row, opts.markets)) return Math.min(r.rating, 30);
+  // Owners buy mostly through their EPC contractors: they rank below the contractors and fabricators who buy.
+  if (type === 'owner') r = { ...r, rating: Math.min(r.rating, OWNER_CEILING) };
   // The AI rated it as a competitor, but its own reason says it uses the material: rate it as a likely buyer
   // (50, "Good"); the caps below still apply, and its website check decides.
   if (competitorOverruled(r, type)) r = { ...r, rating: Math.max(r.rating, 50) };
@@ -339,13 +400,13 @@ export const VERIFY_FIRST = 45;
  */
 export const verifyPriority = (rating: number | null | undefined, type?: BuyerType | string | null) =>
   // Stockists, competitors and non-buyers are never leads: their checks go last.
-  type === 'reseller' || type === 'competitor' || type === 'not_buyer' ? 5
+  type === 'reseller' || type === 'competitor' || type === 'not_buyer' || type === 'owner' ? 5
   : rating == null ? 30 : rating >= VERIFY_FIRST ? 1100 + rating : rating >= LOOKUP_FLOOR ? 700 + rating : 5;
 
 /** The rating context of a search from its stored input. */
-type SearchInput = Partial<Pick<RunInput, 'productId' | 'query' | 'includeResellers'>>;
+type SearchInput = Partial<Pick<RunInput, 'productId' | 'query' | 'includeResellers' | 'markets'>>;
 export const rateContext = (input: SearchInput): RateContext =>
-  ({ productId: input.productId!, query: input.query, resellers: input.includeResellers !== false });
+  ({ productId: input.productId!, query: input.query, resellers: input.includeResellers !== false, markets: input.markets });
 
 /**
  * Rate up to `limit` unrated companies of a search and save the ratings. With an AI provider, plain-rule

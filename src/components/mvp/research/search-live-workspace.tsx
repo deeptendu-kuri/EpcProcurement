@@ -51,6 +51,7 @@ function Stat({ label, value, sub, ratio }: { label: string; value: string; sub?
 
 function statusLine(c: FoundCompany): { text: string; tone: string } {
   if (secondary(c)) return { text: "Stockist · secondary, not a lead", tone: "bg-[var(--subtle)] text-[var(--text-2)]" };
+  if (!c.opportunityId && c.buyerType === "owner") return { text: "Project owner · buys through its EPCs", tone: "bg-[var(--subtle)] text-[var(--text-2)]" };
   if (c.opportunityId && c.verification === "rating") return { text: "Lead · likely, not verified", tone: "bg-[var(--warn-bg)] text-[var(--warn)]" };
   if (c.opportunityId && c.verification === "listing") return { text: "Lead · its listed work", tone: "bg-[var(--info-bg)] text-[var(--info)]" };
   if (c.opportunityId) return { text: "Verified buyer", tone: "bg-[var(--good-bg)] text-[var(--good)]" };

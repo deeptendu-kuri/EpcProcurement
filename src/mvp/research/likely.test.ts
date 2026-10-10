@@ -61,3 +61,16 @@ describe("likely buyers become leads (docs/mvp/19 §6)", () => {
     expect(buyerPriority("explicit", "recent", "B").score - buyerPriority("explicit", "capability_only", "B").score).toBe(10);
   });
 });
+
+describe("one company however it is written (web audit, 10 Oct)", () => {
+  it("merges short names, Roman numerals and initials", async () => {
+    const { sameCompany } = await import("./found");
+    const k = (key: string, initials = "") => ({ key, initials });
+    expect(sameCompany(k("acwa"), k("acwapower"))).toBe(true);
+    expect(sameCompany(k("sepco3"), k("sepco3"))).toBe(true);
+    expect(sameCompany(k("swcc"), k("salinewaterconversion", "swcc"))).toBe(true);
+    expect(sameCompany(k("powerchina"), k("power"))).toBe(false);
+    expect(sameCompany(k("tekzoneksa"), k("tekzoneindustrialconstruction"))).toBe(false);
+  });
+});
+

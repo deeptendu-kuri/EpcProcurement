@@ -129,3 +129,11 @@ describe('extra rounds',()=>{
     expect(order).toEqual(['official:Example','Example-capability','Example-trigger']);
   });
 });
+
+describe('company websites must carry the distinctive name (web audit, 10 Oct)',()=>{
+  it('does not match a short word inside another brand',()=>{
+    expect(officialSite('O-GREEN',[{url:'https://www.ugreen.com/ar-sa/pages/about-ugreen'}])).toBeUndefined();
+    expect(officialSite('Al Gharbia',[{url:'https://algharbiapipe.com'}])).toBeTruthy();
+    expect(officialSite('Saudi Arabia Railways',[{url:'https://www.saudigulfprojects.com/'}])).toBeUndefined();
+  });
+});

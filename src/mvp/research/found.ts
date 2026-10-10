@@ -44,7 +44,20 @@ export interface FoundCompany {
 export type LikelyRole = 'owner' | 'contractor' | 'pipe_maker' | 'supplier';
 // "GASCO, Abu Dhabi" and "GASCO" are one company: the place after a comma is not part of the name.
 // "(KPIL)" is a short form, not part of the name, so "… Ltd (KPIL)" and "… Limited" match.
-const key = (name: string) => name.split(',')[0].replace(/\([^)]*\)/g, ' ').toLowerCase().replace(/\b(?:ltd|limited|llc|l\.l\.c|pvt|private|inc|plc|co|company|corporation|corp)\b\.?/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+/** Initials of the name's words ("Saline Water Conversion Corporation" → "swcc"). */
+const initialsOf = (name: string) => (name.replace(/\([^)]*\)/g, ' ').match(/[A-Za-z][A-Za-z'&]*/g) ?? []).map((w) => w[0].toLowerCase()).join('');
+// Words a short name often drops: "ACWA" for "ACWA Power", "Tekzone" for "Tekzone Industrial Construction".
+const NAME_TAIL = /^(?:power|group|energy|holdings?|international|global|engineering|construction|contracting|industrial|industries|services|technologies|me|middleeast|ksa|uae|arabia|saudi)+$/;
+/** The same company written two ways: equal keys, a short name plus a generic tail, or initials. */
+export function sameCompany(a: { key: string; initials: string }, b: { key: string; initials: string }): boolean {
+  if (a.key === b.key) return true;
+  const [short, long] = a.key.length <= b.key.length ? [a, b] : [b, a];
+  if (short.key.length >= 4 && long.key.startsWith(short.key) && NAME_TAIL.test(long.key.slice(short.key.length))) return true;
+  return short.key.length >= 3 && short.key.length <= 6 && short.key === long.initials;
+}
+const key = (name: string) => name.split(',')[0].replace(/\([^)]*\)/g, ' ').toLowerCase()
+  // Roman numerals as numbers: "SEPCO-III" = "Sepco3".
+  .replace(/\biii\b/g, '3').replace(/\bii\b/g, '2').replace(/\b(?:ltd|limited|llc|l\.l\.c|pvt|private|inc|plc|co|company|corporation|corp)\b\.?/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
  * Likely role from how the source names the company: "Pipeline Project for GAIL" (the project owner, who
@@ -86,16 +99,17 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
   const savedBy = new Map(saved.map((s) => [key(s.name), s.id]));
   const savedFit = new Map(saved.map((s) => [s.id, Number(s.fit_score) || 0]));
   const savedHow = new Map(saved.map((s) => [s.id, s.verification]));
-  const runInput = (await db.query<{ product_id: string | null; resellers: boolean | null }>("select adhoc_query->>'productId' as product_id,(adhoc_query->>'includeResellers')::boolean as resellers from runs where id=$1", [runId])).rows[0];
+  const runInput = (await db.query<{ product_id: string | null; resellers: boolean | null; markets: string[] | null }>("select adhoc_query->>'productId' as product_id,(adhoc_query->>'includeResellers')::boolean as resellers,adhoc_query->'markets' as markets from runs where id=$1", [runId])).rows[0];
   const productId = runInput?.product_id ?? null;
-  const opts = { resellers: runInput?.resellers !== false };
+  const opts = { resellers: runInput?.resellers !== false, markets: runInput?.markets ?? [] };
   const productName = productId ? getCatalogueItem(productId)?.shortName ?? productId : '';
-  const seen = new Set<string>();
+  const seen: { key: string; initials: string }[] = [];
   const result: FoundCompany[] = [];
   for (const r of rows) {
     const k = key(r.company);
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
+    // One company, however it is written: "Acwa" / "ACWA Power", "SWCC" / "Saline Water Conversion Corporation".
+    if (!k || seen.some((s) => sameCompany(s, { key: k, initials: initialsOf(r.company) }))) continue;
+    seen.push({ key: k, initials: initialsOf(r.company) });
     const opportunityId = savedBy.get(k) ?? null;
     const how = opportunityId ? savedHow.get(opportunityId) ?? 'website' : null;
     const [status, statusText]: [FoundStatus, string] = opportunityId && how !== 'website' && (r.running || r.pending) ? ['checking', 'Verifying its website']
@@ -113,7 +127,7 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
       : ['not_checked', 'Not checked yet'];
     // AI ratings are re-checked against the current consistency rules, so a rule fix applies without a new AI call.
     const judged = { rating: Number(r.rating), role: r.rating_role ?? '', reason: r.rating_reason ?? '', buyerType: r.rating_buyer_type };
-    const row = { company: r.company, identity_quote: r.identity_quote, title: r.title };
+    const row = { company: r.company, identity_quote: r.identity_quote, title: r.title, url: r.url, domain: r.domain_hint };
     const shortlist = r.rating === null ? null : r.rating_source === 'ai' ? consistentRating(judged, row, productName, opts) : Number(r.rating);
     const buyerType = r.rating === null ? null : r.rating_source === 'ai' ? consistentType(judged, row, productName, opts) : r.rating_buyer_type;
     // One number per company per search: a verified buyer keeps the higher of the two ratings.
@@ -121,7 +135,9 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
     const rating = shortlist === null ? (fit || null) : Math.max(shortlist, fit);
     // Stockists and traders are secondary: listed, never leads (see likely.ts and discovery).
     const secondary = buyerType === 'reseller' && !opportunityId;
-    result.push({ id: r.id, name: r.company, website: r.domain_hint, status, statusText: secondary ? 'Stockist · secondary, not a lead' : statusText, source: r.url ? { title: r.title, url: r.url } : null,
+    // Project owners buy through their EPC contractors: listed, not saved as leads from a rating (likely.ts).
+    const ownerOnly = buyerType === 'owner' && !opportunityId;
+    result.push({ id: r.id, name: r.company, website: r.domain_hint, status, statusText: secondary ? 'Stockist · secondary, not a lead' : ownerOnly ? 'Project owner · buys through its EPCs' : statusText, source: r.url ? { title: r.title, url: r.url } : null,
       quote: r.identity_quote, pagesRead: r.pages, opportunityId,
       // Suppliers of the material are competitors, not buyers: folded with the other non-buyer names.
       // A rated company is relevant unless the rating says it is not a buyer.

@@ -197,8 +197,11 @@ describe("fixes from the per-company eval (docs/mvp/19 §5)", () => {
     expect(consistentType({ rating: 80, role: "Pipeline contractor", reason: "Lays pipelines", buyerType: "contractor" },
       { company: "Gulf Pipeline Builders", identity_quote: "Gulf Pipeline Builders lays gas pipelines" }, "line pipe")).toBe("contractor");
   });
-  it("tells the AI that owners commissioning projects buy the material", () => {
-    expect(ratingPrompt("line-pipe", rows).system).toMatch(/owner-furnished material/);
+  it("tells the AI that owners buy through their EPCs, and who is not a buyer (web audit, 10 Oct)", () => {
+    const system = ratingPrompt("line-pipe", rows, { markets: ["AE", "SA"] }).system;
+    expect(system).toMatch(/Owners buy mostly through their contractors: rate 40-55/);
+    expect(system).toMatch(/investors .* technology licensors, equipment makers/);
+    expect(system).toMatch(/sells in United Arab Emirates, Saudi Arabia: .* "Outside the searched countries"/);
   });
 });
 
@@ -259,5 +262,40 @@ describe("rating when a model refuses a request as too large (elbow search, 10 O
     expect(rated.warning).toBeUndefined();
     expect(calls[0]).toBe(12);
     expect(Math.max(...calls.slice(1))).toBeLessThanOrEqual(6);
+  });
+});
+
+describe("rules from the independent web audit (10 Oct)", () => {
+  const product = "stainless / duplex pipe";
+  const contractor = { rating: 70, role: "EPC contractor", reason: "Builds desalination plants.", buyerType: "contractor" as const };
+  const owner = { rating: 80, role: "Desalination plant owner", reason: "Owns plants.", buyerType: "owner" as const };
+  it("never treats plant, project or place names as companies", () => {
+    for (const company of ["Rabigh 4 IWP", "Shuaibah 3 IWP", "Jazan IGCC", "Hajr IPP", "Ras Al-Khair", "Yanbu III", "Al-Khobar I", "Qassim 1", "Prince Naif Bin Abdulaziz International Airport"])
+      expect(consistentType(owner, { company, identity_quote: company }, product)).toBe("not_buyer");
+    expect(consistentType(contractor, { company: "Rabigh Contracting Company", identity_quote: "Rabigh Contracting Company builds plants" }, product)).toBe("contractor");
+  });
+  it("rates investors, agencies, consultants, licensors, equipment makers and defunct firms as not buyers", () => {
+    expect(consistentType({ ...owner, role: "Investment company owner" }, { company: "Gulf Investment Corporation", identity_quote: null }, product)).toBe("not_buyer");
+    expect(consistentType({ ...owner, role: "Offtaker of desalinated water" }, { company: "Saudi Water Partnership Company", identity_quote: null }, product)).toBe("not_buyer");
+    for (const company of ["AECOM", "Black & Veatch", "Siemens", "Alstom", "Abengoa"]) expect(consistentType(contractor, { company, identity_quote: null }, product)).toBe("not_buyer");
+    expect(consistentType(contractor, { company: "Nextchem", identity_quote: "Nextchem Secures €125 Million Technology Package for SABIC AN" }, product)).toBe("not_buyer");
+  });
+  it("treats a company that receives bids or awards the contract as the procuring owner", () => {
+    expect(consistentType(contractor, { company: "SHARAKAT", identity_quote: "SHARAKAT Receives Five Bids for Riyadh East ISTP" }, product)).toBe("owner");
+    expect(consistentType(contractor, { company: "Nakheel", identity_quote: "Nakheel Awards Mar Marine Contract for marine works" }, product)).toBe("owner");
+    // The winner named in someone else's award is still the contractor.
+    expect(consistentType(contractor, { company: "Samsung E&A", identity_quote: "SABIC Agri-Nutrients Awards $3.47 Billion EPC Contract to Samsung E&A" }, product)).toBe("contractor");
+  });
+  it("spots a pipe mill by its web address, and a recruiter by its own page, but not a contractor named on a news site", () => {
+    expect(consistentType({ rating: 65, role: "Pipeline manufacturer/fabricator", reason: "Listed as a pipeline manufacturer", buyerType: "end_user" },
+      { company: "Al Gharbia", identity_quote: null, domain: "algharbiapipe.com" }, "fittings")).toBe("competitor");
+    expect(consistentType(contractor, { company: "Progressive", identity_quote: null, url: "https://www.progressiverecruitment.com/en-sa/job/123/" }, product)).toBe("not_buyer");
+    expect(consistentType(contractor, { company: "GAS Arabian Services", identity_quote: "GAS Arabian Services Wins Ghazlan 1 Gas Delivery System", url: "https://www.saudigulfprojects.com/" }, product)).toBe("contractor");
+  });
+  it("ranks owners below contractors and caps companies working only outside the searched countries", () => {
+    expect(consistentRating({ ...owner, role: "Oil & gas operator" }, { company: "ADNOC Onshore", identity_quote: "ADNOC Onshore operates oil fields" }, product)).toBe(55);
+    expect(consistentRating(contractor, { company: "IDE Technologies", identity_quote: "Located 15km south of Tel Aviv in Israel and developed by IDE Technologies" }, product, { markets: ["SA"] })).toBe(30);
+    expect(consistentRating({ ...contractor, reason: "Outside the searched countries; builds plants in Kuwait." }, { company: "Example EPC", identity_quote: null }, product, { markets: ["SA"] })).toBe(30);
+    expect(consistentRating(contractor, { company: "Acciona", identity_quote: "Acciona will build Jubail 3B in Saudi Arabia" }, product, { markets: ["SA"] })).toBe(70);
   });
 });

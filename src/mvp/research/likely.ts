@@ -19,10 +19,13 @@ import type { BuyerType } from './shortlist';
 
 export const LIKELY_MIN = 45;
 export const LIKELY_MAX_PER_SEARCH = 60;
-// Stockists and traders are secondary: listed under Companies found, never saved as leads.
+// Stockists and traders, and project owners (they buy through their EPC contractors), are secondary:
+// listed under Companies found, never saved as leads from a rating alone. A website check can still prove an owner.
 const ROLE: Record<BuyerType, string | null> = {
-  end_user: 'fabricator', contractor: 'epc_contractor', subcontractor: 'subcontractor', owner: 'owner', reseller: null, competitor: null, not_buyer: null,
+  end_user: 'fabricator', contractor: 'epc_contractor', subcontractor: 'subcontractor', owner: null, reseller: null, competitor: null, not_buyer: null,
 };
+/** The lead role a rated buyer type is saved with, or null when that type is never a lead. */
+export const leadRoleFor = (type: BuyerType): string | null => ROLE[type];
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInput, 'productId' | 'query' | 'contactRole'>): Promise<{ saved: number; listing: number }> {

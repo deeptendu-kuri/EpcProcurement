@@ -21,7 +21,9 @@ const PROFILE_SITES=['globaldata.com','zoominfo.com','crunchbase.com','dnb.com',
   'instafinancials.com','thecompanycheck.com','economictimes.indiatimes.com','business-standard.com','livemint.com','reuters.com','youtube.com','facebook.com',
   'instagram.com','twitter.com','x.com'];
 const GENERIC_NAME=new Set(['limited','private','india','group','company','construction','constructions','engineering','international','projects','project',
-  'infrastructure','industries','corporation','services','holdings','global','energy','pipeline','pipelines','contracts','contracting']);
+  'infrastructure','industries','corporation','services','holdings','global','energy','pipeline','pipelines','contracts','contracting',
+  // Country and region words name no one company: "Saudi Arabia Railways" is not saudigulfprojects.com.
+  'saudi','arabia','arabian','emirates','gulf','dubai','dhabi','qatar','kuwait','oman','bahrain','middle','east','national','united']);
 const LEGAL=new Set(['limited','ltd','pvt','private','the','llc','co','inc','plc','and']);
 /**
  * The company's own site among search results: its domain must carry a distinctive word of the name
@@ -44,7 +46,12 @@ export function officialSite<T extends {url:string}>(company:string,results:T[])
     let host:string;try{host=new URL(r.url).hostname.toLowerCase().replace(/^www\./,'');}catch{return false;}
     if(PROFILE_SITES.some(d=>host===d||host.endsWith('.'+d)))return false;
     const labels=host.split('.').slice(0,-1).map(l=>l.replace(/[^a-z0-9]/g,''));
-    return labels.some(label=>tokens.some(t=>label.includes(t))||initials.length>=3&&label.startsWith(initials)||amp.length>=3&&label.startsWith(amp));
+    // The name must lead the address ("aramco", "larsentoubro"; an Arabic "al" may come first), or a long
+    // distinctive word may sit inside it. A short word inside another brand is not a match ("green" in "ugreen").
+    const joined=plain.filter(w=>!LEGAL.has(w)).join('');
+    return labels.some(label=>{const lead=label.replace(/^(?:al|el|the)(?=[a-z]{4})/,'');
+      return tokens.some(t=>label.startsWith(t)||lead.startsWith(t)||t.length>=7&&label.includes(t))||joined.length>=5&&label.includes(joined)
+        ||initials.length>=3&&label.startsWith(initials)||amp.length>=3&&label.startsWith(amp);});
   });
 }
 
@@ -140,7 +147,10 @@ export async function seedRoundup(db:Db,runId:string,input:RunInput,result:Round
     if(company.role==='owner'||company.role==='consultant')continue;
     // A company named on its own website already has its website: no search needed.
     const own=!company.domain&&officialSite(company.name,[{url:original.url}])?domainOf(original.url):null;
-    const candidate=await db.tx(tx=>registerCandidate(tx,runId,company.name,company.domain??own,result.found_via.documentId,company.quote));
+    // A website the extraction read off the page counts only when it carries the company's name
+    // (not the news site it was read on, not another brand): otherwise the website is looked up later.
+    const listed=company.domain&&officialSite(company.name,[{url:`https://${company.domain.replace(/^https?:\/\//,'')}`}])?company.domain:null;
+    const candidate=await db.tx(tx=>registerCandidate(tx,runId,company.name,listed??own,result.found_via.documentId,company.quote));
     seeded++;
     await db.query('update research_candidates set found_via=$2::jsonb where id=$1',[candidate.id,JSON.stringify(result.found_via)]);
     // Page furniture (platforms, certifiers, site credits) and sellers of the material are listed,
