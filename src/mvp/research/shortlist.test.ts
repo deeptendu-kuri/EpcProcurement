@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type Db } from "@/mvp/db";
 import type { LLMProvider } from "@/mvp/llm/types";
-import { consistentRating, consistentReason, consistentType, heuristicRating, parseRatings, rateCandidates, ratingPrompt, ruleRating } from "./shortlist";
+import { consistentRating, consistentReason, consistentType, heuristicRating, parseRatings, rateCandidates, rateRows, ratingPrompt, ruleRating } from "./shortlist";
 import { listFoundCompanies } from "./found";
 
 describe("shortlist rating rules (docs/mvp/18 §5)", () => {
@@ -240,5 +240,24 @@ describe("fixes from the live Saudi search, 10 Oct", () => {
   it("keeps a real maker a competitor even when the AI's reason mentions use", () => {
     const judged = { rating: 5, role: "Steel pipe manufacturer", reason: "Manufactures pipe; uses steel coil", buyerType: "competitor" as const };
     expect(consistentType(judged, { company: "Example Tubes Co", identity_quote: "Example Tubes Co" }, product)).toBe("competitor");
+  });
+});
+
+describe("rating when a model refuses a request as too large (elbow search, 10 Oct)", () => {
+  it("splits the batch into smaller ones instead of falling back to plain rules", async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({ id: String(i), company: `Example Piping Contractors ${i} LLC`, identity_quote: `Example Piping Contractors ${i} LLC fabricates process piping spools.`, title: "Piping contractors" }));
+    const calls: number[] = [];
+    const provider: LLMProvider = { name: "groq", model: "test", async complete(request) {
+      const ids = [...request.user.matchAll(/"id":\s*"(c\d+)"/g)].map((m) => m[1]);
+      calls.push(ids.length);
+      if (ids.length > 6) throw new Error("groq 429: Request too large for model `qwen/qwen3.8-27b` on tokens per minute (TPM)");
+      return { text: JSON.stringify({ companies: ids.map((id) => ({ id, rating: 70, type: "end_user", role: "Piping fabricator", reason: "Fabricates process piping spools" })) }), tokensIn: 10, tokensOut: 10 };
+    } };
+    const rated = await rateRows(rows, { productId: "bw-fittings" }, () => provider);
+    expect(rated).toHaveLength(12);
+    expect(rated.every((r) => r.source === "ai")).toBe(true);
+    expect(rated.warning).toBeUndefined();
+    expect(calls[0]).toBe(12);
+    expect(Math.max(...calls.slice(1))).toBeLessThanOrEqual(6);
   });
 });

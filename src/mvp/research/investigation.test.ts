@@ -30,7 +30,8 @@ describe('source-aware company investigations',()=>{
   it('uses page-brand names, not provider titles or a news publisher as company identity',()=>{
     const text='Atlas Electrical Contracting LLC\nWe install power cables.';
     expect(pageCompany(text,'Services | Atlas Electrical Contracting LLC','https://atlas.example/services')).toBe('Atlas Electrical Contracting LLC');
-    expect(pageCompany(text,'Beta Engineering LLC','https://atlas.example')).toBeNull();
+    // A title naming another company is never used; the name written on the site's own page is.
+    expect(pageCompany(text,'Beta Engineering LLC','https://atlas.example')).toBe('Atlas Electrical Contracting LLC');
     expect(pageCompany(text,'Atlas Electrical Contracting LLC','https://economictimes.indiatimes.com/news')).toBeNull();
   });
   it('does not turn service headings into company names and recognises literal short brands on their own domain',()=>{
@@ -70,5 +71,21 @@ describe('source-aware company investigations',()=>{
     const base={query:'cables',productId:'cables',leadKinds:['supply_subcontract' as const]};
     expect(sourceSeeds({...base,markets:['AE']}).some(s=>s.research?.registryId==='dewa-contractor-list')).toBe(true);
     const india=sourceSeeds({...base,markets:['IN']});expect(india).toHaveLength(3);expect(india.some(s=>s.research?.registryId==='dewa-contractor-list')).toBe(false);
+  });
+});
+
+describe('company names from company pages (elbow search, 10 Oct)',()=>{
+  it('takes the company, not the service, from a page title',()=>{
+    expect(pageCompany('ESC Group provides general fabrication and welding in the UAE.','General Fabrication & Welding | ESC Group | United Arab Emirates','https://www.escpiling.com/general-fabrication-welding')).toBe('ESC Group');
+    expect(pageCompany('SJS Enersol carries out piping fabrication for oil and gas plants.','Piping Fabrication - UAE','https://sjsenersol.com/piping-fabrication/')).toBe('SJS Enersol');
+    expect(pageCompany('We process and fabricate custom wear parts.','Processing and fabrication of custom wear parts in UAE - SSAB','https://www.ssab.com/en/services/processing')).toBeNull();
+  });
+  it('never takes a company from a job advert or a recruitment site',()=>{
+    expect(pageCompany('Progressive is hiring a Project Manager Fabrication in Saudi Arabia.','Project Manager Fabrication (4069395) | Progressive','https://www.progressiverecruitment.com/en-sa/job/project-manager-fabrication/4069395/')).toBeNull();
+    expect(pageCompany('Example Steel Works LLC is hiring welders.','Welder | Example Steel Works LLC','https://examplesteel.example/careers/welder')).toBeNull();
+  });
+  it('keeps real company titles working',()=>{
+    expect(pageCompany('Embark Contracting Est provides piping and structural fabrication.','Piping and Structural Fabrication Company in Saudi Arabia| Embark Contracting Est','https://embarkgroups.com/services/3134')).toBe('Embark Contracting Est');
+    expect(pageCompany('DONEM Steel Saudi Arabia offers industrial fabrication.','Industrial Fabrication & Engineering Services | DONEM Steel Saudi Arabia','https://www.donem-steel.com/services')).toBe('DONEM Steel Saudi Arabia');
   });
 });

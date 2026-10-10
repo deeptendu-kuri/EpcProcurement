@@ -278,9 +278,13 @@ export async function rateRows(rows: RateRow[], ctx: RateContext, providerFor: (
     if (fixed) rated.push({ id: r.id, ...fixed }); else open.push(r);
   }
   let aiCalls = 0, warning: string | undefined;
-  for (let i = 0; i < open.length; i += RATING_BATCH) {
-    const batch = open.slice(i, i + RATING_BATCH);
+  const queue: Row[][] = [];
+  for (let i = 0; i < open.length; i += RATING_BATCH) queue.push(open.slice(i, i + RATING_BATCH));
+  while (queue.length) {
+    const batch = queue.shift()!;
     let answers: RatedCompany[] = [];
+    // Rows handed to smaller batches (a model refused the request as too large for its per-minute cap).
+    const resplit = new Set<string>();
     for (const [attempt, part] of [[0, batch], [1, null]] as const) {
       const todo = part ?? batch.filter((r) => !answers.some((a) => a.id === r.id));
       if (!todo.length || (attempt === 1 && !answers.length)) break;
@@ -292,11 +296,18 @@ export async function rateRows(rows: RateRow[], ctx: RateContext, providerFor: (
         aiCalls++;
         answers = [...answers, ...parseRatings(res.text, todo, ctx.productId, ctx)];
       } catch (error) {
-        warning = `AI rating unavailable (${error instanceof Error ? error.message.slice(0, 120) : 'error'}); plain rules rated the rest.`;
+        const message = error instanceof Error ? error.message : '';
+        if (/request too large/i.test(message) && todo.length > 4) {
+          const half = Math.ceil(todo.length / 2);
+          queue.unshift(todo.slice(0, half), todo.slice(half));
+          for (const r of todo) resplit.add(r.id);
+          break;
+        }
+        warning = `AI rating unavailable (${message.slice(0, 120) || 'error'}); plain rules rated the rest.`;
         break;
       }
     }
-    for (const r of batch) rated.push(answers.find((a) => a.id === r.id) ?? { id: r.id, ...heuristicRating(r.company, r.identity_quote, r.title, productName, ctx) });
+    for (const r of batch) if (!resplit.has(r.id)) rated.push(answers.find((a) => a.id === r.id) ?? { id: r.id, ...heuristicRating(r.company, r.identity_quote, r.title, productName, ctx) });
   }
   rated.aiCalls = aiCalls;
   rated.warning = warning;

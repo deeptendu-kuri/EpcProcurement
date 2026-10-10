@@ -8,14 +8,16 @@ export function junkCompanyReason(name:string):string|null {
   if(/\b(?:awards?|awarded|wins?|secured|bags|essential services|how to|top \d+|market size|market outlook)\b/i.test(n))return 'article or list title';
   return null;
 }
-const NEWS_PUBLISHERS=['saudigulfprojects.com','reuters.com','thehindubusinessline.com','business-standard.com','constructionweekonline.com','gulfnews.com','offshore-energy.biz','economictimes.indiatimes.com',
+const NEWS_PUBLISHERS=['saudigulfprojects.com','marinelink.com','maritime-executive.com','worldoil.com','fastmarkets.com','mysteel.net','mysteel.com','oilfieldtechnology.com','hydrocarbonengineering.com','manilatimes.net','pipeline-journal.net','offshore-mag.com','ogj.com','energy-pedia.com','argusmedia.com','spglobal.com','reuters.com','thehindubusinessline.com','business-standard.com','constructionweekonline.com','gulfnews.com','offshore-energy.biz','economictimes.indiatimes.com',
   'hindustantimes.com','livemint.com','indiatimes.com','thenationalnews.com','zawya.com','meed.com','arabnews.com','khaleejtimes.com'];
 export function newsPublisher(domain:string):boolean {
   const host=domain.toLowerCase();return NEWS_PUBLISHERS.some(d=>host===d||host.endsWith('.'+d));
 }
 const PUBLISHERS=[...NEWS_PUBLISHERS,'revenuebase.ai','indiamart.com'];
 export function nonCompanyDomain(domain:string):boolean {
-  return [...PUBLISHERS,'weebly.com','wordpress.com','blogspot.com','medium.com','github.io','linkedin.com','facebook.com','world-nuclear.org','mordorintelligence.com','sphericalinsights.com','wikipedia.org'].some(d=>domain===d||domain.endsWith('.'+d));
+  // Recruitment and job boards post buyers' vacancies; they are not the buyer ("Progressive" from a job ad).
+  if(/(?:recruit|jobs?|careers?|talent|staffing|hiring|vacanc)/i.test(domain.split('.')[0]??''))return true;
+  return [...PUBLISHERS,'scribd.com','issuu.com','yumpu.com','bayt.com','naukrigulf.com','gulftalent.com','indeed.com','glassdoor.com','monster.com','hays.com','michaelpage.com','michaelpage.ae','reed.co.uk','weebly.com','wordpress.com','blogspot.com','medium.com','github.io','linkedin.com','facebook.com','world-nuclear.org','mordorintelligence.com','sphericalinsights.com','wikipedia.org'].some(d=>domain===d||domain.endsWith('.'+d));
 }
 /** Identity admission, not a buying/verification label. Domain must already be corroborated. */
 export function companyIdentityReason(name:string,basis:{confirmedDomain?:string|null;registryRow?:boolean}={}):string|null {

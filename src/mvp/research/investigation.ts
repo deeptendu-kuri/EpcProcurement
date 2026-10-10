@@ -6,6 +6,7 @@ import { namesCompany } from "@/mvp/discovery/evidence";
 import { buyerPageCandidate } from "@/mvp/discovery/plan";
 import { addJob, manualCheck } from "./store";
 import { verifyPriority } from "./shortlist";
+import { classifyPage } from "@/mvp/sourcing/classify";
 import { readLane, readLaneLimits } from "./registry";
 import { companyIdentityReason,nonCompanyDomain } from '@/mvp/sourcing/entities';
 import { genericServicePhrase, junkFoundName } from '@/mvp/sourcing/names';
@@ -35,12 +36,19 @@ export { genericServicePhrase };
 /** Conservative page-brand seed. A title/hint is not a purchasing or legal-verification claim. */
 export function pageCompany(text:string,title:string|null,url:string):string|null {
   if(NON_COMPANY.test(domainOf(url))||nonCompanyDomain(domainOf(url)))return null;
-  const legal=/\b(?:contracting|contractors?|engineering|infrastructure|fabrication|construction|utility|utilities|mechanical|electrical|steel)\b/i;
+  // A job advert names the employer's vacancy, not a company's own work.
+  try{if(/\/(?:jobs?|careers?|vacanc\w*)\//i.test(new URL(url).pathname))return null;}catch{return null;}
+  // A news article or market report names its publisher in the title ("… | Mysteel"); the companies it
+  // reports on are taken from its text (awards, lists), never the site's own name.
+  const kind=classifyPage({url,title,text});
+  if(kind==='article'||kind==='junk'||/\b(?:awarded|awards?|wins?|won|signs?|secures?|clears|ordered|orders|prices?|market|trends|intelligence|report|deal|agreement)\b/i.test(title??''))return null;
+  const legal=/\b(?:contracting|contractors?|engineering|infrastructure|fabrication|construction|utility|utilities|mechanical|electrical|steel|group|holdings?|est|establishment)\b/i;
   const domain=domainOf(url).split('.')[0].replace(/[^a-z0-9]/g,'');
   const genericFirst=/^(?:cable|cables|pipe|pipes|pipeline|gas|oil|electrical|mechanical|civil|structural|industrial|engineering|construction|building|comprehensive|third|power|steel|utility|utilities|services?|solutions?|design|installation|maintenance|inspection|testing|top|latest|best|about|contact|welcome)$/i;
   const segments=(title??'').split(/\s+[|–—-]\s+|\s*\|\s*/);
   for(const segment of [...segments].reverse()) {
-    const name=segment.replace(/^(?:home|welcome to)\s*[:–—-]?\s*/i,'').trim();
+    // "Home", "Welcome to", and a page label before a colon ("Services : MAEC Contracting Company").
+    const name=segment.replace(/^(?:home|welcome to)\s*[:–—-]?\s*/i,'').replace(/^(?:services?|about(?: us)?|contact(?: us)?|projects?|products?)\s*:\s*/i,'').trim();
     const tokens=name.match(/[\p{L}\p{N}]+/gu)??[];
     const first=tokens[0]?.toLowerCase()??'';
     const domainBrand=!genericFirst.test(first)&&(first.length>=5&&domain.startsWith(first)||tokens.join('').toLowerCase()===domain);
@@ -49,6 +57,41 @@ export function pageCompany(text:string,title:string|null,url:string):string|nul
     if(name.length>=5&&name.length<=105&&(domainBrand||namedBusiness||declaredBrand)&&!companyIdentityReason(name,{confirmedDomain:domainOf(url)})&&namesCompany(text,[name])
       // "Pressure Vessel Fabrication", "We give you a clear solution", "… Secures A $300M …" are not company names.
       &&!genericServicePhrase(name)&&!junkFoundName(name,null)&&!/^(?:our |services|projects|electrical installation|pipeline construction|cable laying in|top \d|best \d|approved |list of|directory)|\b(?:news|awarded|wins?|secured|jobs|market|report|tender|contract award)\b/i.test(name))return name;
+  }
+  // Only a company's own page names itself this way, and only when its title names a service instead of
+  // the company ("Piping Fabrication - UAE"); a title that already contains the name keeps the old routing.
+  if(kind!=='company_site'&&kind!=='directory')return null;
+  const own=domainNameInText(text,url);
+  const plain=(s:string)=>s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
+  return own&&!plain(title??'').includes(plain(own).slice(0,Math.max(5,plain(own).length-6)))?own:null;
+}
+/**
+ * The company name written on its own page that spells its web address ("SJS Enersol" on sjsenersol.com),
+ * for titles that only name a service ("Piping Fabrication - UAE").
+ */
+export function domainNameInText(text:string,url:string):string|null{
+  const domain=domainOf(url).split('.')[0].replace(/[^a-z0-9]/g,'');
+  if(domain.length<5)return null;
+  const words=[...text.slice(0,20_000).matchAll(/[\p{L}\p{N}&]+/gu)].map(m=>({word:m[0],at:m.index??0}));
+  for(let i=0;i<words.length;i++){
+    let joined='';
+    for(let n=0;n<4&&i+n<words.length;n++){
+      joined+=words[i+n].word.toLowerCase();
+      if(joined===domain){
+        // Carry on to a company ending written right after it ("Atlas Electrical Contracting LLC").
+        let end=i+n;
+        for(let k=end+1;k<=Math.min(words.length-1,end+4);k++){
+          if(!/^[\p{Lu}]/u.test(words[k].word)||/[\n.,;:]/.test(text.slice(words[k-1].at+words[k-1].word.length,words[k].at)))break;
+          if(/^(?:llc|l\.?l\.?c|ltd|limited|inc|plc|corp|corporation|company|co|group|holdings?|est|establishment|fze|fzc|wll|w\.l\.l|works|industries|engineering|contracting|construction|trading|international|enterprises?)$/i.test(words[k].word))end=k;
+          // Stop at the first legal ending; a trade word ("Works", "Engineering") may be followed by one.
+          if(/^(?:llc|l\.?l\.?c|ltd|limited|inc|plc|corp|corporation|co|fze|fzc|wll|w\.l\.l)$/i.test(words[k].word))break;
+        }
+        const name=text.slice(words[i].at,words[end].at+words[end].word.length);
+        // A brand is written as a name ("SJS Enersol", "ALGHARBIA"), not inside running lowercase text.
+        if(/^[\p{Lu}\p{N}]/u.test(name)&&!genericServicePhrase(name)&&!junkFoundName(name,null))return name;
+      }
+      if(joined.length>=domain.length)break;
+    }
   }
   return null;
 }

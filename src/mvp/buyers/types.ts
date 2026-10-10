@@ -35,6 +35,12 @@ export interface EvidenceDrawerView {
   header: LeadRow; why: string; /** Why this work needs the searched product, when the source wording supports it. */ application?: string | null;
   sources: SourceCard[]; related: { above: SubcontractorRow[]; below: SubcontractorRow[] };
   contacts: ContactSlot[]; activity: { at: string; text: string }[];
+  /** How the lead is proven (doc 19 §6): its own website, its listed work, or only rated as likely. */
+  proof?: { level: 'verified' | 'listing' | 'likely'; note: string };
+  /** The search's rating of the company (from what the source says), with what to do next. */
+  rating?: { score: number | null; role: string | null; reason: string | null; buyerType: string | null; candidateId: string; runId: string; checkable: boolean; status: string } | null;
+  /** Contracts, orders and regular work found for the company, newest first, each with its source. */
+  recent?: Trigger[];
 }
 
 export type BuyerRole = 'owner' | 'epc_contractor' | 'subcontractor' | 'manufacturer' | 'fabricator' | 'distributor';

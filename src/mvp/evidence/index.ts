@@ -8,7 +8,7 @@ import {companyIdentityReason} from '@/mvp/sourcing/entities';
 import {sentenceFor} from '@/mvp/buyers/load';
 import {buildTeam} from '@/mvp/buyers/team';
 import {applicationSentence} from '@/mvp/discovery/application';
-import type {EvidenceDrawerView,SourceCard,LeadRow} from '@/mvp/buyers/types';
+import type {EvidenceDrawerView,SourceCard,LeadRow,Trigger} from '@/mvp/buyers/types';
 
 interface SourceSql {id:string;document_id:string;quote:string;text:string;url:string;title:string|null;published_at:string|null;source_key:string;fields:string[];}
 type Proves=SourceCard['quotes'][number]['proves'];
@@ -89,11 +89,72 @@ async function drawerView(db:Queryable,data:TableDataset,companyId:string,compan
 }
 export async function opportunityEvidence(id:string,db:Queryable=getDb()):Promise<EvidenceDrawerView|null>{
   const opp=(await db.query<{run_id:string;company_id:string}>('select run_id,company_id from search_opportunities where id=$1',[id])).rows[0];if(!opp)return null;
-  const data=await tableDataset(opp.run_id,db);const company=data.companies.find(c=>c.row.opportunityId===id);if(!company)return null;
-  return drawerView(db,data,opp.company_id,company,opp.run_id);
+  const data=await tableDataset(opp.run_id,db);const company=data.companies.find(c=>c.row.opportunityId===id);
+  const view=company?await drawerView(db,data,opp.company_id,company,opp.run_id):null;
+  return view?withLeadContext(db,view,opp.company_id,opp.run_id):likelyLeadView(db,opp.company_id,opp.run_id);
 }
 export async function companyEvidence(id:string,run='all',db:Queryable=getDb()):Promise<EvidenceDrawerView|null>{
   const data=await tableDataset(run,db);
-  if(run!=='all'&&!data.companies.some(c=>c.row.companyId===id)&&!data.chain.some(c=>c.row.companyId===id||c.row.linkedToCompanyId===id))return null;
-  return drawerView(db,data,id,data.companies.find(c=>c.row.companyId===id)??null,run);
+  const listed=run==='all'||data.companies.some(c=>c.row.companyId===id)||data.chain.some(c=>c.row.companyId===id||c.row.linkedToCompanyId===id);
+  const view=listed?await drawerView(db,data,id,data.companies.find(c=>c.row.companyId===id)??null,run):null;
+  // A lead saved from the shortlist has no checked quote yet: show why it is rated likely and where it was found.
+  return view?withLeadContext(db,view,id,run):likelyLeadView(db,id,run);
+}
+
+interface LeadOpp {id:string;run_id:string;fit_score:number;verification:'website'|'listing'|'rating';buying_reason:string;product_id:string;product_name:string;name:string;country:string|null;types:string[]}
+async function leadOpp(db:Queryable,companyId:string,run:string):Promise<LeadOpp|null>{
+  return (await db.query<LeadOpp>(`select o.id,o.run_id,o.fit_score,o.verification,o.buying_reason,o.product_id,o.product_name,c.canonical_name as name,c.country,c.types
+    from search_opportunities o join companies c on c.id=o.company_id where o.company_id=$1 and ($2::uuid is null or o.run_id=$2) and o.qualification<>'rejected'
+    order by o.created_at desc limit 1`,[companyId,run==='all'?null:run])).rows[0]??null;
+}
+const PROOF_NOTE={
+  verified:'Verified: its own website shows matching work.',
+  listing:'Its listed work: a list or directory entry describes its work with this material. Its own website is not checked yet.',
+  likely:'Likely buyer, not verified: rated from what the source says. Verify it before relying on it; it is never emailed automatically.',
+} as const;
+/** The search's rating of this company and whether it can be checked now. */
+async function ratingFor(db:Queryable,opp:LeadOpp|null){
+  if(!opp)return null;
+  const {listFoundCompanies}=await import('@/mvp/research/found');
+  const found=(await listFoundCompanies(db,opp.run_id)).find(c=>c.opportunityId===opp.id);
+  if(!found)return null;
+  const checkable=['not_checked','no_website','unreadable'].includes(found.status)&&opp.verification!=='website'&&found.buyerType!=='reseller';
+  return {found,rating:{score:found.rating,role:found.ratingRole,reason:found.ratingReason,buyerType:found.buyerType,candidateId:found.id,runId:opp.run_id,checkable,status:found.statusText}};
+}
+const newestFirst=(a:Trigger,b:Trigger)=>(b.date??'').localeCompare(a.date??'');
+/** Adds how the lead is proven, the search's rating and its recent work to a verified view. */
+async function withLeadContext(db:Queryable,view:EvidenceDrawerView,companyId:string,run:string):Promise<EvidenceDrawerView>{
+  const opp=await leadOpp(db,companyId,run);
+  const level=opp?.verification==='listing'?'listing':opp?.verification==='rating'?'likely':'verified';
+  const rated=await ratingFor(db,opp).catch(()=>null);
+  const recent=(await triggersForCompany(db,companyId,run!=='all'?run:undefined)).sort(newestFirst);
+  return {...view,proof:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent};
+}
+/**
+ * A lead saved from the shortlist (docs/mvp/19 §6): no checked quote yet, so the panel shows why the search
+ * rated it a likely buyer, the source page that named it (the exact line, when it is on the page), its
+ * recent work if any, and a Verify action.
+ */
+async function likelyLeadView(db:Queryable,companyId:string,run:string):Promise<EvidenceDrawerView|null>{
+  const opp=await leadOpp(db,companyId,run);if(!opp)return null;
+  const rated=await ratingFor(db,opp).catch(()=>null);
+  const candidate=rated?(await db.query<{quote:string|null;doc:string|null;text:string|null;url:string|null;title:string|null;published_at:string|null}>(`select c.identity_quote as quote,c.identity_document_id as doc,d.text,d.url,d.title,d.published_at::text as published_at
+    from research_candidates c left join source_documents d on d.id=c.identity_document_id where c.id=$1`,[rated.rating.candidateId])).rows[0]:null;
+  const sources:SourceCard[]=[];
+  if(candidate?.doc&&candidate.url&&candidate.text){
+    let domain='';try{domain=new URL(candidate.url).hostname;}catch{/* not a web page */}
+    const quote=candidate.quote?originalQuote(candidate.text,candidate.quote):null;
+    const kind=classifyPage({url:candidate.url,title:candidate.title,text:candidate.text});
+    if(domain)sources.push({documentId:candidate.doc,url:candidate.url,domain,title:candidate.title??domain,publishedAt:candidate.published_at,
+      kind:kind==='junk'||kind==='article'?'roundup':kind==='company_site'?'company_site':kind==='directory'?'directory':'roundup',
+      quotes:quote?[{evidenceId:`candidate:${rated!.rating.candidateId}`,sentence:sentenceFor(candidate.text,quote,null,null)??quote,highlight:quote,proves:'role'}]:[]});
+  }
+  const triggers=(await triggersForCompany(db,companyId,opp.run_id)).sort(newestFirst);
+  const level=opp.verification==='listing'?'listing':opp.verification==='website'?'verified':'likely';
+  const team=buildTeam(opp.types.includes('subcontractor')?'subcontractor':'epc_contractor',opp.name,[]);
+  const notes=(await db.query<{at:string;text:string}>("select created_at::text as at,'Workspace note/status: '||body as text from opportunity_events where opportunity_id=$1 order by created_at desc limit 30",[opp.id])).rows;
+  const header:LeadRow={opportunityId:opp.id,companyId,name:opp.name,whatTheyDo:rated?.rating.role??'',trigger:strongestTrigger(triggers),operatingCountry:opp.country,hqCountry:null,
+    sellSummary:opp.product_name,fitScore:Math.max(Number(opp.fit_score)||0,rated?.rating.score??0),howSure:'low',stage:'check',contactsFound:0,contactsTotal:team.length,sourceCount:sources.length,status:'likely',isSample:false};
+  return {header,why:rated?.rating.reason??opp.buying_reason,application:null,sources,related:{above:[],below:[]},contacts:team,activity:notes,
+    proof:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent:triggers};
 }

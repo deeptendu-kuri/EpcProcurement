@@ -16,7 +16,7 @@ import type { ResearchBudget, ResearchJob } from './store';
 import { autoPauseIfDue } from './control';
 import { clearBuyerCache } from '@/mvp/buyers/load';
 import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
-import { candidateForPage, candidatePageIdentity, extendInvestigation, seedInvestigations, domainOf, queueRead } from './investigation';
+import { candidateForPage, candidatePageIdentity, extendInvestigation, seedInvestigations, domainOf, queueRead, registerCandidate } from './investigation';
 import { RESEARCH_SOURCES } from './registry';
 import { bundlePromptText,discoverCompanyBundle,loadCompanyBundle } from '@/mvp/discovery/bundle';
 import { z } from 'zod';
@@ -35,6 +35,7 @@ import { extendResearchIfShort,retryAfterRateLimit } from './extend';
 import { REPEAT_STORY_PRIORITY,sameStory } from '@/mvp/sourcing/story';
 import { LLMHttpError,QuotaExceededError } from '@/mvp/llm/types';
 import { DAILY_LIMIT,retryAfterMs } from '@/mvp/llm/groq';
+import { getLLM,type LLMProvider } from '@/mvp/llm';
 /** Longest a step waits for Groq's daily allowance before the search stops (seconds). */
 const DAILY_WAIT_MAX_S=60*60;
 import { tedSource } from '@/mvp/pipeline/sources/ted';
@@ -217,7 +218,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         await db.query('update research_jobs set result=$3::jsonb where id=$1 and lease_token=$2',[job.id,job.lease_token,JSON.stringify({roundup})]);
         const seeded=await seedRoundup(db,job.run_id,input,roundup,session.budget);
         // Rate the names just found so website lookups go to likely buyers first (docs/mvp/18 §5).
-        const rating=await rateCandidates(db,job.run_id,input,key=>budgetedAwardProviders(db,job.run_id,key,session.budget).provider('triage'))
+        const rating=await rateCandidates(db,job.run_id,input,ratingProvider(db,job.run_id,session.budget))
           .catch(error=>({rated:[],aiCalls:0,warning:`Shortlist rating skipped: ${error instanceof Error?error.message:'error'}`}));
         const likely=rating.rated.filter(r=>r.rating>=45).length;
         if(rating.rated.length)await researchProgress(db,job.run_id,'check',`Shortlist: rated ${rating.rated.length} companies; ${likely} look like buyers. Checking the best rated first.`);
@@ -254,6 +255,9 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         });
         if(!resolved)return {processed:true,stale:true};
         const triggers=await persistAwardTriggers(db,job.run_id,input.productId!,await awardTriggerSnapshots(db,id));
+        // Award winners join the shortlist: rated like every other company, saved as likely leads with the
+        // award as recent work, even when the announcement does not name the exact product (it rarely does).
+        await shortlistAwardWinners(db,job.run_id,id,triggers).catch(()=>0);
         await buildSignalsAndScore(job.run_id,{db});
         await captureOpportunities(job.run_id,input,db);
         await completeJob(db,job,{extracted,triggers,factsKept:extracted.stats.kept,factsDropped:extracted.stats.dropped,budgetLimited:providers.limited});
@@ -361,7 +365,7 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
     // Names found outside list pages (news, company sites) are rated before the search settles (docs/mvp/18 §5).
     const rs=(await db.query<{input:RunInput|null;budget:ResearchBudget}>('select r.adhoc_query as input,s.budget from research_sessions s join runs r on r.id=s.run_id where s.run_id=$1',[s.run_id])).rows[0];
     if(rs?.input?.productId){
-      const rated=await rateCandidates(db,s.run_id,rs.input,key=>budgetedAwardProviders(db,s.run_id,key,rs.budget).provider('triage')).catch(()=>null);
+      const rated=await rateCandidates(db,s.run_id,rs.input,ratingProvider(db,s.run_id,rs.budget)).catch(()=>null);
       if(rated?.rated.length)await researchProgress(db,s.run_id,'check',`Shortlist: rated ${rated.rated.length} more companies; ${rated.rated.filter(r=>r.rating>=45).length} look like buyers.`);
       const likely=await saveLikelyBuyers(db,s.run_id,rs.input).catch(()=>({saved:0,listing:0}));
       if(likely.saved)await researchProgress(db,s.run_id,'check',`Saved ${likely.saved} likely ${likely.saved===1?'buyer':'buyers'} as leads${likely.listing?` (${likely.listing} with their listed work as evidence)`:''}.`);
@@ -399,4 +403,36 @@ export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
     const counters=await researchProgress(db,s.run_id,allSourcesFailed?'error':'done',allSourcesFailed?'All live sources failed. No sample data was substituted.':`${partial?'Partial research; saved companies retained. ':coverageLimited?'Research complete with bounded coverage; saved companies retained. ':'Research complete. '}No sample data was substituted.`);
     await researchProgress(db,s.run_id,'info',`${counters.scopedProspects??0} buyer prospects saved; contact discovery/validation is separate.${failed?' Some sources/pages failed; coverage is incomplete.':''}`);
   }
+}
+/**
+ * Add the winners of a verified award (contractor, subcontractor or project owner) to the search's
+ * shortlist, identified by the award sentence on the stored article. The normal rating decides whether
+ * each is a likely buyer; the award itself shows as the company's recent work.
+ */
+export async function shortlistAwardWinners(db:Db,runId:string,documentId:string,triggers:{id:string;kind:string;role:string;title:string}[]):Promise<number> {
+  let added=0;
+  for(const t of triggers){
+    if(t.kind==='tender'||t.role==='supplier')continue;
+    const company=(await db.query<{name:string}>('select c.canonical_name as name from company_triggers t join companies c on c.id=t.company_id where t.id=$1',[t.id])).rows[0]?.name;
+    if(!company)continue;
+    await db.tx(tx=>registerCandidate(tx,runId,company,null,documentId,t.title));added++;
+  }
+  return added;
+}
+/**
+ * The AI that rates a search's shortlist. Rating is cheap (about 2-3k tokens per 20 companies) and decides
+ * which companies are checked, so once the search's own AI allowance is used up it continues on the day's
+ * shared allowance (still recorded against the search) instead of leaving companies unrated.
+ */
+export function ratingProvider(db:Db,runId:string,budget:ResearchBudget){
+  return (key:string):LLMProvider=>{
+    const budgeted=budgetedAwardProviders(db,runId,key,budget).provider('triage');
+    return {...budgeted,async complete(request){
+      try{return await budgeted.complete(request);}
+      catch(error){
+        if(!(error instanceof Error&&/budget exhausted/i.test(error.message)))throw error;
+        return getLLM('triage',db).complete({...request,runId,singleAttempt:true});
+      }
+    }};
+  };
 }
