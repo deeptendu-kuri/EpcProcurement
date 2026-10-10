@@ -15,7 +15,17 @@ export async function apiJson<T>(url: string, init: { method?: string; body?: un
     signal: init.signal,
     cache: "no-store",
   });
-  const data = (await response.json().catch(() => ({}))) as { error?: string };
+  let data: { error?: string };
+  try {
+    data = await response.json();
+  } catch (error) {
+    // Navigation can abort the body after headers arrive. Never turn that into
+    // a successful empty result: callers would render it as a full API response.
+    if (init.signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+    if (response.ok) throw new ApiError("The server returned an unreadable response. Try again.", response.status);
+    data = {};
+  }
+  if (init.signal?.aborted) throw init.signal.reason ?? new DOMException("Request aborted.", "AbortError");
   if (!response.ok) {
     if (response.status === 401) throw new ApiError("Your session has ended. Sign in again.", 401);
     throw new ApiError(data.error ?? `Request failed (${response.status}).`, response.status);

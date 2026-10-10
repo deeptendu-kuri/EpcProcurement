@@ -310,6 +310,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
     const people = current.view === "contacts" ? searchContacts(body, controller.signal) : Promise.resolve(null);
     Promise.all([buyers, people])
       .then(([nextResult, nextContacts]) => {
+        if (controller.signal.aborted) return;
         setResult(nextResult);
         setContacts(nextContacts);
         setError(null);
