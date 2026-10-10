@@ -188,7 +188,7 @@ export async function lookupRoundupWebsite(db:Db,runId:string,input:RunInput,can
   await db.query('update research_candidates set domain_hint=coalesce(domain_hint,$2) where id=$1',[candidate.id,domain]);
   const raw:RawDoc={...found,url:'https://'+domain+'/',title:null,text:null,fallbackText:null,research:{lane:'investigation',candidateId:candidate.id,sourcingLane:'roundup'}};
   // A company the user asked to check is read first; otherwise its rating decides (see verifyPriority).
-  const rating=(await db.query<{rating:number|null}>('select rating from research_candidates where id=$1',[candidate.id])).rows[0]?.rating;
-  const priority=await manualCheck(db,runId,candidate.id)?2500:Math.max(750,verifyPriority(rating));
+  const rated=(await db.query<{rating:number|null;type:string|null}>('select rating,rating_buyer_type as type from research_candidates where id=$1',[candidate.id])).rows[0];
+  const priority=await manualCheck(db,runId,candidate.id)?2500:['reseller','competitor','not_buyer'].includes(rated?.type??'')?5:Math.max(750,verifyPriority(rated?.rating,rated?.type));
   return {queued:await db.tx(tx=>queueRead(tx,runId,raw,budget,priority))?1:0,cached};
 }

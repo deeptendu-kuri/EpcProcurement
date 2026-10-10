@@ -42,7 +42,9 @@ export type DiscoveredBuyer = z.infer<typeof discoverySchema>["buyers"][number];
 const BUYER_WORK = /\b(?:epc|contract\w*|construct\w*|install\w*|procure\w*|fabricat\w*|weld\w*|erect\w*|laying|painting|blasting|coating|maintain\w*|maintenance|drilling)\b/i;
 const SALES_ONLY = /\b(?:pipe manufacturer|pipe mill|stockist|distributor|manufactur\w* (?:and |& )?suppl\w*|supply (?:order|contract)|supplier-only)\b/i;
 /** A stockist, trader or distributor that stocks or supplies the material (doc 19 reseller buyers). */
-export const RESELLER_WORK = /\b(?:stockists?|stockholders?|stock(?:s|ing)?|traders?|trading|distribut(?:or|ors|ion|es|ing)|dealers?|wholesal\w*|suppl(?:y|ies|ier|iers|ying))\b/i;
+/** Why a stockist or trader is not saved as a lead (shown in Companies found). */
+export const SECONDARY_REASON = 'Stockist or trader: shown as secondary, not saved as a lead.';
+export const RESELLER_WORK =/\b(?:stockists?|stockholders?|stock(?:s|ing)?|traders?|trading|distribut(?:or|ors|ion|es|ing)|dealers?|wholesal\w*|suppl(?:y|ies|ier|iers|ying))\b/i;
 const PRE_AWARD = /\b(?:invitation to (?:bid|tender)|invites? (?:bids|tenders)|seeking bids|tender notice|bid deadline)\b/i;
 
 /** Verbatim, company-attributed evidence is mandatory. Search country hints are never proof. */
@@ -57,7 +59,9 @@ export function buyerEvidence(b:DiscoveredBuyer,text:string,input:RunInput,bundl
   const identityReason=companyIdentityReason(b.company,{confirmedDomain});
   if(identityReason)return fail(identityReason);
   if(!input.productId)return fail('Search product is missing.');
-  if(!["epc_contractor","subcontractor","fabricator","input_manufacturer","channel_customer","owner"].includes(b.role))return fail("Not a buying-compatible contractor/fabricator.");
+  // Stockists and traders are secondary: shown under Companies found, never saved as leads or emailed.
+  if(b.role==='channel_customer')return fail(SECONDARY_REASON);
+  if(!["epc_contractor","subcontractor","fabricator","input_manufacturer","owner"].includes(b.role))return fail("Not a buying-compatible contractor/fabricator.");
   const productText=bundle?bundleSource(bundle,b.productQuote)?.text??'':text;
   const activityText=bundle&&b.activityQuote?bundleSource(bundle,b.activityQuote)?.text??'':text;
   const productQuote=(bundle?bundleScope(bundle,b.productQuote,names):null)??attributedScope(productText,b.productQuote,companyQuote,names)
@@ -69,18 +73,14 @@ export function buyerEvidence(b:DiscoveredBuyer,text:string,input:RunInput,bundl
   if(!productQuote)return fail("Product activity is not attributed to this company.");
   if(b.country&&!countryQuote)return fail("Location is not attributed to this company.");
   const inputWork=b.role==='input_manufacturer'&&/\b(?:uses?|consumes?|procures?|purchases?|raw material|material inputs?)\b/i.test(productQuote);
-  // A stockist or trader that stocks and supplies the material counts as a reseller buyer when the search
-  // includes resellers (doc 19); otherwise only explicit purchasing-for-resale evidence does.
-  const channelWork=b.role==='channel_customer'&&(/\b(?:purchases?|procures?|stocks?|stocking|buys?|buying)\b/i.test(productQuote)&&/\b(?:resale|resell|distribution|inventory)\b/i.test(productQuote)
-    ||input.includeResellers!==false&&RESELLER_WORK.test(productQuote));
   // Owners and operators buy directly for the assets they run (pipelines, plants, utilities).
   // The owner must be described as one (it operates/maintains/procures the assets), not as a contractor.
   const ownerWork=b.role==='owner'&&/\b(?:operat\w*|own(?:s|ed)?|maintain\w*|maintenance|procure\w*|purchas\w*|expan\w*|develop\w*)\b/i.test(productQuote)
     &&!/\b(?:epc|contractors?|subcontractors?)\b/i.test(`${companyQuote} ${productQuote}`);
   if(b.role==='owner'&&!ownerWork)return fail('An owner must operate, maintain or procure assets that use the material.');
-  if(!BUYER_WORK.test(productQuote)&&!inputWork&&!channelWork&&!ownerWork)return fail("No documented buying-compatible work.");
-  if((b.role==='input_manufacturer'&&!inputWork)||(b.role==='channel_customer'&&!channelWork))return fail('Material input or channel purchasing is not evidenced.');
-  if((!inputWork&&!channelWork&&((SALES_ONLY.test(companyQuote)&&b.role!=="fabricator")||SALES_ONLY.test(productQuote)))||PRE_AWARD.test(productQuote))return fail("Supplier-only sales or open tender, not buyer work.");
+  if(!BUYER_WORK.test(productQuote)&&!inputWork&&!ownerWork)return fail("No documented buying-compatible work.");
+  if(b.role==='input_manufacturer'&&!inputWork)return fail('Material input is not evidenced.');
+  if((!inputWork&&((SALES_ONLY.test(companyQuote)&&b.role!=="fabricator")||SALES_ONLY.test(productQuote)))||PRE_AWARD.test(productQuote))return fail("Supplier-only sales or open tender, not buyer work.");
   if(materialEvidenceKind(productQuote,input.productId)==="none")return fail("Product/material application does not match the search.");
   if(b.country&&!countriesInQuote(b.countryQuote??'',names).includes(b.country))return fail("No geographic evidence; query hints and customer brands do not count.");
   // Keep HQ intact. Operating claims must cite this company's actual work on ONE original.

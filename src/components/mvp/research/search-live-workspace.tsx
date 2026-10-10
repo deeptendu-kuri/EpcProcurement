@@ -24,6 +24,9 @@ const TYPE_TONE: Record<NonNullable<FoundCompany["buyerType"]>, string> = {
 };
 const inType = (c: FoundCompany, t: TypeFilter) => t === "any" || (t === "chain" ? c.buyerType === "contractor" || c.buyerType === "subcontractor" : c.buyerType === t);
 const CHECKABLE: FoundCompany["status"][] = ["not_checked", "no_website", "unreadable"];
+/** Stockists and traders are listed as secondary and never checked or saved as leads. */
+const secondary = (c: FoundCompany) => c.buyerType === "reseller" && !c.opportunityId;
+const checkable = (c: FoundCompany) => CHECKABLE.includes(c.status) && !secondary(c);
 const host = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const compact = (n: number) => (n >= 100_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n));
 const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
@@ -45,6 +48,7 @@ function Stat({ label, value, sub, ratio }: { label: string; value: string; sub?
 }
 
 function statusLine(c: FoundCompany): { text: string; tone: string } {
+  if (secondary(c)) return { text: "Stockist · secondary, not a lead", tone: "bg-[var(--subtle)] text-[var(--text-2)]" };
   if (c.opportunityId && c.verification === "rating") return { text: "Lead · likely, not verified", tone: "bg-[var(--warn-bg)] text-[var(--warn)]" };
   if (c.opportunityId && c.verification === "listing") return { text: "Lead · its listed work", tone: "bg-[var(--info-bg)] text-[var(--info)]" };
   if (c.opportunityId) return { text: "Verified buyer", tone: "bg-[var(--good-bg)] text-[var(--good)]" };
@@ -106,7 +110,7 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
   const shown = filter === "not" ? lists.not : lists[filter].filter((c) => inType(c, typeFilter));
   const typeCounts = (["end_user", "chain", "owner", "reseller"] as TypeFilter[]).map((t) => [t, lists[filter === "not" ? "all" : filter].filter((c) => inType(c, t)).length] as const);
   const unrated = data.companies.filter((c) => c.rating === null || c.guessed).length;
-  const nextToCheck = relevant.filter((c) => (!c.opportunityId || c.verification === "rating") && CHECKABLE.includes(c.status) && (c.rating === null || c.rating >= 25)).slice(0, 5);
+  const nextToCheck = relevant.filter((c) => (!c.opportunityId || c.verification === "rating") && checkable(c) && (c.rating === null || c.rating >= 25)).slice(0, 5);
   const markets = data.run.markets.map(marketName);
   const u = data.usage;
 
@@ -234,9 +238,9 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
                         <span className={`rounded-full px-2 py-0.5 font-medium ${status.tone}`}>{status.text}</span>
                         {c.source?.url ? <a href={c.source.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[var(--muted)] hover:text-[var(--accent)]">Found in {(c.source.title ?? host(c.source.url)).slice(0, 60)}<ExternalLink size={12} aria-hidden /></a> : null}
                         <span className="ml-auto flex gap-2">
-                          {c.opportunityId && c.verification === "rating" && CHECKABLE.includes(c.status) ? <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => void act(c.id, { candidateId: c.id })} aria-label={`Verify ${c.name}`}>{busy === c.id ? "Starting…" : "Verify"}</button> : null}
+                          {c.opportunityId && c.verification === "rating" && checkable(c) ? <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => void act(c.id, { candidateId: c.id })} aria-label={`Verify ${c.name}`}>{busy === c.id ? "Starting…" : "Verify"}</button> : null}
                           {c.opportunityId ? <Link href={`/opportunities/${c.opportunityId}?returnTo=${encodeURIComponent(`/find?run=${runId}`)}`} className="btn btn-secondary btn-sm">Open lead<ArrowRight size={13} aria-hidden /></Link>
-                            : CHECKABLE.includes(c.status) ? <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => void act(c.id, { candidateId: c.id })} aria-label={`Check ${c.name} now`}>{busy === c.id ? "Starting…" : "Check now"}</button> : null}
+                            : checkable(c) ? <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => void act(c.id, { candidateId: c.id })} aria-label={`Check ${c.name} now`}>{busy === c.id ? "Starting…" : "Check now"}</button> : null}
                         </span>
                       </div>
                     </div>

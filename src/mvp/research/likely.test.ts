@@ -30,6 +30,7 @@ describe("likely buyers become leads (docs/mvp/19 §6)", () => {
     await add("Rule Guess Contracting", "Rule Guess Contracting.", 50, "contractor", "rules");
     await add("Welspun Corp", "Welspun Corp makes line pipe.", 70, "competitor");
     await add("Weak Works", "Weak Works.", 30, "end_user");
+    await add("Gulf Steel Stockists LLC", "Gulf Steel Stockists LLC stocks and supplies line pipe to pipeline contractors across the UAE.", 60, "reseller");
   }, 60_000);
   afterAll(async () => { setDbForTests(undefined); await db?.close(); });
 
@@ -45,6 +46,8 @@ describe("likely buyers become leads (docs/mvp/19 §6)", () => {
     expect(found.find((f) => f.name === "Desert Mechanical LLC")).toMatchObject({ status: "saved", statusText: "Lead · likely, not verified", verification: "rating" });
     expect(found.find((f) => f.name === "Welspun Corp")?.opportunityId).toBeNull(); // competitors are never leads
     expect(found.find((f) => f.name === "Rule Guess Contracting")?.opportunityId).toBeNull(); // a rule guess needs evidence
+    // Stockists are secondary: listed, never a lead.
+    expect(found.find((f) => f.name === "Gulf Steel Stockists LLC")).toMatchObject({ opportunityId: null, statusText: "Stockist · secondary, not a lead" });
     expect(await saveLikelyBuyers(db, run, input)).toEqual({ saved: 0, listing: 0 }); // never twice
   });
   it("keeps searching until the search's own target, not 2 buyers", () => {

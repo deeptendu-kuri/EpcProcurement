@@ -17,6 +17,8 @@ const roleLabel:Record<LikelyRole,string>={owner:'Project owner',contractor:'Con
 const roleHint:Record<LikelyRole,string>={owner:'Named as the owner of a project; owners often buy material directly.',contractor:'Described as a construction, engineering or EPC company.',pipe_maker:'Makes or supplies pipe; may compete with you for this product.',supplier:'Says it supplies this kind of material; a competitor rather than a buyer.'};
 const order:Record<FoundCompany['status'],number>={saved:0,checking:1,not_checked:2,no_website:3,unreadable:4,no_match:5};
 const CHECKABLE:FoundCompany['status'][]=['not_checked','no_website','unreadable'];
+// Stockists and traders are secondary: never checked or saved as leads.
+const checkable=(c:FoundCompany)=>CHECKABLE.includes(c.status)&&!(c.buyerType==='reseller'&&!c.opportunityId);
 const host=(url:string)=>{try{return new URL(url).hostname.replace(/^www\./,'');}catch{return '';}};
 type Data={companies:FoundCompany[];active:boolean};
 
@@ -55,8 +57,8 @@ export function FoundCompanies({runId}:{runId:string}){
   // The server orders saved buyers first, then by rating; unrated companies keep the status order.
   const rows=all.filter(c=>c.relevant).sort((a,b)=>Number(Boolean(b.opportunityId))-Number(Boolean(a.opportunityId))||(b.rating??-1)-(a.rating??-1)||order[a.status]-order[b.status]);
   const other=all.filter(c=>!c.relevant);
-  const next=rows.filter(c=>CHECKABLE.includes(c.status)).slice(0,5);
-  const waiting=rows.filter(c=>CHECKABLE.includes(c.status)).length;
+  const next=rows.filter(checkable).slice(0,5);
+  const waiting=rows.filter(checkable).length;
   const name=(c:FoundCompany)=>c.opportunityId?<Link className="text-[var(--accent-2)] hover:underline" href={`/opportunities/${c.opportunityId}?returnTo=${encodeURIComponent(`/crm?run=${runId}`)}`}>{c.name}</Link>:c.name;
   const source=(c:FoundCompany)=>c.source?.url?<a href={c.source.url} target="_blank" rel="noreferrer" className="underline">{(c.source.title??host(c.source.url)).slice(0,60)}</a>:EMPTY;
   const sourceHost=(c:FoundCompany)=>c.source?.url&&c.source.title?<span className="block text-xs text-[var(--muted)]">{host(c.source.url)}</span>:null;
@@ -64,7 +66,7 @@ export function FoundCompanies({runId}:{runId:string}){
     :c.likelyRole?<span className="pill" title={`${roleHint[c.likelyRole]} From the source wording; not verified.`}>{roleLabel[c.likelyRole]}</span>:EMPTY;
   const rating=(c:FoundCompany)=>c.rating!==null?<RatingBadge score={c.rating}/>:<span className="text-xs text-[var(--muted)]">Not rated</span>;
   const status=(c:FoundCompany)=><span className={`inline-block shrink-0 rounded-full border px-2 py-0.5 text-xs ${statusClass[c.status]}`} title={c.statusText}>{c.status==='no_match'?'Checked · no match':c.statusText}</span>;
-  const action=(c:FoundCompany,actions:boolean)=>actions&&CHECKABLE.includes(c.status)?<button type="button" disabled={busy!==null} onClick={()=>void check([c.id],c.id)} className="btn btn-secondary btn-sm shrink-0" aria-label={`Check ${c.name} now`}>{busy===c.id?'Starting…':'Check now'}</button>:null;
+  const action=(c:FoundCompany,actions:boolean)=>actions&&checkable(c)?<button type="button" disabled={busy!==null} onClick={()=>void check([c.id],c.id)} className="btn btn-secondary btn-sm shrink-0" aria-label={`Check ${c.name} now`}>{busy===c.id?'Starting…':'Check now'}</button>:null;
   const contacts=(c:FoundCompany)=>c.opportunityId?<Link className="underline" href={`/opportunities/${c.opportunityId}?tab=contacts&returnTo=${encodeURIComponent(`/crm?run=${runId}`)}`}>Contacts</Link>:EMPTY;
   const quote=(c:FoundCompany)=>c.ratingReason?<>{c.ratingReason}{c.alsoBuys.length?<span className="mt-1 block text-[var(--muted)]">Also buys: {c.alsoBuys.join(', ')}</span>:null}</>
     :c.quote?`“${c.quote.slice(0,160)}${c.quote.length>160?'…':''}”`:EMPTY;

@@ -19,8 +19,9 @@ import type { BuyerType } from './shortlist';
 
 export const LIKELY_MIN = 45;
 export const LIKELY_MAX_PER_SEARCH = 60;
+// Stockists and traders are secondary: listed under Companies found, never saved as leads.
 const ROLE: Record<BuyerType, string | null> = {
-  end_user: 'fabricator', contractor: 'epc_contractor', subcontractor: 'subcontractor', owner: 'owner', reseller: 'distributor', competitor: null, not_buyer: null,
+  end_user: 'fabricator', contractor: 'epc_contractor', subcontractor: 'subcontractor', owner: 'owner', reseller: null, competitor: null, not_buyer: null,
 };
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 

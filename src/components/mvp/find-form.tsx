@@ -231,7 +231,7 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
           </div>:null}
           <label className="flex items-start gap-3 rounded-xl border border-[var(--line)] p-3 text-sm">
             <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--accent)]" checked={includeResellers} onChange={(e) => setIncludeResellers(e.target.checked)} aria-label="Also find stockists and traders" />
-            <span><span className="font-semibold">Also find stockists and traders</span><span className="block text-xs text-[var(--muted)]">Companies that buy {chosen?.shortName ?? "this material"} to resupply contractors. Turn off if you only sell to end users and contractors; they then count as competitors.</span></span>
+            <span><span className="font-semibold">Also find stockists and traders</span><span className="block text-xs text-[var(--muted)]">Companies that buy {chosen?.shortName ?? "this material"} to resupply contractors. They are listed under Companies found as secondary, never saved as leads or emailed. Turn off to count them as competitors.</span></span>
           </label>
           <label className="flex flex-col gap-2 text-sm font-semibold sm:max-w-md">Where do you want buyers?
             <select aria-label="Add a country" className="control h-12 px-3 font-normal" value="" onChange={e=>{if(e.target.value&&!selected.includes(e.target.value))setSelected(s=>[...s,e.target.value]);}}>

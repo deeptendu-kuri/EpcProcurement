@@ -119,7 +119,9 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
     // One number per company per search: a verified buyer keeps the higher of the two ratings.
     const fit = opportunityId ? savedFit.get(opportunityId) ?? 0 : 0;
     const rating = shortlist === null ? (fit || null) : Math.max(shortlist, fit);
-    result.push({ id: r.id, name: r.company, website: r.domain_hint, status, statusText, source: r.url ? { title: r.title, url: r.url } : null,
+    // Stockists and traders are secondary: listed, never leads (see likely.ts and discovery).
+    const secondary = buyerType === 'reseller' && !opportunityId;
+    result.push({ id: r.id, name: r.company, website: r.domain_hint, status, statusText: secondary ? 'Stockist · secondary, not a lead' : statusText, source: r.url ? { title: r.title, url: r.url } : null,
       quote: r.identity_quote, pagesRead: r.pages, opportunityId,
       // Suppliers of the material are competitors, not buyers: folded with the other non-buyer names.
       // A rated company is relevant unless the rating says it is not a buyer.

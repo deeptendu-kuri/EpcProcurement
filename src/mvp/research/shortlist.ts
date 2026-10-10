@@ -312,9 +312,9 @@ async function save(db: Queryable, r: RatedCompany) {
  * Verification order follows the rating: queued website lookups and reads of a rated company move up
  * (700 + rating) or, below LOOKUP_FLOOR, to the back (5), so the lookup allowance goes to likely buyers.
  */
-export async function prioritiseRated(db: Queryable, runId: string, rated: Pick<RatedCompany, 'id' | 'rating'>[]) {
+export async function prioritiseRated(db: Queryable, runId: string, rated: (Pick<RatedCompany, 'id' | 'rating'> & { buyerType?: BuyerType | null })[]) {
   for (const r of rated) {
-    const priority = verifyPriority(r.rating);
+    const priority = verifyPriority(r.rating, r.buyerType);
     await db.query(`update research_jobs set priority=$3 where run_id=$1 and state='queued'
       and (key='official:'||$2 or key='bundle:'||$2 or (stage='read' and payload->'raw'->'research'->>'candidateId'=$2))`, [runId, r.id, priority]);
   }
@@ -326,8 +326,10 @@ export const VERIFY_FIRST = 45;
  * list searches (1000) and list reading (950), so a search verifies leads as it goes instead of spending
  * its AI on more names first; below award triggers (2000).
  */
-export const verifyPriority = (rating: number | null | undefined) =>
-  rating == null ? 30 : rating >= VERIFY_FIRST ? 1100 + rating : rating >= LOOKUP_FLOOR ? 700 + rating : 5;
+export const verifyPriority = (rating: number | null | undefined, type?: BuyerType | string | null) =>
+  // Stockists, competitors and non-buyers are never leads: their checks go last.
+  type === 'reseller' || type === 'competitor' || type === 'not_buyer' ? 5
+  : rating == null ? 30 : rating >= VERIFY_FIRST ? 1100 + rating : rating >= LOOKUP_FLOOR ? 700 + rating : 5;
 
 /** The rating context of a search from its stored input. */
 type SearchInput = Partial<Pick<RunInput, 'productId' | 'query' | 'includeResellers'>>;
