@@ -678,7 +678,8 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
           )
         ) : rows.length ? (
           <>
-            <ResultsTable rows={rows} selected={selected} openId={openId} onToggle={toggle} onOpen={setOpen} onSaveDerived={(row) => void saveDerived(row)} saving={savingDerived} newIds={newIds} />
+            <ResultsTable rows={rows} selected={selected} openId={openId} onToggle={toggle} onOpen={setOpen} onSaveDerived={(row) => void saveDerived(row)} saving={savingDerived} newIds={newIds}
+              returnTo={basePath === "/crm" ? searchHref({ ...state, open: "" }, basePath) : "/crm"} />
             <div className="mt-3">
               <Pagination page={state.page} size={PAGE_SIZE} total={total} onPage={goToPage} />
             </div>

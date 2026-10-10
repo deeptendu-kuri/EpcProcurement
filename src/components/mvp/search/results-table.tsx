@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { AlertTriangle, Loader2, Save } from "lucide-react";
 import { isDerivedLeadId, type BuyerRow, type ChainTier } from "@/mvp/buyers/types";
 import { SampleBadge } from "../badges";
@@ -58,6 +59,8 @@ export interface ResultsTableProps {
   saving?: ReadonlySet<string>;
   /** Leads saved since the list was first shown (marked New). */
   newIds?: ReadonlySet<string>;
+  /** Where "Open details" comes back to: this Leads view (a /crm address; the workspace accepts only those). */
+  returnTo?: string;
 }
 
 /** How a lead is proven (doc 19 §6), as a short tag. */
@@ -96,9 +99,10 @@ const TD = "px-4 py-4 align-top";
 
 /**
  * Leads table (docs/mvp/18 §2): Company (role, country, tier) · Search it came from · Will buy (the
- * searched product and why) · Also can sell · Rating · Email · Contacts. A click opens the evidence drawer.
+ * searched product and why) · Rating · Email · Contacts · Open details (the opportunity workspace, as
+ * "Open workspace" in the evidence panel). A click on the row opens the evidence panel.
  */
-export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true, onSaveDerived, saving, newIds }: ResultsTableProps) {
+export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true, onSaveDerived, saving, newIds, returnTo = "/crm" }: ResultsTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1040px] border-collapse text-[14px] leading-[1.45]" aria-label="Buyers">
@@ -107,11 +111,11 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
             {selectable ? <th scope="col" className={`w-[44px] ${TH}`}><span className="sr-only">Select</span></th> : null}
             <th scope="col" className={`w-[24%] ${TH}`}>Company</th>
             <th scope="col" className={`w-[14%] ${TH}`}>Search</th>
-            <th scope="col" className={`w-[25%] ${TH}`}>Will buy</th>
-            <th scope="col" className={`w-[14%] ${TH}`}>Also can sell</th>
+            <th scope="col" className={`w-[30%] ${TH}`}>Will buy</th>
             <th scope="col" className={TH} title="Buyer fit for this search, 0–100">Rating</th>
             <th scope="col" className={TH}>Email</th>
             <th scope="col" className={TH}>Contacts</th>
+            <th scope="col" className={TH}><span className="sr-only">Details</span></th>
           </tr>
         </thead>
         <tbody>
@@ -219,9 +223,6 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                     </div>
                   ) : null}
                 </td>
-                <td className={`${TD} text-[13px] text-[var(--text-2)]`}>
-                  {row.alsoSell?.length ? row.alsoSell.join(", ") : <span className="text-[var(--muted)]">—</span>}
-                </td>
                 <td className={TD}>
                   <RatingBadge score={row.fitScore} />
                   <div className={`mt-1 text-[12px] ${HOW_SURE_STYLES[row.howSure]}`} title="How sure we are">{HOW_SURE_LABELS[row.howSure]}</div>
@@ -231,6 +232,15 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                 </td>
                 <td className={`${TD} whitespace-nowrap text-[13px] text-[var(--text-2)]`}>
                   <b className="font-semibold text-[var(--text)]">{row.found}</b> of {row.total} found
+                </td>
+                <td className={TD} onClick={(event) => event.stopPropagation()}>
+                  {row.opportunityId && !derived ? (
+                    <Link href={`/opportunities/${encodeURIComponent(row.opportunityId)}?returnTo=${encodeURIComponent(returnTo)}`}
+                      className="btn btn-secondary btn-sm whitespace-nowrap" aria-label={`Open details of ${row.name}`}>Open details</Link>
+                  ) : (
+                    <button type="button" disabled className="btn btn-secondary btn-sm whitespace-nowrap opacity-50"
+                      title={derived ? "Save as buyer first" : "No saved opportunity for this search yet"}>Open details</button>
+                  )}
                 </td>
               </tr>
             );
