@@ -14,7 +14,7 @@ import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tav
 import { collectBingQuery,collectRssFeed,collectLocalNews,collectGdeltCountry} from './sources';
 import { plannedCollectJobs, type ResearchBudget, type ResearchJob } from './store';
 import { getSearchBrief, namesWork, type GroundFn } from '@/mvp/discovery/brief';
-import { checkNeed, followKey, followUpQueries, projectsToFollow } from './need';
+import { checkNeed, FOLLOW_SEARCHES_PER_COUNTRY, followKey, followUpQueries, projectsToFollow } from './need';
 import { autoPauseIfDue } from './control';
 import { clearBuyerCache } from '@/mvp/buyers/load';
 import { addJob,admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
@@ -117,14 +117,17 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         const cached=await cachedTavilyQuery(ctx,q);
         if(cached!==null)docs=cached;
         else{
-          const reservation=await reserveBudget(db,job.run_id,'search',job.key,1,session.budget.searchQueries);
+          // docs/mvp/20: a project's follow-ups have their own small allowance (2 projects x 3 searches per country),
+          // so the most productive searches are not crowded out by the first award searches.
+          const followUp=job.key.startsWith('follow:');
+          const reservation=await reserveBudget(db,job.run_id,followUp?'follow_search':'search',job.key,1,followUp?FOLLOW_SEARCHES_PER_COUNTRY*input.markets.length:session.budget.searchQueries);
           if(reservation==='exhausted'){
             await completeJob(db,job,{skipped:'Tavily query budget',budgetLimited:true});
             await researchProgress(db,job.run_id,'info','Tavily coverage limit reached; saved pages and free sources continue.');return {processed:true};
           }
           if(reservation==='existing'){await parkJob(db,job,'A previous search request has no committed response; manual review is required before repeating a charged query.');return {processed:true,paused:true};}
-          try{docs=await deps.collect(source,ctx,job.payload);await markBudget(db,job.run_id,'search',job.key,'completed');}
-          catch(error){await markBudget(db,job.run_id,'search',job.key,'unknown');throw error;}
+          try{docs=await deps.collect(source,ctx,job.payload);await markBudget(db,job.run_id,followUp?'follow_search':'search',job.key,'completed');}
+          catch(error){await markBudget(db,job.run_id,followUp?'follow_search':'search',job.key,'unknown');throw error;}
         }
       }else docs=await deps.collect(source,ctx,job.payload);
       if(news)await markBudget(db,job.run_id,'bing_search',job.key,'completed');
@@ -219,21 +222,27 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         // then the run's searches are planned from it. Without AI, the catalogue brief keeps today's plan.
         const ctx:SourceContext={db,runId:job.run_id,input,profile:getClientProfile(),terms:queryTerms(input.query),log:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)};
         const web=Boolean(process.env.TAVILY_API_KEY?.trim());
+        // The grounding searches find recent news about the item in his countries: their pages are read like any
+        // other search result, so the brief's two searches are not spent only on the brief.
+        const groundDocs:RawDoc[]=[];
         const ground:GroundFn|null=web?async(query,market)=>{
           const key=`brief-ground:${market}`;
           const planned={key,market,lane:'news' as const,activityIndex:0,query,topic:'news' as const,days:365};
           let docs=await cachedTavilyQuery(ctx,planned);
           if(docs===null){
-            if(await reserveBudget(db,job.run_id,'search',key,1,session.budget.searchQueries)!=='reserved')return [];
-            try{docs=await collectTavilyQuery(ctx,planned);await markBudget(db,job.run_id,'search',key,'completed');}
-            catch{await markBudget(db,job.run_id,'search',key,'unknown');return [];}
+            // One grounding search per country, on its own allowance (its pages are read too).
+            if(await reserveBudget(db,job.run_id,'brief_search',key,1,input.markets.length)!=='reserved')return [];
+            try{docs=await collectTavilyQuery(ctx,planned);await markBudget(db,job.run_id,'brief_search',key,'completed');}
+            catch{await markBudget(db,job.run_id,'brief_search',key,'unknown');return [];}
           }
+          groundDocs.push(...docs.map(d=>({...d,market:d.market??market,research:{lane:'news' as const,...d.research,sourcingLane:'trigger' as const}})));
           return docs.map(d=>({title:d.title??'',snippet:(d.text??'').slice(0,300),date:d.publishedAt?.slice(0,10)??null}));
         }:null;
         const provider=budgetedAwardProviders(db,job.run_id,'brief',session.budget).provider('extract_a','openai/gpt-oss-120b');
         const brief=await getSearchBrief(db,{material:input.query,markets:input.markets,productId:input.productId??null},provider,ground,job.run_id);
         const planned={...input,brief};
         const jobs=plannedCollectJobs(planned,session.budget);
+        if(groundDocs.length)await enqueueRawDocs(db,job,groundDocs,session.budget.maxPages);
         if(!await db.tx(async tx=>{
           if(!await owned(tx,job))return false;
           await tx.query(`update runs set adhoc_query=adhoc_query||jsonb_build_object('brief',$2::jsonb) where id=$1`,[job.run_id,JSON.stringify(brief)]);

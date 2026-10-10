@@ -90,3 +90,16 @@ describe("getSearchBrief", () => {
     expect((await getSearchBrief(db, { material: "Line pipe", markets: ["AE"], productId: "line-pipe" }, null, null)).source).toBe("catalogue");
   });
 });
+
+describe("matching the AI's use to the brief (smoke test, 10 Oct)", async () => {
+  const { matchUse } = await import("./brief");
+  const b = parseBrief(answer(), "Stud bolts and spiral wound gaskets", ["AE", "SA"], "stud-bolts")!;
+  it("accepts the same work in other words, never none", () => {
+    expect(matchUse(b, "Gas Processing Plant")?.name).toBe("gas processing plant");
+    expect(matchUse(b, "gas processing plant (Habshan)")?.name).toBe("gas processing plant");
+    expect(matchUse(b, "NGL train")?.name).toBe("gas processing plant");
+    expect(matchUse(b, null)).toBeNull();
+    expect(matchUse(b, "none")).toBeNull();
+    expect(matchUse(b, "road construction")).toBeNull();
+  });
+});

@@ -182,6 +182,20 @@ export function namesWork(text: string, brief: SearchBrief): boolean {
     && !/\b(?:market report|market size|cagr|job vacancy)\b/i.test(text);
 }
 
+/**
+ * The brief's use an AI answer means, matched loosely: the same name in any case, one name inside the other
+ * ("LNG export terminal (Ruwais)"), or one of the use's headline words. The 10 Oct smoke test lost every lead
+ * to an exact-name comparison.
+ */
+export function matchUse(brief: SearchBrief, answer: string | null | undefined): BriefUse | null {
+  const a = (answer ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!a || a === 'null' || a === 'none') return null;
+  return brief.uses.find((u) => u.name.toLowerCase() === a)
+    ?? brief.uses.find((u) => a.includes(u.name.toLowerCase()) || u.name.toLowerCase().includes(a))
+    ?? brief.uses.find((u) => u.newsWords.some((w) => w.length >= 3 && a.includes(w.toLowerCase())))
+    ?? null;
+}
+
 /** This country's uses first (they differ between countries), at most `n`. */
 export function usesFor(brief: SearchBrief, market: string, n = 4): BriefUse[] {
   const local = brief.uses.filter((u) => !u.countries.length || u.countries.includes(market));

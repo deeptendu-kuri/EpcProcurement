@@ -16,6 +16,13 @@ import { resolveBuyerCompany, storeTrigger } from '@/mvp/sourcing/triggers';
 import { clearBuyerCache } from '@/mvp/buyers/load';
 import { listFoundCompanies } from './found';
 import type { BuyerType } from './shortlist';
+import { sameCompanyName } from './company-names';
+
+/** A need check's accepted company, with its source (docs/mvp/20). */
+interface NeedLead { company_name: string; role: string; quote: string; need_why: string | null; work_date: string | null; market: string | null; project: string | null;
+  document_id: string; url: string | null; tier: string | null; publisher_key: string | null }
+/** A need-proven lead's fit: its work needs the item, shown on a verified sentence. */
+const NEED_FIT = 75;
 
 export const LIKELY_MIN = 45;
 export const LIKELY_MAX_PER_SEARCH = 60;
@@ -28,12 +35,18 @@ const ROLE: Record<BuyerType, string | null> = {
 export const leadRoleFor = (type: BuyerType): string | null => ROLE[type];
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInput, 'productId' | 'query' | 'contactRole'>): Promise<{ saved: number; listing: number }> {
+export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInput, 'productId' | 'query' | 'contactRole' | 'brief'>): Promise<{ saved: number; listing: number }> {
   const productId = input.productId;
   if (!productId || !getCatalogueItem(productId)) return { saved: 0, listing: 0 };
   const label = searchedProductLabel(productId, input.query ?? '');
+  // docs/mvp/20: in a work-based search a company the need check accepted is a lead on that proof (its verified
+  // sentence about work that needs the item), whatever its shortlist rating; the smoke test lost them all.
+  const needs = input.brief?.source === 'ai' ? (await db.query<NeedLead>(
+    `select n.company_name,n.role,n.quote,n.need_why,n.work_date,n.market,n.project,n.document_id,d.url,d.tier,d.publisher_key
+     from need_checks n join source_documents d on d.id=n.document_id where n.run_id=$1 and n.verdict='lead' order by n.work_date desc nulls last`, [runId])).rows : [];
+  const needFor = (name: string) => needs.find((n) => sameCompanyName(n.company_name, name)) ?? null;
   const picks = (await listFoundCompanies(db, runId))
-    .filter((c) => c.relevant && !c.opportunityId && (c.rating ?? 0) >= LIKELY_MIN && c.buyerType && ROLE[c.buyerType])
+    .filter((c) => !c.opportunityId && (needFor(c.name) || (c.relevant && (c.rating ?? 0) >= LIKELY_MIN && c.buyerType && ROLE[c.buyerType])))
     .slice(0, LIKELY_MAX_PER_SEARCH);
   if (!picks.length) return { saved: 0, listing: 0 };
   const docs = new Map((await db.query<{ id: string; doc: string | null; text: string | null; url: string | null; tier: string | null; publisher_key: string | null }>(
@@ -41,15 +54,19 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
      where c.id=any($1::uuid[])`, [picks.map((p) => p.id)])).rows.map((r) => [r.id, r]));
   let saved = 0, listing = 0;
   for (const c of picks) {
-    const role = ROLE[c.buyerType!]!;
-    const doc = docs.get(c.id);
-    // A list entry that itself describes work with the material is quoted evidence ("listing").
-    const quote = c.quote && squash(c.quote).length >= 20 ? squash(c.quote) : null;
-    const listed = Boolean(quote && doc?.doc && doc.text && squash(doc.text).includes(quote) && materialEvidenceKind(quote, productId) !== 'none');
+    const need = needFor(c.name);
+    const role = need ? (need.role === 'subcontractor' || need.role === 'maintenance_contractor' ? 'subcontractor' : 'epc_contractor') : ROLE[c.buyerType!]!;
+    const doc = need ? { doc: need.document_id, text: null, url: need.url, tier: need.tier, publisher_key: need.publisher_key } : docs.get(c.id);
+    // A list entry that itself describes work with the material is quoted evidence ("listing"); the need check's
+    // sentence was verified against its source when it was judged.
+    const quote = need ? need.quote : c.quote && squash(c.quote).length >= 20 ? squash(c.quote) : null;
+    const listed = Boolean(need) || Boolean(quote && doc?.doc && doc.text && squash(doc.text).includes(quote!) && materialEvidenceKind(quote!, productId) !== 'none');
     // A plain-rule guess (no AI yet) becomes a lead only with its listed work as evidence.
     if (c.guessed && !listed) continue;
     const verification = listed ? 'listing' : 'rating';
-    const reason = `Likely ${label} buyer (${listed ? 'its listed work uses it' : 'rated from the source; not verified yet'}): ${c.ratingReason ?? c.ratingRole ?? 'see source'}`;
+    // The same form as an award winner's reason, so Leads shows "Their work" and "Why" as bullets.
+    const reason = need ? `${need.quote}${need.need_why ? ` Why it needs ${label}: ${need.need_why}` : ''}`
+      : `Likely ${label} buyer (${listed ? 'its listed work uses it' : 'rated from the source; not verified yet'}): ${c.ratingReason ?? c.ratingRole ?? 'see source'}`;
     const ok = await db.tx(async (tx) => {
       const company = await resolveBuyerCompany(tx, c.name, null, role === 'epc_contractor' ? 'main_epc' : role, c.website);
       let evidence: string[] = [];
@@ -64,9 +81,13 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
         on conflict on constraint leads_candidate_uniq do update set updated_at=now() returning id`, [company.id, [productId], JSON.stringify([{ text: reason, evidenceIds: evidence }]), runId, role])).rows[0];
       const inserted = await tx.query(`insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,contact_role,buying_reason,evidence_ids,discovery_kind,fit_score,material_fit_kind,activity_status,verification,discovery_version)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid[],'company',$10,$11,'capability_only',$12,0) on conflict(run_id,company_id,product_id) do nothing returning id`,
-        [runId, lead.id, company.id, input.query ?? label, productId, label, input.contactRole ?? 'buyer', reason, evidence, c.rating ?? LIKELY_MIN, c.match === 'named' ? 'explicit' : 'potential', verification]);
+        [runId, lead.id, company.id, input.query ?? label, productId, label, input.contactRole ?? 'buyer', reason, evidence, need ? Math.max(c.rating ?? 0, NEED_FIT) : c.rating ?? LIKELY_MIN, c.match === 'named' ? 'explicit' : 'potential', verification]);
       if (inserted.rows.length && listed && quote)
-        await storeTrigger(tx, runId, company.id, productId, { kind: 'capability', role: c.buyerType === 'subcontractor' ? 'subcontractor' : 'contractor', title: quote, date: null, datePrecision: 'unknown',
+        await storeTrigger(tx, runId, company.id, productId, need
+          // Its dated work on a project that needs the item (Recent work and the buying window come from this).
+          ? { kind: 'award', role: role === 'subcontractor' ? 'subcontractor' : 'contractor', title: need.quote, date: need.work_date, datePrecision: need.work_date ? (need.work_date.length === 7 ? 'month' : 'day') : 'unknown',
+            valueUsd: null, valueText: null, country: need.market, projectId: null, projectName: need.project, ownerName: null, strength: 'confirmed', evidenceIds: evidence }
+          : { kind: 'capability', role: c.buyerType === 'subcontractor' ? 'subcontractor' : 'contractor', title: quote, date: null, datePrecision: 'unknown',
           valueUsd: null, valueText: null, country: null, projectId: null, projectName: null, ownerName: null, strength: 'possible', evidenceIds: evidence });
       return inserted.rows.length > 0;
     }).catch(() => false);

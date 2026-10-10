@@ -10,7 +10,7 @@
 import { z } from 'zod';
 import type { Db, Queryable } from '@/mvp/db';
 import type { LLMProvider } from '@/mvp/llm/types';
-import type { SearchBrief } from '@/mvp/discovery/brief';
+import { matchUse, type SearchBrief } from '@/mvp/discovery/brief';
 import type { RunInput } from '@/mvp/types';
 import { getCatalogue, getCatalogueItem } from '@/mvp/config/buyers-config';
 import { whoBuys } from '@/mvp/discovery/material-catalogue';
@@ -338,7 +338,7 @@ export function parseRatings(text: string, rows: Row[], productId: string, opts:
     const judged = { rating: Math.max(0, Math.min(100, Math.round(c.rating))), role: clip(c.role, 60) || 'Not clear yet', reason: `${echoed ? PAGE_CONTEXT : ''}${clip(c.reason, 220)}`, buyerType: typed };
     // docs/mvp/20: in a work-based search a company whose own work is none of the brief's is not a lead; the cap
     // is kept in the stored (raw) rating so the read-time checks keep it too.
-    if (opts.brief?.source === 'ai' && !opts.brief.uses.some((u) => u.name === (c.use ?? '').trim())) {
+    if (opts.brief?.source === 'ai' && !matchUse(opts.brief, c.use)) {
       judged.rating = Math.min(judged.rating, 30);
       if (!/^Not this work/.test(judged.reason)) judged.reason = `Not this work: ${judged.reason}`.slice(0, 240);
     }

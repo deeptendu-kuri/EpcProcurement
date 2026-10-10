@@ -12,7 +12,7 @@ import type { LLMProvider } from '@/mvp/llm';
 import { firstJsonObject } from '@/mvp/llm/groq';
 import { verifyQuote } from '@/mvp/pipeline/quote-check';
 import { detectCountry, detectMarkets } from '@/mvp/pipeline/filter';
-import type { SearchBrief } from '@/mvp/discovery/brief';
+import { matchUse, type SearchBrief } from '@/mvp/discovery/brief';
 import { companyKey, initialsOf, sameCompanyName } from './company-names';
 
 export type NeedRole = 'owner' | 'developer' | 'epc' | 'jv_partner' | 'subcontractor' | 'maintenance_contractor' | 'seller_of_item' | 'other_supplier' | 'consultant' | 'investor' | 'other';
@@ -60,7 +60,8 @@ Return {"project": project name or null, "country": country where the work is do
   "no" if the work is none of the uses, or the text shows a different material doing that job (e.g. GRE or steel pipe instead of the item);
   "unclear" only if what the work is cannot be told from the text,
 "needWhy": one line explaining that verdict,
-"companies": [{"name": company, "role": one of owner|developer|epc|jv_partner|subcontractor|maintenance_contractor|seller_of_item|other_supplier|consultant|investor|other, "package": what it does in this work, "quote": one sentence copied character for character from the text (no rewording, no shortening) that names the company and its work, "since": "YYYY" or "YYYY-MM" when the text says when it got this work, else null}]}
+"companies": [{"name": company, "role": one of owner|developer|epc|jv_partner|subcontractor|maintenance_contractor|seller_of_item|other_supplier|consultant|investor|other, "package": what it does in this work, "quote": one sentence copied character for character from the text (no rewording, no shortening) that names the company and its work, "since": "YYYY" or "YYYY-MM" when the text says when it got this work, else null,
+  "buysItem": "yes" if this company's OWN package would buy the item sold (an EPC, process or piping, mechanical, tank or plant contractor usually does), "no" if its package would not (e.g. dredging, jetty or marine civil works, roads, buildings only, electrical only, drilling, engineering or design only)}]}
 Roles: epc = won the engineering, procurement and construction contract; jv_partner = partner in a CONSTRUCTION joint venture that won such a contract; developer = developer, sponsor or shareholder of a concession (IWP, IPP, IWTP), not the builder; owner = owns or operates the plant or field, including equity partners that co-own or co-develop a field or plant with the operator (e.g. oil majors partnering in a field) — they are never jv_partner.
 If the page is a company's own page describing its regular work, list that company with role subcontractor or maintenance_contractor and project null.`,
   };
@@ -79,7 +80,8 @@ export function workMarket(text: string | null, brief: SearchBrief, markets: str
 
 /** Rule 3: when the sentence dates the work ("In 2005, …", since), that date counts, not the article's. */
 export function workDate(quote: string, since: string | null, articleDate: string | null): string | null {
-  if (since && /^\d{4}/.test(since)) return since.length === 4 ? `${since}-06` : since.slice(0, 7);
+  // The AI's "since" counts only when the sentence itself names that year; otherwise the article's date does.
+  if (since && /^\d{4}/.test(since) && quote.includes(since.slice(0, 4))) return since.length === 4 ? `${since}-06` : since.slice(0, 7);
   const years = [...quote.matchAll(/\b(19\d\d|20\d\d)\b/g)].map((m) => Number(m[1]));
   const article = articleDate ? Number(articleDate.slice(0, 4)) : new Date().getFullYear();
   return years.length && Math.max(...years) < article - 1 ? `${Math.max(...years)}-06` : articleDate?.slice(0, 10) ?? null;
@@ -91,7 +93,7 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
   let raw: Record<string, unknown>;
   try { raw = JSON.parse(firstJsonObject(text) ?? 'null') as Record<string, unknown>; } catch { return null; }
   if (!raw || typeof raw !== 'object') return null;
-  const use = brief.uses.find((u) => u.name === clip(raw.use, 120))?.name ?? null;
+  const use = matchUse(brief, clip(raw.use, 120))?.name ?? null;
   const needsItem = raw.needsItem === 'yes' || raw.needsItem === 'no' ? raw.needsItem : 'unclear';
   const project = clip(raw.project, 160) || null, country = clip(raw.country, 80) || null;
   const market = workMarket(country, brief, markets) ?? (project ? null : workMarket(doc.text.slice(0, 4000), brief, markets));
@@ -116,6 +118,8 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
       age !== null && age > NEED_WINDOW_MONTHS && `older than ${NEED_WINDOW_MONTHS} months (${date})`,
       STAKE.test(quote) && !WORK.test(quote) && 'an investment, not work',
       ENGINEERING_ONLY.test(pkg) && !BUYS_MATERIAL.test(pkg) && 'engineering only, buys no material',
+      // Smoke test, 10 Oct: the work needed the item, but a jetty contractor's own package does not buy it.
+      DOES_WORK.has(role) && c?.buysItem === 'no' && 'its own package does not buy the item',
       !quoteVerified && 'sentence not found in the source',
     ].filter((x): x is string => Boolean(x));
     // Owners and developers (rule 4) on qualifying work are kept as owners: they buy through their contractors.
@@ -147,6 +151,8 @@ export async function checkNeed(db: Queryable, runId: string, documentId: string
 
 /** Follow-ups per project (docs/mvp/20 stage 6, rule 5): at most this many projects per country per search. */
 export const FOLLOW_PROJECTS_PER_COUNTRY = 2;
+/** Each followed project gets three searches (subcontracts, packages, suppliers' orders). */
+export const FOLLOW_SEARCHES_PER_COUNTRY = FOLLOW_PROJECTS_PER_COUNTRY * 3;
 /**
  * The follow-up searches for a project the need check accepted: its subcontracts and packages (tank builders,
  * piping and mechanical subcontractors) and suppliers' orders for the item (a competitor's order names the buyer).

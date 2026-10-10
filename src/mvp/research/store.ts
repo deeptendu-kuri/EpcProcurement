@@ -14,6 +14,7 @@ import { maxExtensionRounds, minimumBuyers } from './limits';
 import { sourcePlan,tavilyTask } from '@/mvp/sourcing/plan';
 import { junkReason } from '@/mvp/sourcing/junk';
 import {SOURCING_REGISTRY} from '@/mvp/sourcing/registry';
+import { FOLLOW_SEARCHES_PER_COUNTRY } from './need';
 
 export type ResearchBudget = ReturnType<typeof researchBudget>;
 export interface ResearchJob { id:string;run_id:string;stage:'collect'|'read'|'analyse'|'finish';key:string;payload:Record<string,unknown>;state:string;attempts:number;lease_token:string|null; }
@@ -186,7 +187,12 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   counters.researchUsage={search:units('search'),reads:units('read'),aiCalls:units('ai_pages'),estimatedAiTokens:await aiTokensUsed(db,runId),pdfPages:units('pdf_pages')};
   counters.researchUsage.bingSearches=units('bing_search');
   counters.researchUsage.websiteLookups=units('lookup');
-  if(session)counters.researchLimits={search:session.budget.searchQueries,reads:session.budget.maxPages,aiCalls:session.budget.maxAiPages,estimatedAiTokens:session.budget.maxAiTokens};
+  // docs/mvp/20: a work-based search's grounding (one per country) and project follow-ups have their own
+  // allowances; they count as web searches like the rest.
+  const workRun=(await db.query<{markets:string[]|null;brief:boolean}>("select adhoc_query->'markets' as markets,(adhoc_query ? 'brief') as brief from runs where id=$1",[runId])).rows[0];
+  const workExtra=workRun?.brief?(workRun.markets??[]).length*(1+FOLLOW_SEARCHES_PER_COUNTRY):0;
+  counters.researchUsage.search+=units('brief_search')+units('follow_search');
+  if(session)counters.researchLimits={search:session.budget.searchQueries+workExtra,reads:session.budget.maxPages,aiCalls:session.budget.maxAiPages,estimatedAiTokens:session.budget.maxAiTokens};
   if(session)counters.researchLimits!.bingSearches=session.budget.bingQueries;
   // Extra rounds taken because fewer buyers than wanted were saved (see extend.ts).
   if(session)counters.researchRounds=(session.budget as {extensions?:number}).extensions??0;

@@ -111,6 +111,8 @@ async function leadOpp(db:Queryable,companyId:string,run:string):Promise<LeadOpp
     from search_opportunities o join companies c on c.id=o.company_id where o.company_id=$1 and ($2::uuid is null or o.run_id=$2) and o.qualification<>'rejected'
     order by o.created_at desc limit 1`,[companyId,run==='all'?null:run])).rows[0]??null;
 }
+/** docs/mvp/20: a need-checked lead is proven by a dated source naming it on work that needs the item. */
+const NEED_NOTE='Proven by its work: a dated source names it on work that needs this item (shown below). Its own website is not checked yet.';
 const PROOF_NOTE={
   verified:'Verified: its own website shows matching work.',
   listing:'Its listed work: a list or directory entry describes its work with this material. Its own website is not checked yet.',
@@ -133,7 +135,8 @@ async function withLeadContext(db:Queryable,view:EvidenceDrawerView,companyId:st
   const level=opp?.verification==='listing'?'listing':opp?.verification==='rating'?'likely':'verified';
   const rated=await ratingFor(db,opp).catch(()=>null);
   const recent=(await triggersForCompany(db,companyId,run!=='all'?run:undefined)).sort(newestFirst);
-  return {...view,proof:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent,need:await needFor(db,opp?.run_id??(run!=='all'?run:null),view.header.name)};
+  const need=await needFor(db,opp?.run_id??(run!=='all'?run:null),view.header.name);
+  return {...view,proof:need?{level:level==='likely'?'listing':level,note:NEED_NOTE}:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent,need};
 }
 /** docs/mvp/20: the "Why they are a buyer" card, when the lead's search was a work-based search. */
 async function needFor(db:Queryable,runId:string|null,company:string){
@@ -148,6 +151,7 @@ async function needFor(db:Queryable,runId:string|null,company:string){
  */
 async function likelyLeadView(db:Queryable,companyId:string,run:string):Promise<EvidenceDrawerView|null>{
   const opp=await leadOpp(db,companyId,run);if(!opp)return null;
+  const need=await needFor(db,opp.run_id,opp.name);
   const rated=await ratingFor(db,opp).catch(()=>null);
   const candidate=rated?(await db.query<{quote:string|null;doc:string|null;text:string|null;url:string|null;title:string|null;published_at:string|null}>(`select c.identity_quote as quote,c.identity_document_id as doc,d.text,d.url,d.title,d.published_at::text as published_at
     from research_candidates c left join source_documents d on d.id=c.identity_document_id where c.id=$1`,[rated.rating.candidateId])).rows[0]:null;
@@ -167,5 +171,5 @@ async function likelyLeadView(db:Queryable,companyId:string,run:string):Promise<
   const header:LeadRow={opportunityId:opp.id,companyId,name:opp.name,whatTheyDo:rated?.rating.role??'',trigger:strongestTrigger(triggers),operatingCountry:opp.country,hqCountry:null,
     sellSummary:opp.product_name,fitScore:Math.max(Number(opp.fit_score)||0,rated?.rating.score??0),howSure:'low',stage:'check',contactsFound:0,contactsTotal:team.length,sourceCount:sources.length,status:'likely',isSample:false};
   return {header,why:rated?.rating.reason??opp.buying_reason,application:null,sources,related:{above:[],below:[]},contacts:team,activity:notes,
-    proof:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent:triggers,need:await needFor(db,opp.run_id,opp.name)};
+    proof:need?{level:level==='likely'?'listing':level,note:NEED_NOTE}:{level,note:PROOF_NOTE[level]},rating:rated?.rating??null,recent:triggers,need};
 }
