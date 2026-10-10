@@ -23,7 +23,7 @@ export function localFunnelEnv(input, root) {
 
 export function researchDemoEnv(env,{demo=false}={}) {
   return {...env,MVP_NEXT_DIST_DIR:'.next-discovery',MVP_FUNNEL_WORKER:demo?'on':'off',MVP_RESEARCH_NEWS:'off',
-    ...(demo?{MVP_PROSPECT_DEMO_OUTREACH:'on',MVP_DEMO_PROSPECTS_PER_SEARCH:'1'}:{}),
+    ...(demo?{MVP_PROSPECT_DEMO_OUTREACH:'on',MVP_DEMO_PROSPECTS_PER_SEARCH:'3'}:{}),
     MVP_MAX_SEARCH_QUERIES:'6',MVP_MAX_RESEARCH_PAGES:'60',MVP_MAX_AI_DOCS:'12',MVP_MAX_RESEARCH_AI_TOKENS:'30000'};
 }
 export async function startLocalFunnel({ check = false, reliability = false, discovery = false, demo = false, workerOff = false, activate = false } = {}) {

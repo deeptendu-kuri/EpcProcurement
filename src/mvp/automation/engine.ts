@@ -59,11 +59,11 @@ export async function reviewedProspectStatus(opportunityId:string, db:Queryable=
   const automaticReason=!control?.enabled?'Automation is paused. Enable it once in Settings before a new search.'
     :!control.enabled_at||Date.parse(row.run_created_at)<Date.parse(control.enabled_at)?'Historical search: retained for reference, not automatically emailed. Run a new search to start the automatic demo.'
     :row.is_sample||row.qualification==='rejected'?'Sample or rejected company; no automatic email.'
-    :row.status!=='done'||row.research_state&&!['done','partial'].includes(row.research_state)?'Research is running. Saved results remain visible; automatic qualification starts when this run settles.'
+    :row.status!=='done'||row.research_state&&!['done','partial'].includes(row.research_state)?'Research is running or paused. Saved results remain visible; the top leads are emailed automatically when the search finishes.'
     :!row.has_evidence?'Original-source evidence is needed before automatic qualification.'
     :existing?'This company and product already have a conversation.'
     :prior?'Separate outreach history exists; no duplicate introduction.'
-    :count>=prospectsPerSearch()?'One demo conversation is already selected for this search. All other companies remain saved.'
+    :count>=prospectsPerSearch()?`The top ${prospectsPerSearch()} ${prospectsPerSearch()===1?'lead':'leads'} of this search already have demo conversations. All other companies remain saved.`
     :null;
   return {canStart:!reason,reason,researchState:row.research_state,researchPaused:row.research_state==='partial',
     automaticEligible:prospectDemoEnabled()&&!automaticReason,automaticReason,
@@ -191,11 +191,11 @@ export async function enrollCompletedSearches():Promise<number> {
   const candidates=(await db.query<{id:string;company_id:string;product_id:string}>(`select id,company_id,product_id from (select o.id,o.company_id,o.product_id,o.run_id,o.created_at,
       row_number() over(partition by o.run_id order by o.fit_score desc,o.created_at,o.id) as rank
       from search_opportunities o join runs r on r.id=o.run_id join leads l on l.id=o.lead_id
-    where (r.status='done' or r.status='running' and exists(select 1 from research_sessions ps where ps.run_id=o.run_id and ps.state='paused'))
+    -- Only a finished search is emailed automatically: its best leads are known (a paused one waits until it ends).
+    where r.status='done'
       and r.created_at >= $1 and not l.is_sample and o.qualification <> 'rejected' and o.verification <> 'rating'
-      -- A paused search's verified leads are emailed too: the user paused it to act on them.
       and not exists(select 1 from research_sessions rs where rs.run_id=o.run_id and
-        (rs.state not in ('done','partial','paused') or rs.state='partial' and not $2::boolean))
+        (rs.state not in ('done','partial') or rs.state='partial' and not $2::boolean))
       and (not $2::boolean or exists(select 1 from evidence e join run_documents rd on rd.document_id=e.document_id
         where e.id=any(o.evidence_ids) and e.quote_verified=true and rd.run_id=o.run_id))
       and not exists(select 1 from demo_campaigns dc where dc.company_id=o.company_id and dc.product_id=o.product_id and dc.status<>'cancelled')

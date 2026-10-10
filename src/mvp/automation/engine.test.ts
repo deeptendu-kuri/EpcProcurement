@@ -104,14 +104,35 @@ describe("persistent demo research-to-meeting funnel",()=>{
     await db.query("update research_sessions set state='cancelled' where run_id=$1",[s.run]);expect(await enrollCompletedSearches()).toBe(0);
     expect(mocks.fit).not.toHaveBeenCalled();expect(mocks.send).not.toHaveBeenCalled();
   });
-  it('enrolls the verified leads of a paused search, not its likely-only leads',async()=>{
+  it('emails only a finished search, never its likely-only leads (a paused search waits until it ends)',async()=>{
     vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');await setFunnelEnabled(true);const s=await seed({validated:false});await attachSource(s);
     await db.query("update runs set status='running' where id=$1",[s.run]);
     await db.query("insert into research_sessions(run_id,state,budget) values($1,'active','{}')",[s.run]);
     expect(await enrollCompletedSearches()).toBe(0);
-    await db.query("update search_opportunities set verification='rating' where id=$1",[s.o]);
     await db.query("update research_sessions set state='paused' where run_id=$1",[s.run]);expect(await enrollCompletedSearches()).toBe(0);
+    await db.query("update runs set status='done' where id=$1",[s.run]);await db.query("update research_sessions set state='done' where run_id=$1",[s.run]);
+    await db.query("update search_opportunities set verification='rating' where id=$1",[s.o]);expect(await enrollCompletedSearches()).toBe(0);
     await db.query("update search_opportunities set verification='website' where id=$1",[s.o]);expect(await enrollCompletedSearches()).toBe(1);
+  });
+  it('emails the top 3 leads of a finished search by default, best first, and no others',async()=>{
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');vi.stubEnv('MVP_DEMO_PROSPECTS_PER_SEARCH','');await setFunnelEnabled(true);
+    const s=await seed({validated:false});await attachSource(s);
+    await db.query("insert into research_sessions(run_id,state,budget) values($1,'done','{}')",[s.run]);
+    const evidence=(await db.query<{ids:string[]}>("select evidence_ids as ids from search_opportunities where id=$1",[s.o])).rows[0].ids;
+    const fits:Record<string,number>={[s.o]:60};
+    for(const [name,fit] of [['Second EPC',90],['Third EPC',80],['Fourth EPC',70]] as const){
+      const company=(await db.query<{id:string}>("insert into companies(canonical_name,normalized_name,country) values($1,lower($1),'IN') returning id",[name])).rows[0].id;
+      const lead=(await db.query<{id:string}>("insert into leads(kind,buyer_company_id,score_breakdown,gate_results,class,reasons,scoring_version) values('supply_subcontract',$1,'{}','[]','research','[]',1) returning id",[company])).rows[0].id;
+      const o=(await db.query<{id:string}>(`insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,buying_reason,evidence_ids,qualification,discovery_kind,fit_score)
+        values($1,$2,$3,'line pipe','line-pipe','Line pipe','Awarded piping contract',$4::uuid[],'pending','company',$5) returning id`,[s.run,lead,company,evidence,fit])).rows[0].id;
+      fits[o]=fit;
+    }
+    await db.query("update search_opportunities set fit_score=60 where id=$1",[s.o]);
+    expect(await enrollCompletedSearches()).toBe(3);
+    const enrolled=(await db.query<{opportunity_id:string}>("select opportunity_id from funnel_threads")).rows.map(r=>fits[r.opportunity_id]).sort((a,b)=>b-a);
+    expect(enrolled).toEqual([90,80,70]);
+    expect(await enrollCompletedSearches()).toBe(0);
+    expect((await reviewedProspectStatus(s.o))?.automaticReason).toBe('The top 3 leads of this search already have demo conversations. All other companies remain saved.');
   });
   it('automatically offers replacements if an agreed time expires or becomes occupied',async()=>{
     await setFunnelEnabled(true);const s=await seed();await processFunnelTick();

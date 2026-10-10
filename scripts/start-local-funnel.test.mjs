@@ -6,7 +6,7 @@ import { localFunnelEnv,researchDemoEnv } from "./start-local-funnel.mjs";
 describe("local funnel startup isolation", () => {
   it('runs the same bounded discovery build with a demo worker only by explicit opt-in',()=>{
     expect(researchDemoEnv({DATABASE_URL:''})).toMatchObject({MVP_FUNNEL_WORKER:'off',MVP_NEXT_DIST_DIR:'.next-discovery'});
-    expect(researchDemoEnv({DATABASE_URL:''},{demo:true})).toMatchObject({DATABASE_URL:'',MVP_FUNNEL_WORKER:'on',MVP_PROSPECT_DEMO_OUTREACH:'on',MVP_DEMO_PROSPECTS_PER_SEARCH:'1',MVP_MAX_SEARCH_QUERIES:'6',MVP_MAX_RESEARCH_AI_TOKENS:'30000'});
+    expect(researchDemoEnv({DATABASE_URL:''},{demo:true})).toMatchObject({DATABASE_URL:'',MVP_FUNNEL_WORKER:'on',MVP_PROSPECT_DEMO_OUTREACH:'on',MVP_DEMO_PROSPECTS_PER_SEARCH:'3',MVP_MAX_SEARCH_QUERIES:'6',MVP_MAX_RESEARCH_AI_TOKENS:'30000'});
   });
   const root = path.resolve(".");
   const base = { SESSION_SECRET: "local-test-secret-".repeat(3) };

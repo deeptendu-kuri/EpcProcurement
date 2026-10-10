@@ -31,9 +31,11 @@ export const seller = () => {
 export function sellerSignature() { const s=seller();return `Kind regards,\n${s.name}${s.company?`\n${s.company}`:""}\nProcurement support${s.email?`\n${s.email}`:""}`; }
 /** Explicit demo-only opt-in, frozen on new threads. Never weakens the real contact gate. */
 export function prospectDemoEnabled() { return process.env.MVP_PROSPECT_DEMO_OUTREACH === "on"; }
+/** How many of a finished search's best leads get an approved-inbox demo conversation (default 3; 1-5). */
+export const DEFAULT_PROSPECTS_PER_SEARCH=3;
 export function prospectsPerSearch() {
-  const value=Number(process.env.MVP_DEMO_PROSPECTS_PER_SEARCH??1);
-  return Number.isInteger(value)&&value>=1&&value<=5?value:1;
+  const value=Number(process.env.MVP_DEMO_PROSPECTS_PER_SEARCH??DEFAULT_PROSPECTS_PER_SEARCH);
+  return Number.isInteger(value)&&value>=1&&value<=5?value:DEFAULT_PROSPECTS_PER_SEARCH;
 }
 export async function calendarConnected() {
   return Boolean((await getDb().query("select account from funnel_integrations where provider='google' and account=$1",[AUTOMATION_RECIPIENT])).rows.length);
