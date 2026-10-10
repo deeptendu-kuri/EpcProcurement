@@ -50,7 +50,10 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
   const picks = (await listFoundCompanies(db, runId))
     // Smoke test, 10 Oct: names rated without any source sentence (Fluor on LNG Canada, a package name) became
     // leads. In a work-based search a rated company needs its own sentence naming the brief's work.
-    .filter((c) => !c.opportunityId && (needFor(c.name) || (c.relevant && (c.rating ?? 0) >= LIKELY_MIN && c.buyerType && ROLE[c.buyerType]
+    // Two AI checks that disagree: the stricter wins (smoke test 3: the need check took a jetty contractor on an LNG
+    // project, the rating said "Not this work" — jetty work rarely buys cryogenic valves).
+    .filter((c) => !c.opportunityId && ((needFor(c.name) && !(work && (c.rating ?? 100) <= 30 && /^Not this work/.test(c.ratingReason ?? '')))
+      || (c.relevant && (c.rating ?? 0) >= LIKELY_MIN && c.buyerType && ROLE[c.buyerType]
       && (!work || Boolean(c.quote && namesWork(c.quote, input.brief!))))))
     .slice(0, LIKELY_MAX_PER_SEARCH);
   if (!picks.length) return { saved: 0, listing: 0 };

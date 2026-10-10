@@ -140,8 +140,8 @@ describe("need-proven companies become leads (smoke test, 10 Oct)", () => {
       const provider: LLMProvider = { name: "groq", model: "test", async complete() { return { tokensIn: 1, tokensOut: 1, text: answer({ companies: [co("Tecnimont", "epc", text, { since: "2026-08" })] }) }; } };
       await checkNeed(db, run, doc, { text, url: "https://n.example/b", title: null, publishedAt: "2026-08-17" }, b, ["AE"], provider);
       await db.tx((tx) => registerCandidate(tx, run, "Tecnimont", null, doc, text));
-      // The shortlist held it back (the AI's use name did not match the brief's wording).
-      await db.query("update research_candidates set rating=30, rating_source='ai', rating_reason='Not this work: …', rating_buyer_type='contractor' where run_id=$1", [run]);
+      // The shortlist rated it low for another reason (e.g. a vague source line); the need check's proof decides.
+      await db.query("update research_candidates set rating=30, rating_source='ai', rating_reason='Possible buyer; the source line is short.', rating_buyer_type='contractor' where run_id=$1", [run]);
       const saved = await saveLikelyBuyers(db, run, { productId: "gate-globe-check", query: "Cryogenic valves", brief: b });
       expect(saved.saved).toBe(1);
       const opp = (await db.query<{ buying_reason: string; verification: string; fit_score: number }>("select buying_reason, verification, fit_score from search_opportunities where run_id=$1", [run])).rows[0];
@@ -153,6 +153,23 @@ describe("need-proven companies become leads (smoke test, 10 Oct)", () => {
       expect(trig).toMatchObject({ kind: "award", title: text, strength: "confirmed" });
       // The engine keeps a trigger date only when the sentence states it; this one does not.
       expect(trig.event_date).toBeNull();
+    } finally { await db.close(); }
+  }, 60_000);
+  it("does not save it when the rating AI judged its own work is not the work (two checks disagree: the stricter wins)", async () => {
+    const { saveLikelyBuyers } = await import("./likely");
+    const { registerCandidate } = await import("./investigation");
+    const db = await createTestDb();
+    try {
+      const b = brief();
+      const run = (await db.query<{ id: string }>("insert into runs (status, adhoc_query) values ('running', $1::jsonb) returning id", [JSON.stringify({ query: "Cryogenic valves", productId: "gate-globe-check", markets: ["AE"], brief: b })])).rows[0].id;
+      await db.query("insert into research_sessions (run_id, budget) values ($1, '{}'::jsonb)", [run]);
+      const text = "ITD Cementation India has won a contract for jetty construction work on the Ruwais NGL terminal.";
+      const doc = (await db.query<{ id: string }>("insert into source_documents(source_key,publisher_key,url,canonical_url,content_hash,text) values('t','t','https://n.example/j','https://n.example/j','hj',$1) returning id", [text])).rows[0].id;
+      const provider: LLMProvider = { name: "groq", model: "test", async complete() { return { tokensIn: 1, tokensOut: 1, text: answer({ companies: [co("ITD Cementation India", "subcontractor", text, { package: "jetty construction" })] }) }; } };
+      await checkNeed(db, run, doc, { text, url: "https://n.example/j", title: null, publishedAt: "2026-08-17" }, b, ["AE"], provider);
+      await db.tx((tx) => registerCandidate(tx, run, "ITD Cementation India", null, doc, text));
+      await db.query("update research_candidates set rating=20, rating_source='ai', rating_reason='Not this work: jetty construction; valve use is indirect.', rating_buyer_type='contractor' where run_id=$1", [run]);
+      expect((await saveLikelyBuyers(db, run, { productId: "gate-globe-check", query: "Cryogenic valves", brief: b })).saved).toBe(0);
     } finally { await db.close(); }
   }, 60_000);
 });
