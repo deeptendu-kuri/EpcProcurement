@@ -55,6 +55,15 @@ describe("award winners in a work-based search", () => {
     expect(opp[0].buying_reason).toContain("Why it needs");
     expect(opp[0].buying_reason).not.toContain("Potential need");
   }, 60_000);
+  it("follows the accepted project to its subcontracts, packages and suppliers' orders (stage 6)", async () => {
+    vi.stubEnv("TAVILY_API_KEY", "test-key-not-used");
+    const id = await run("Line pipe API 5L", brief("Line pipe", [
+      { name: "gas pipeline construction", newsWords: ["gas pipeline"], why: "A gas pipeline is built from line pipe.", countries: ["AE"], localWords: {} },
+      { name: "water transmission line", newsWords: ["water transmission"], why: "Large water lines use line pipe.", countries: ["AE"], localWords: {} }]),
+      verdict({ use: "gas pipeline construction", needsItem: "yes", needWhy: "A gas pipeline is built from line pipe." }));
+    const follow = (await db.query<{ key: string; payload: { query: { query: string } } }>("select key, payload from research_jobs where run_id=$1 and key like 'follow:%' order by key", [id])).rows;
+    expect(follow.map((j) => j.payload.query.query)).toEqual(["UAE gas pipeline subcontract awarded", "UAE gas pipeline package contract awarded", "UAE gas pipeline Line pipe supply order"]);
+  }, 60_000);
   it("does not save a contract winner whose work does not need the item (the Dovre case)", async () => {
     const id = await run("Cryogenic Valves", brief("Cryogenic valves", [
       { name: "LNG liquefaction plant", newsWords: ["LNG"], why: "LNG is handled at −162 °C.", countries: ["AE"], localWords: {} },

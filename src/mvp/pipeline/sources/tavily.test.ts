@@ -14,6 +14,7 @@ describe("targeted real web discovery",()=>{
     expect(JSON.parse(request.body).query).toContain("contractors");expect(JSON.parse(request.body).query).toContain("India");
     expect(JSON.parse(request.body)).toMatchObject({max_results:20,search_depth:'basic',country:'india',auto_parameters:false});
     expect(JSON.parse(request.body).exclude_domains).toContain('facebook.com');
+    expect(JSON.parse(request.body).exclude_domains).toContain('linkedin.com');
     expect(rows[0].research?.searchPreview).toBe('Search snippet is not verified');
     expect(fetchMock).toHaveBeenCalledTimes(2);expect(JSON.parse(fetchMock.mock.calls[1][1].body).query).toContain("contract awarded");
     expect(JSON.parse(request.body).include_answer).toBe(false);expect(request.redirect).toBe("error");

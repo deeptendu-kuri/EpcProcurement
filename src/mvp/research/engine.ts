@@ -14,10 +14,10 @@ import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tav
 import { collectBingQuery,collectRssFeed,collectLocalNews,collectGdeltCountry} from './sources';
 import { plannedCollectJobs, type ResearchBudget, type ResearchJob } from './store';
 import { getSearchBrief, namesWork, type GroundFn } from '@/mvp/discovery/brief';
-import { checkNeed } from './need';
+import { checkNeed, followKey, followUpQueries, projectsToFollow } from './need';
 import { autoPauseIfDue } from './control';
 import { clearBuyerCache } from '@/mvp/buyers/load';
-import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
+import { addJob,admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
 import { candidateForPage, candidatePageIdentity, extendInvestigation, seedInvestigations, domainOf, queueRead, registerCandidate } from './investigation';
 import { RESEARCH_SOURCES } from './registry';
 import { bundlePromptText,discoverCompanyBundle,loadCompanyBundle } from '@/mvp/discovery/bundle';
@@ -303,6 +303,14 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
           if(need.answer)await db.query(`update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2`,[job.id,job.lease_token,need.answer]);
           const accepted=need.result?.companies.filter(c=>c.verdict==='lead')??[];
           for(const c of accepted)await db.tx(tx=>registerCandidate(tx,job.run_id,c.name,null,id,c.quote));
+          // Stage 6: follow the project to its subcontracts, packages and suppliers' orders (budgeted Tavily searches).
+          const follow=need.result&&process.env.TAVILY_API_KEY?.trim()?await projectsToFollow(db,job.run_id,need.result):[];
+          for(const {project,market} of follow)await db.tx(async tx=>{
+            for(const [n,query] of followUpQueries(project,input.brief!.item).entries())
+              await addJob(tx,job.run_id,'collect',followKey(market,project,n),{source:'tavily',sourcingLane:'trigger',
+                query:{key:followKey(market,project,n),market,lane:'news',activityIndex:0,query,topic:'general',sourcingLane:'trigger'}},1900);
+          });
+          if(follow.length)await researchProgress(db,job.run_id,'check',`Following ${follow.map(f=>f.project).join(', ')}: its subcontracts, packages and suppliers' orders.`);
           if(need.result)await researchProgress(db,job.run_id,'check',need.result.needsItem==='yes'&&accepted.length
             ?`${need.result.project??'Work'} needs ${input.brief.item}: ${accepted.map(c=>c.name).join(', ')} ${accepted.length===1?'does':'do'} the work.`
             :`${need.result.project??'Article'}: no buyer of ${input.brief.item} (${need.result.companies.find(c=>c.verdict==='rejected')?.reason??need.result.needWhy??'no work named'}).`);

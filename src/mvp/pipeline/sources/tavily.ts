@@ -10,7 +10,8 @@ import { tavilyCountry } from '@/mvp/config/country-meta';
 const responseSchema=z.object({results:z.array(z.object({url:z.url(),title:z.string(),content:z.string().nullable().optional().transform(v=>v?.slice(0,1200)),published_date:z.string().nullable().optional()})).max(100),usage:z.object({credits:z.number().nonnegative()}).optional()});
 // Tavily boosts results from a country for general searches (150+ countries; docs/mvp/19). Other
 // countries still work through the country name in the query; an unsupported name is never sent.
-const EXCLUDED_DOMAINS=['facebook.com','instagram.com','youtube.com','tiktok.com','pinterest.com','researchgate.net','indeed.com','glassdoor.com'];
+// Social and job sites are never sources; LinkedIn is never searched or read (no LinkedIn scraping).
+const EXCLUDED_DOMAINS=['facebook.com','instagram.com','youtube.com','tiktok.com','pinterest.com','researchgate.net','indeed.com','glassdoor.com','linkedin.com'];
 function requestBody(query:PlannedBuyerQuery) {
   return {query:query.query,search_depth:'basic',max_results:20,topic:query.topic??'general',include_answer:false,include_raw_content:false,
     auto_parameters:false,include_published_date:true,include_usage:true,exclude_domains:EXCLUDED_DOMAINS,

@@ -89,3 +89,29 @@ describe("checkNeed storage", () => {
     expect((await needProofs(db, run, "Tecnimont"))[0]).toMatchObject({ why: "NGL fractionation runs at cryogenic temperatures.", use: "NGL fractionation plant", market: "AE", url: "https://n.example/a" });
   });
 });
+
+describe("following accepted projects (stage 6)", () => {
+  it("asks for the project's subcontracts, packages and suppliers' orders", async () => {
+    const { followUpQueries } = await import("./need");
+    expect(followUpQueries("Ruwais LNG", "Cryogenic valves")).toEqual(["Ruwais LNG subcontract awarded", "Ruwais LNG package contract awarded", "Ruwais LNG Cryogenic valves supply order"]);
+  });
+  it("follows needed work in a chosen country only, at most two projects per country, never twice", async () => {
+    const { projectsToFollow, followKey } = await import("./need");
+    const db = await createTestDb();
+    try {
+      const run = (await db.query<{ id: string }>("insert into runs (status, adhoc_query) values ('running', '{}'::jsonb) returning id")).rows[0].id;
+      await db.query("insert into research_sessions (run_id, budget) values ($1, '{}'::jsonb)", [run]);
+      const result = (project: string, o: Record<string, unknown> = {}) => ({ project, country: "UAE", market: "AE", date: "2026-08", use: "LNG liquefaction plant", needsItem: "yes" as const, needWhy: "",
+        companies: [{ name: "Example EPC", role: "epc" as const, package: "EPC", quote: "", quoteVerified: true, since: null, verdict: "lead" as const, reason: "" }], ...o });
+      expect(await projectsToFollow(db, run, result("Ruwais LNG", { needsItem: "no" }))).toEqual([]);
+      expect(await projectsToFollow(db, run, result("Ruwais LNG", { market: null }))).toEqual([]);
+      expect(await projectsToFollow(db, run, result("Ruwais LNG"))).toEqual([{ project: "Ruwais LNG", market: "AE" }]);
+      const add = (project: string) => db.query("insert into research_jobs(run_id,stage,key,payload) values($1,'collect',$2,'{}'::jsonb)", [run, followKey("AE", project, 0)]);
+      await add("Ruwais LNG");
+      expect(await projectsToFollow(db, run, result("Ruwais LNG"))).toEqual([]);
+      await add("Habshan RGD");
+      expect(await projectsToFollow(db, run, result("Das Island IGD"))).toEqual([]);
+      expect(await projectsToFollow(db, run, result("Riyas NGL", { market: "SA" }))).toEqual([{ project: "Riyas NGL", market: "SA" }]);
+    } finally { await db.close(); }
+  }, 60_000);
+});

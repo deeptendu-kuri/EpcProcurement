@@ -145,6 +145,28 @@ export async function checkNeed(db: Queryable, runId: string, documentId: string
   return { result, answer };
 }
 
+/** Follow-ups per project (docs/mvp/20 stage 6, rule 5): at most this many projects per country per search. */
+export const FOLLOW_PROJECTS_PER_COUNTRY = 2;
+/**
+ * The follow-up searches for a project the need check accepted: its subcontracts and packages (tank builders,
+ * piping and mechanical subcontractors) and suppliers' orders for the item (a competitor's order names the buyer).
+ */
+export function followUpQueries(project: string, item: string): string[] {
+  const name = project.replace(/\s+/g, ' ').trim().slice(0, 90);
+  return [`${name} subcontract awarded`, `${name} package contract awarded`, `${name} ${item} supply order`];
+}
+/** Which projects of a judged page to follow: needed work, in a chosen country, not yet followed (top 2 per country). */
+export async function projectsToFollow(db: Queryable, runId: string, result: NeedResult): Promise<{ project: string; market: string }[]> {
+  if (result.needsItem !== 'yes' || !result.project || !result.market || !result.companies.some((c) => c.verdict === 'lead' || c.verdict === 'owner')) return [];
+  const followed = (await db.query<{ key: string }>(`select key from research_jobs where run_id=$1 and stage='collect' and key like 'follow:%'`, [runId])).rows.map((r) => r.key);
+  const slug = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').slice(0, 60);
+  if (followed.some((k) => k.startsWith(`follow:${result.market}:${slug(result.project!)}:`))) return [];
+  const projects = new Set(followed.filter((k) => k.startsWith(`follow:${result.market}:`)).map((k) => k.split(':')[2]));
+  return projects.size >= FOLLOW_PROJECTS_PER_COUNTRY ? [] : [{ project: result.project, market: result.market }];
+}
+export const followKey = (market: string, project: string, n: number) =>
+  `follow:${market}:${project.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').slice(0, 60)}:${n}`;
+
 export interface NeedProof { company: string; quote: string; why: string; use: string | null; project: string | null; date: string | null; market: string | null; documentId: string; url: string | null }
 /** A company's accepted need checks in a run (strongest first: most recent work). */
 export async function needProofs(db: Queryable, runId: string, company: string): Promise<NeedProof[]> {
