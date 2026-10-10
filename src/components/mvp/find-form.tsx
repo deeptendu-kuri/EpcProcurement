@@ -35,6 +35,19 @@ export interface FindFormProps {
   initialInput?: RunInput | null;
 }
 
+/**
+ * Search sizes with honest time and AI estimates (free AI tier: about 7,000 tokens a minute, about 200,000 a
+ * day per model). Quick takes no extra rounds; Deep takes the server's extra rounds and may use most of a
+ * day's allowance.
+ */
+const SIZES = {
+  quick: { label: "Quick", mode: "preview", target: 10, extraRounds: 0, time: "About 10 minutes · up to 60k AI tokens", hint: "A first batch of leads. Good for a demo." },
+  standard: { label: "Standard", mode: "batch", target: 20, extraRounds: 0, time: "About 20 minutes · up to 120k AI tokens", hint: "More searches and pages per country." },
+  deep: { label: "Deep", mode: "deep", target: 50, extraRounds: undefined, time: "An hour or more · may use the day's AI allowance", hint: "Keeps searching until 50+ companies are verified." },
+} as const satisfies Record<string, { label: string; mode: "preview" | "batch" | "deep"; target: number; extraRounds: number | undefined; time: string; hint: string }>;
+type SizeKey = keyof typeof SIZES;
+const sizeOf = (mode: "preview" | "batch" | "deep" | undefined): SizeKey => mode === "deep" ? "deep" : mode === "batch" ? "standard" : "quick";
+
 /** Find (09 §4.1, 13 §7): what you offer + markets + lead type → Search now (queued) → live progress; Save this search. */
 export function FindForm({ markets, products, materials: givenMaterials, initialRunId = null, initialTicketId = null, initialInput = null }: FindFormProps) {
   const router = useRouter();
@@ -55,7 +68,10 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
   const [includeResellers, setIncludeResellers] = useState(initialInput?.includeResellers !== false);
   const variant = useMemo(() => specChips(parseMaterialSpec(query)), [query]);
   const [researchMode, setResearchMode] = useState<"preview" | "batch" | "deep">(initialInput?.researchMode ?? "preview");
-  const [targetCompanies, setTargetCompanies] = useState(initialInput?.targetCompanies ?? (initialInput?.researchMode === "deep" ? 50 : 20));
+  const [targetCompanies, setTargetCompanies] = useState(initialInput?.targetCompanies ?? SIZES[sizeOf(initialInput?.researchMode)].target);
+  const [pauseOn, setPauseOn] = useState(Boolean(initialInput?.pauseAfter));
+  const [pauseAfter, setPauseAfter] = useState(initialInput?.pauseAfter ?? 10);
+  const size = sizeOf(researchMode);
   const [runId, setRunId] = useState<string | null>(initialRunId);
   const [ticketId, setTicketId] = useState<string | null>(initialRunId ? null : initialTicketId);
   const [position, setPosition] = useState(0);
@@ -70,7 +86,7 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
     setSeenInitial(initialRunId);
     if (initialRunId) {
       setRunId(initialRunId);
-      if(initialInput){setQuery(initialInput.query);setSelected(initialInput.markets);setProductId(initialInput.productId??products[0]?.id??"");setContactRole(initialInput.contactRole??"buyer");setResearchMode(initialInput.researchMode??"preview");setTargetCompanies(initialInput.targetCompanies??(initialInput.researchMode==="deep"?50:20));}
+      if(initialInput){setQuery(initialInput.query);setSelected(initialInput.markets);setProductId(initialInput.productId??products[0]?.id??"");setContactRole(initialInput.contactRole??"buyer");setResearchMode(initialInput.researchMode??"preview");setTargetCompanies(initialInput.targetCompanies??SIZES[sizeOf(initialInput.researchMode)].target);setPauseOn(Boolean(initialInput.pauseAfter));setPauseAfter(initialInput.pauseAfter??10);}
     }
   }
 
@@ -124,6 +140,7 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
     if (!Number.isInteger(targetCompanies) || targetCompanies < (researchMode === "deep" ? 50 : 1) || targetCompanies > 100) {
       setError(researchMode === "deep" ? "Choose a deep-research target between 50 and 100 companies." : "Choose a research target between 1 and 100 companies.");return false;
     }
+    if (pauseOn && (!Number.isInteger(pauseAfter) || pauseAfter < 1 || pauseAfter > 100)) { setError("Choose when to pause: after 1 to 100 leads."); return false; }
     if (!selected.length || selected.length > 20) {
       setError("Pick between 1 and 20 countries.");
       return false;
@@ -137,7 +154,8 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
     if (!validate()) return;
     setSubmitting(true);
     try {
-      const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), productId, contactRole, researchMode, targetCompanies, includeResellers, markets: selected, leadKinds: leadKinds() } });
+      const ticket = await apiJson<TicketBody>("/api/mvp/runs", { method: "POST", body: { query: query.trim(), productId, contactRole, researchMode, targetCompanies, includeResellers, markets: selected, leadKinds: leadKinds(),
+        ...(SIZES[size].extraRounds !== undefined ? { extraRounds: SIZES[size].extraRounds } : {}), ...(pauseOn ? { pauseAfter } : {}) } });
       emit(EVENTS.refreshStatus);
       if (ticket.runId) {
         // The search's own workspace shows its live progress and shortlist.
@@ -224,11 +242,24 @@ export function FindForm({ markets, products, materials: givenMaterials, initial
           <div className="flex flex-wrap gap-2">{selected.map(code=>COUNTRIES.find(c=>c.code===code)??{code,name:code}).map(market=><button key={market.code} type="button" aria-pressed="true" aria-label={market.name} onClick={()=>toggleMarket(market.code)} className="inline-flex min-h-9 items-center gap-2 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-3 text-sm text-[var(--accent-2)]"><Check size={13} aria-hidden />{market.name}<span aria-hidden>×</span><span className="sr-only">Remove country</span></button>)}</div>
           {!selected.length?<p className="text-sm text-[var(--muted)]">Add at least one country above.</p>:null}
         </fieldset>
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-2 text-sm font-semibold">How big a search?</legend>
+          <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Search size">
+            {(Object.keys(SIZES) as SizeKey[]).map(key=>{const z=SIZES[key];return <button key={key} type="button" role="radio" aria-checked={size===key} onClick={()=>{setResearchMode(z.mode);setTargetCompanies(z.target);}}
+              className={`rounded-xl border p-3 text-left text-sm transition ${size===key?"border-[var(--accent)] bg-[var(--accent-soft)]":"border-[var(--line)] bg-white hover:bg-[var(--hover)]"}`}>
+              <span className="block font-semibold">{z.label}</span><span className="block text-xs text-[var(--text-2)]">{z.time}</span><span className="mt-1 block text-xs text-[var(--muted)]">{z.hint}</span></button>;})}
+          </div>
+          <label className="flex flex-wrap items-center gap-2 text-sm">
+            <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={pauseOn} onChange={e=>setPauseOn(e.target.checked)} aria-label="Pause when leads are found" />
+            <span>Pause when</span>
+            <input type="number" min={1} max={100} value={pauseAfter} onChange={e=>{setPauseAfter(Number(e.target.value));setPauseOn(true);}} aria-label="Leads before pausing" className="input h-9 w-20 px-2" />
+            <span>leads are found, so I can review them, then resume or finish.</span>
+          </label>
+        </fieldset>
         <details className="rounded-lg border border-[var(--line)] p-3 text-sm" open={Boolean(initialInput&&initialInput.researchMode==="deep")}>
-          <summary className="cursor-pointer font-semibold text-[var(--text-2)]">Advanced options · contact role and research size</summary>
+          <summary className="cursor-pointer font-semibold text-[var(--text-2)]">Advanced options · contact role and target</summary>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1 font-semibold">Priority contact role<select aria-label="Priority contact role" className="control h-11 px-2 font-normal" value={contactRole} onChange={e=>setContactRole(e.target.value)}>{CONTACT_ROLES.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
-            <label className="flex flex-col gap-1 font-semibold">Research mode<select aria-label="Research mode" className="control h-11 px-2 font-normal" value={researchMode} onChange={e=>{const mode=e.target.value as "preview"|"batch"|"deep";setResearchMode(mode);setTargetCompanies(mode==="deep"?50:20);}}><option value="preview">Preview · smallest research budget</option><option value="batch">Batch · broader bounded research</option><option value="deep">Deep · work toward 50–100 companies</option></select></label>
             <label className="flex flex-col gap-1 font-semibold">Target companies<input aria-label="Target companies" type="number" min={researchMode==="deep"?50:1} max={100} value={targetCompanies} onChange={e=>setTargetCompanies(Number(e.target.value))} className="input h-11 px-3 font-normal" /></label>
           </div>
           <p className="mt-3 text-xs leading-relaxed text-[var(--muted)]">Optional: prioritize a contact role. All available contacts still appear with role tags. A research target is not a guaranteed number of leads; deeper modes may consume more credits. Companies appear even without contacts.</p>

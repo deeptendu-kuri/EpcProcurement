@@ -59,8 +59,11 @@ export async function extendResearchIfShort(db: Db, runId: string): Promise<bool
   const run = (await db.query<{ status: string }>('select status from runs where id=$1', [runId])).rows[0];
   if (!session || session.state !== 'active' || !run || run.status === 'cancelled') return false;
   const rounds = session.budget.extensions ?? 0;
-  if (rounds >= maxExtensionRounds()) {
-    await researchProgress(db, runId, 'info', `Stopped after ${rounds} extra rounds with ${saved} buyer(s) saved. Raise MVP_RESEARCH_EXTENSION_ROUNDS to search longer.`);
+  // The search's own choice (Quick = 0, Standard = 1) never exceeds the server setting.
+  const allowed = Math.min(maxExtensionRounds(), (session.budget as { extraRounds?: number }).extraRounds ?? Number.POSITIVE_INFINITY);
+  if (rounds >= allowed) {
+    await researchProgress(db, runId, 'info', allowed === 0 ? `Quick search: finished with ${saved} verified buyer(s) and no extra rounds. Resume or run a Standard search to look further.`
+      : `Stopped after ${rounds} extra rounds with ${saved} buyer(s) saved. Raise MVP_RESEARCH_EXTENSION_ROUNDS to search longer.`);
     return false;
   }
   const allowance = await researchAiAllowance(db);
@@ -104,7 +107,7 @@ export async function extendResearchIfShort(db: Db, runId: string): Promise<bool
   // Companies parked by a reading limit get their website read again (imported lazily: found.ts uses this module).
   if (parked) await (await import('./found')).requeueDeferredCandidates(db, runId, next);
   await researchProgress(db, runId, 'info',
-    `Only ${saved} buyer(s) saved so far; searching further (round ${next.extensions} of ${maxExtensionRounds()}): up to ${next.searchQueries} web searches, ${next.maxPages} pages and ${next.maxAiTokens.toLocaleString('en-US')} AI tokens.`);
+    `Only ${saved} buyer(s) saved so far; searching further (round ${next.extensions} of ${Math.min(maxExtensionRounds(), (session.budget as { extraRounds?: number }).extraRounds ?? Number.POSITIVE_INFINITY)}): up to ${next.searchQueries} web searches, ${next.maxPages} pages and ${next.maxAiTokens.toLocaleString('en-US')} AI tokens.`);
   return true;
 }
 

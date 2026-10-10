@@ -12,7 +12,9 @@ import { gdeltSource } from '@/mvp/pipeline/sources/gdelt';
 import { rssSource } from '@/mvp/pipeline/sources/rss';
 import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tavily';
 import { collectBingQuery,collectRssFeed,collectLocalNews,collectGdeltCountry} from './sources';
-import type { ResearchBudget } from './store';
+import type { ResearchBudget, ResearchJob } from './store';
+import { autoPauseIfDue } from './control';
+import { clearBuyerCache } from '@/mvp/buyers/load';
 import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
 import { candidateForPage, candidatePageIdentity, extendInvestigation, seedInvestigations, domainOf, queueRead } from './investigation';
 import { RESEARCH_SOURCES } from './registry';
@@ -69,6 +71,14 @@ export const productionResearchDeps:ResearchDeps={
 export async function processResearchTick(db:Db=getDb(),deps:ResearchDeps=productionResearchDeps,runId?:string,jobId?:string,maxRunning=1) {
   const job=await claimJob(db,runId,jobId,maxRunning);
   if(!job){await finishIdleResearch(db,runId);return {processed:false};}
+  const result=await processJob(db,deps,job);
+  // Leads saved by this step show on Leads at once, not after the 30 s buyer cache expires.
+  if(job.stage==='analyse')clearBuyerCache();
+  // "Pause after N leads" (control.ts).
+  await autoPauseIfDue(db,job.run_id).catch(()=>false);
+  return result;
+}
+async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
   const session=await sessionFor(db,job.run_id);
   const input=(await db.query<{adhoc_query:RunInput}>('select adhoc_query from runs where id=$1',[job.run_id])).rows[0].adhoc_query;
   if(!session)return {processed:false};

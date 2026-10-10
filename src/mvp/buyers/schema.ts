@@ -31,6 +31,7 @@ export const buyerSearchSchema = z
     howSure: list(z.enum(["high", "medium", "low"])).optional(),
     q: z.string().trim().max(200).optional(),
     run: z.string().uuid().optional(),
+    proof: z.enum(["verified", "likely"]).optional(),
     sort: z.enum(["latest", "fit", "window"]).optional(),
     page: z.number().int().min(1).max(10_000).optional(),
     pageSize: z.number().int().min(1).max(200).optional(),

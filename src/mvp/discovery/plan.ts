@@ -8,7 +8,7 @@ import { MATERIAL_ACTIVITIES } from "./material";
 /** Buying activities, not product sellers. Broad search terms never prove exact product fit. */
 export function buyingActivities(productId: string): string[] { return [...(MATERIAL_ACTIVITIES[productId] ?? [])]; }
 export type ResearchMode = "preview" | "batch" | "deep";
-type BudgetInput = Pick<RunInput, "query" | "markets"> & {researchMode?:ResearchMode; targetCompanies?:number};
+type BudgetInput = Pick<RunInput, "query" | "markets"> & {researchMode?:ResearchMode; targetCompanies?:number; extraRounds?:number};
 export const MODE_BUDGETS = {
   preview:{searchQueries:4,bingQueries:6,maxPages:40,maxAiPages:20,maxAiTokens:60_000,maxPagesPerDomain:4,maxRepairCalls:1,targetCompanies:10},
   batch:{searchQueries:8,bingQueries:12,maxPages:80,maxAiPages:40,maxAiTokens:120_000,maxPagesPerDomain:4,maxRepairCalls:2,targetCompanies:30},
@@ -32,7 +32,9 @@ export function researchBudget(input?:BudgetInput) {
     maxPages:bounded("MVP_MAX_RESEARCH_PAGES",grow(defaults.maxPages,12,deep.maxPages)),
     maxAiPages:bounded("MVP_MAX_AI_DOCS",grow(defaults.maxAiPages,4,deep.maxAiPages)),maxAiTokens:bounded("MVP_MAX_RESEARCH_AI_TOKENS",grow(defaults.maxAiTokens,10_000,deep.maxAiTokens)),
     maxPagesPerDomain:bounded("MVP_MAX_PAGES_PER_DOMAIN",defaults.maxPagesPerDomain),maxRepairCalls:bounded("MVP_MAX_REPAIR_CALLS",defaults.maxRepairCalls),
-    targetCompanies:typeof target==="number"&&Number.isInteger(target)&&target>=1&&target<=100?target:defaults.targetCompanies};
+    targetCompanies:typeof target==="number"&&Number.isInteger(target)&&target>=1&&target<=100?target:defaults.targetCompanies,
+    // A quick search takes no extra rounds; absent = the server setting (see research/limits.ts).
+    ...(Number.isInteger(input?.extraRounds)&&input!.extraRounds!>=0?{extraRounds:Math.min(5,input!.extraRounds!)}:{})};
 }
 export function queryBudget(input?:BudgetInput): number {
   return researchBudget(input).searchQueries;

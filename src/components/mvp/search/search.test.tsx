@@ -48,6 +48,15 @@ describe("SuperSearch URL state (docs/mvp/14 §10)", () => {
     expect(parseSearchState({ role: "owner,supplier", stage: "ready,bogus" })).toMatchObject({ roleAny: ["owner"], stage: ["ready"] });
   });
 
+  it("keeps the Leads tab in the URL and sends only verified/likely to the server", () => {
+    expect(parseSearchState({ proof: "likely" }).proof).toBe("likely");
+    expect(parseSearchState({ proof: "bogus" }).proof).toBe("");
+    expect(searchHref({ ...DEFAULT_SEARCH, proof: "verified" }, "/crm")).toBe("/crm?proof=verified");
+    expect(toBuyerSearch({ ...DEFAULT_SEARCH, proof: "likely" }, []).proof).toBe("likely");
+    expect(toBuyerSearch({ ...DEFAULT_SEARCH, proof: "found" }, []).proof).toBeUndefined();
+    expect(applySearchChange({ ...DEFAULT_SEARCH, page: 3 }, { proof: "verified" }).page).toBe(1);
+  });
+
   it("keeps the selected search in the Leads URL and sends only a real run to the server (doc 17)", () => {
     const run = "11111111-1111-4111-8111-111111111111";
     expect(parseSearchState({ run }).run).toBe(run);

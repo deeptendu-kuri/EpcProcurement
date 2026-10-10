@@ -5,7 +5,16 @@ export const RUN_STEPS = ["collecting", "reading", "checking", "scoring"] as con
 export type RunStep = (typeof RUN_STEPS)[number];
 
 /** A settled compatibility status must not hide paused/incomplete research. */
+/** Where a search stands, in one word set used everywhere (Dashboard, Leads, the search page). */
+export type SearchKind = "running" | "paused" | "finished" | "partial" | "stopped" | "failed";
+export function searchKind(status: RunStatus, counters: RunCounters = {}): SearchKind {
+  if (status === "running" || status === "queued") return counters.researchState === "paused" ? "paused" : "running";
+  if (status === "cancelled") return "stopped";
+  if (status === "failed") return "failed";
+  return counters.researchState === "partial" || counters.coverageIncomplete ? "partial" : "finished";
+}
 export function runStatusText(status:RunStatus,counters:RunCounters={}):string {
+  if((status==='running'||status==='queued')&&counters.researchState==='paused')return 'Paused';
   if(status==='done'&&counters.researchState==='partial')return 'Finished · partial coverage';
   if(status==='done'&&counters.coverageIncomplete)return 'Finished · partial coverage';
   return {queued:'Starting',running:'Running',done:'Finished',failed:'Stopped',cancelled:'Stopped by you'}[status];

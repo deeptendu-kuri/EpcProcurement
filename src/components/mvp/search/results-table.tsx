@@ -56,7 +56,16 @@ export interface ResultsTableProps {
   onSaveDerived?: (row: BuyerRow) => void;
   /** Derived keys being saved. */
   saving?: ReadonlySet<string>;
+  /** Leads saved since the list was first shown (marked New). */
+  newIds?: ReadonlySet<string>;
 }
+
+/** How a lead is proven (doc 19 §6), as a short tag. */
+const PROOF: Record<NonNullable<BuyerRow["verification"]>, { label: string; tone: string; title: string }> = {
+  website: { label: "Verified", tone: "bg-[var(--good-bg)] text-[var(--good)]", title: "Its own website shows matching work." },
+  listing: { label: "Listed work", tone: "bg-[var(--info-bg)] text-[var(--info)]", title: "A list or directory entry describes its work with this material." },
+  rating: { label: "Likely", tone: "bg-[var(--warn-bg)] text-[var(--warn)]", title: "Rated from what the sources say; not verified yet and never emailed automatically." },
+};
 
 /** Rating words for the 0–100 buyer fit: the number stays visible, the word makes it scannable. */
 export function ratingWord(score: number): { word: string; tone: string } {
@@ -89,7 +98,7 @@ const TD = "px-4 py-4 align-top";
  * Leads table (docs/mvp/18 §2): Company (role, country, tier) · Search it came from · Will buy (the
  * searched product and why) · Also can sell · Rating · Email · Contacts. A click opens the evidence drawer.
  */
-export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true, onSaveDerived, saving }: ResultsTableProps) {
+export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selectable = true, onSaveDerived, saving, newIds }: ResultsTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1040px] border-collapse text-[14px] leading-[1.45]" aria-label="Buyers">
@@ -157,6 +166,8 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                         {country ? <span className="text-[var(--muted)]"> · {country}</span> : null}
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5" data-testid="tier-cell">
+                        {newIds?.has(row.leadId) ? <span className="rounded-full bg-[var(--accent)] px-1.5 py-px text-[11px] font-semibold text-white">New</span> : null}
+                        {row.verification ? <span title={PROOF[row.verification].title} className={`rounded-full px-1.5 py-px text-[11px] font-semibold ${PROOF[row.verification].tone}`}>{PROOF[row.verification].label}</span> : null}
                         <TierBadge tier={tier} />
                         {tier > 1 && row.link ? (
                           <span className={`inline-block whitespace-nowrap rounded-full px-1.5 py-px text-[11px] font-semibold ${LINK_STYLES[row.link]}`}>{LINK_LABELS[row.link]}</span>

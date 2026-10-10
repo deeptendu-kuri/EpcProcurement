@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Bookmark, ChevronDown, Download, Info, Loader2, PanelLeftOpen, Plus, Search, SearchX, SlidersHorizontal, Sparkles, Square, SquareCheck, Users, X } from "lucide-react";
 import type { BuyerRow, BuyerSearchResult, ContactRow, ContactSearchResult } from "@/mvp/buyers/types";
-import { ApiError } from "../api-client";
+import { ApiError, apiJson } from "../api-client";
+import type { RunCounters, RunStatus } from "@/mvp/types";
+import { searchKind, type SearchKind } from "../run-steps";
+import { SearchControls, SearchStatusChip } from "../research/search-controls";
 import { EmptyState } from "../empty-state";
 import { Pagination } from "../leads/pagination";
 import { safeStorage } from "../shell/events";
@@ -29,6 +32,7 @@ import {
   serializeSearchState,
   toBuyerSearch,
   type CatalogueOption,
+  type ProofTab,
   type ResultView,
   type SearchUrlState,
 } from "./search-state";
@@ -37,6 +41,14 @@ const FILTERS_KEY = "mvp.search.filters.collapsed";
 const SAVED_KEY = "mvp.search.saved";
 
 type Tab = "search" | "lists";
+/** While a search runs, Leads checks for new leads this often (docs/mvp/18 §9). */
+const LIVE_MS = 5000;
+const PROOF_TABS: { id: ProofTab; label: string; hint: string }[] = [
+  { id: "", label: "All leads", hint: "Every lead this search saved." },
+  { id: "verified", label: "Verified", hint: "Proven by the company's own website or its listed work." },
+  { id: "likely", label: "Likely · not verified", hint: "Rated as likely buyers from what the sources say. Verify before emailing." },
+  { id: "found", label: "Companies found", hint: "Every company the search named, checked or not." },
+];
 
 interface SavedFilter {
   name: string;
@@ -214,10 +226,10 @@ export interface SearchWorkspaceProps {
   demoEmail?: boolean;
   /** Page the workspace lives on: "/crm" (Leads) or "/search" (old links). */
   basePath?: string;
-  /** The user's searches, for the Search picker (doc 17 §4.4). */
-  runs?: { id: string; label: string; status: string }[];
-  /** Shown under the results for the selected search (e.g. companies found, not checked yet). */
-  belowResults?: React.ReactNode;
+  /** The user's searches, for the Search picker (doc 17 §4.4), with where each stands. */
+  runs?: { id: string; label: string; status: string; kind?: SearchKind }[];
+  /** The "Companies found" tab for the selected search. */
+  foundCompanies?: React.ReactNode;
   tab: Tab;
   state: SearchUrlState;
   catalogue: CatalogueOption[];
@@ -229,7 +241,7 @@ export interface SearchWorkspaceProps {
  * SuperSearch | Lead Lists tabs, the count line, Buyers | Contacts, Select all, Add to list, Export,
  * Find contacts · the buyer sidebar. Filters live in the URL; 25 buyers per page.
  */
-export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, basePath = "/search", runs = [], belowResults = null }: SearchWorkspaceProps) {
+export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, basePath = "/search", runs = [], foundCompanies = null }: SearchWorkspaceProps) {
   const router = useRouter();
   const toast = useToast();
   const [isPending, startTransition] = useTransition();
@@ -258,6 +270,11 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
   const [addingContact, setAddingContact] = useState<ContactRow | null>(null);
   const [confirming, setConfirming] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
+  /** Live: where the selected search stands now, the latest lead counts, and the leads already shown. */
+  const [kindNow, setKindNow] = useState<Record<string, SearchKind>>({});
+  const [latest, setLatest] = useState<{ key: string; counts: NonNullable<BuyerSearchResult["proofCounts"]> } | null>(null);
+  const known = useRef<{ key: string; ids: Set<string> } | null>(null);
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const goToPage = (page: number) => {
     scrollRef.current?.scrollTo({ top: 0 });
     if (view === "contacts") setContactsPage(page);
@@ -298,6 +315,12 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
         setError(null);
         setDoneKey(key);
         setSelected((previous) => new Set([...previous].filter((id) => nextResult.rows.some((row) => row.leadId === id))));
+        // Leads that arrived since this list was first shown are marked New (newest-first order only).
+        const listKey = queryKey.replace(/(^|&)page=\d+/, "");
+        const ids = nextResult.rows.map((row) => row.leadId);
+        if (known.current?.key === listKey && current.sort === "latest") setNewIds((previous) => new Set([...previous, ...ids.filter((id) => !known.current!.ids.has(id))]));
+        else setNewIds(new Set());
+        known.current = { key: listKey, ids: new Set([...(known.current?.key === listKey ? known.current.ids : []), ...ids]) };
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
@@ -391,6 +414,35 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
   );
 
   const searchRun = state.run && state.run !== "all" ? state.run : undefined;
+  const kind: SearchKind | null = searchRun ? kindNow[searchRun] ?? runs.find((r) => r.id === searchRun)?.kind ?? null : null;
+  // A paused search is watched too: steps already running finish and save leads.
+  const watching = tab === "search" && Boolean(searchRun) && (kind === "running" || kind === "paused");
+  /** The user is working in the table (a selection, an open lead, a later page): new leads wait behind a bar. */
+  const engagedRef = useRef(false);
+  const shownTotalRef = useRef<number | null>(null);
+  useEffect(() => {
+    engagedRef.current = selected.size > 0 || Boolean(openId) || state.page > 1;
+    shownTotalRef.current = result ? result.total : null;
+  });
+  useEffect(() => {
+    if (!watching || !searchRun) return;
+    const timer = setInterval(() => {
+      const current = parseSearchState(new URLSearchParams(queryKey));
+      void Promise.all([
+        searchBuyers({ ...toBuyerSearch(current, catalogue), page: 1, pageSize: 1 }),
+        apiJson<{ run: { status: RunStatus; counters: RunCounters } }>(`/api/mvp/runs/${searchRun}?after=2147483647`),
+      ]).then(([live, { run }]) => {
+        const nextKind = searchKind(run.status, run.counters);
+        setKindNow((previous) => ({ ...previous, [searchRun]: nextKind }));
+        if (!live.proofCounts) return;
+        setLatest({ key: queryKey, counts: live.proofCounts });
+        const grew = live.total !== (shownTotalRef.current ?? live.total);
+        // New leads show at once unless the user is working in the table; the end of the search refreshes too.
+        if ((grew && !engagedRef.current) || (nextKind !== "running" && nextKind !== "paused")) setRetry((value) => value + 1);
+      }).catch(() => undefined);
+    }, LIVE_MS);
+    return () => clearInterval(timer);
+  }, [watching, searchRun, queryKey, catalogue]);
   // A row opens by lead; a link from Email automation or the dashboard may carry an opportunity id.
   const drawerTarget = (id: string) => id.startsWith("company:") ? { companyId: id.slice(8), run: searchRun }
     : rows.some((r) => r.leadId === id) || !/^[0-9a-f-]{36}$/i.test(id) ? { leadId: id, run: searchRun } : { opportunityId: id, run: searchRun };
@@ -403,6 +455,9 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
   const loading = tab === "search" && doneKey !== `${queryKey}#${retry}`;
   const rows = result?.rows ?? [];
   const total = result?.total ?? 0;
+  const counts = (latest?.key === queryKey ? latest.counts : null) ?? result?.proofCounts ?? null;
+  const shownCount = counts ? (state.proof === "verified" ? counts.verified : state.proof === "likely" ? counts.likely : counts.all) : null;
+  const waiting = result && shownCount !== null && state.proof !== "found" ? Math.max(0, shownCount - total) : 0;
   const selectableRows = rows.filter((row) => !isDerivedRow(row));
   const allSelected = selectableRows.length > 0 && selectableRows.every((row) => selected.has(row.leadId));
   const notFound = Math.max(0, (result?.contactsTotal ?? 0) - (result?.contactsFound ?? 0));
@@ -555,6 +610,18 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
           <Sparkles size={15} aria-hidden /> Find contacts
         </button>
       </div>
+      {waiting > 0 ? (
+        <div role="status" className="mx-4 mb-2 flex flex-wrap items-center gap-3 rounded-xl bg-[var(--info-bg)] px-4 py-2.5 text-[14px] text-[var(--info)] lg:mx-6">
+          <span className="font-medium">{waiting} new {waiting === 1 ? "lead" : "leads"} saved since this list loaded.</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => { navigate({ page: 1 }); setRetry((value) => value + 1); }}>Show {waiting === 1 ? "it" : "them"}</button>
+        </div>
+      ) : null}
+      {result && result.facets.roles.length ? (
+        <p className="px-4 pb-1 text-[13px] text-[var(--muted)] lg:px-6" data-testid="lead-summary">
+          {result.facets.roles.slice(0, 4).map((f) => `${f.label} ${f.count}`).join(" · ")}
+          {result.facets.countries.length ? ` · ${result.facets.countries.slice(0, 3).map((f) => `${f.label} ${f.count}`).join(", ")}` : ""}
+        </p>
+      ) : null}
       {result && notFound > 0 ? (
         <p className="flex items-center gap-1.5 px-4 pb-3 text-[13.5px] text-[var(--accent)] lg:px-6">
           <Info size={14} aria-hidden className="shrink-0" />
@@ -582,8 +649,10 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
         ) : noData ? (
           <EmptyState
             icon={<Users size={20} aria-hidden />}
-            title={searchRun ? "No buyers saved by this search yet" : "No saved companies yet"}
-            text={searchRun ? "Check the search progress, or review the companies it found below and check them." : "Start a material search. Its buyers appear here with the proof, contacts and email status."}
+            title={state.proof === "verified" ? "No verified leads yet" : state.proof === "likely" ? "No likely leads waiting" : searchRun ? watching ? "Looking for leads…" : "No leads saved by this search yet" : "No saved companies yet"}
+            text={watching ? "Leads appear here as soon as the search saves them. The search page shows what it is doing now."
+              : state.proof === "verified" ? "Verify likely leads from the Likely tab, or check companies in Companies found."
+              : searchRun ? "Open Companies found to check the companies this search named." : "Start a material search. Its buyers appear here with the proof, contacts and email status."}
           />
         ) : view === "contacts" ? (
           contacts && contacts.rows.length ? (
@@ -608,7 +677,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
           )
         ) : rows.length ? (
           <>
-            <ResultsTable rows={rows} selected={selected} openId={openId} onToggle={toggle} onOpen={setOpen} onSaveDerived={(row) => void saveDerived(row)} saving={savingDerived} />
+            <ResultsTable rows={rows} selected={selected} openId={openId} onToggle={toggle} onOpen={setOpen} onSaveDerived={(row) => void saveDerived(row)} saving={savingDerived} newIds={newIds} />
             <div className="mt-3">
               <Pagination page={state.page} size={PAGE_SIZE} total={total} onPage={goToPage} />
             </div>
@@ -642,15 +711,32 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
         {tab==="search"?<div className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] bg-[var(--subtle)] px-4 py-2.5 text-sm lg:px-6" data-tour="leads-search">
           <label className="flex min-w-0 max-w-full items-center gap-2 font-semibold">Search
             <select aria-label="Search" className="control h-9 w-full min-w-0 max-w-[22rem] px-2 font-normal" value={state.run || "all"} onChange={e=>navigate({run:e.target.value})}>
-              {runs.map(r=><option key={r.id} value={r.id}>{r.label}{r.status==="running"||r.status==="queued"?" · running":""}</option>)}
+              {runs.map(r=><option key={r.id} value={r.id}>{r.label}{(kindNow[r.id]??r.kind)==="paused"?" · paused":r.status==="running"||r.status==="queued"?" · running":""}</option>)}
               <option value="all">All searches</option>
             </select>
           </label>
-          {state.run&&state.run!=="all"?<Link href={`/find?run=${state.run}`} className="btn btn-secondary btn-sm">Search progress</Link>:null}
-          <span className="text-xs text-[var(--muted)]">{state.run&&state.run!=="all"?"Companies saved by this search. Filters work within it.":"Companies from all your searches."}</span>
+          {kind ? <SearchStatusChip kind={kind} /> : null}
+          {searchRun?<Link href={`/find?run=${searchRun}`} className="btn btn-secondary btn-sm">Search progress</Link>:null}
+          {searchRun && kind ? <SearchControls runId={searchRun} kind={kind} size="sm" onDone={(next) => { setKindNow((previous) => ({ ...previous, [searchRun]: next })); setRetry((value) => value + 1); }} /> : null}
+          <span className="text-xs text-[var(--muted)]">{watching ? "New leads appear here as the search saves them." : searchRun ? "Leads saved by this search. Filters work within it." : "Leads from all your searches."}</span>
         </div>:null}
+        {tab === "search" ? (
+          <div role="tablist" aria-label="Leads" className="flex shrink-0 gap-5 overflow-x-auto border-b border-[var(--line)] px-4 lg:px-6">
+            {PROOF_TABS.filter((t) => t.id !== "found" || searchRun).map((t) => {
+              const n = !counts ? null : t.id === "" ? counts.all : t.id === "verified" ? counts.verified : t.id === "likely" ? counts.likely : null;
+              const on = state.proof === t.id;
+              return (
+                <button key={t.id || "all"} type="button" role="tab" aria-selected={on} title={t.hint} onClick={() => navigate({ proof: t.id })}
+                  className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 py-2.5 text-[13.5px] ${on ? "border-[var(--accent)] font-semibold text-[var(--accent)]" : "border-transparent text-[var(--text-2)] hover:text-[var(--text)]"}`}>
+                  {t.label}{n !== null ? <span className={`rounded-full px-1.5 text-[12px] tabular-nums ${on ? "bg-[var(--accent-soft)]" : "bg-[var(--subtle)] text-[var(--muted)]"}`}>{n}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-          {tab === "search" ? <>{results}{belowResults ? <div className="px-4 pb-8 lg:px-6">{belowResults}</div> : null}</> : <LeadListsView onOpenBuyer={setOpen} openId={openId} />}
+          {tab === "search" ? (state.proof === "found" ? <div className="px-4 py-5 lg:px-6">{foundCompanies ?? <EmptyState icon={<Users size={20} aria-hidden />} title="Choose a search" text="Companies found are listed per search. Pick one in the Search menu above." showFind={false} />}</div> : results)
+            : <LeadListsView onOpenBuyer={setOpen} openId={openId} />}
         </div>
       </div>
 

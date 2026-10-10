@@ -5,6 +5,9 @@ import {useRouter} from 'next/navigation';
 import {apiJson} from '../api-client';
 import type {FoundCompany,LikelyRole} from '@/mvp/research/found';
 import {RatingBadge} from '../search/results-table';
+import {Pagination} from '../leads/pagination';
+
+const PAGE=25;
 
 const EMPTY=<span className="text-[var(--muted)]" aria-label="Not found yet">—</span>;
 const statusClass:Record<FoundCompany['status'],string>={saved:'bg-green-50 text-green-900 border-green-200',checking:'bg-blue-50 text-blue-900 border-blue-200',
@@ -23,7 +26,7 @@ export function FoundCompanies({runId}:{runId:string}){
   const [data,setData]=useState<Data|null>(null);
   const [error,setError]=useState('');const [busy,setBusy]=useState<string|null>(null);const [note,setNote]=useState('');
   const url=`/api/mvp/research/${encodeURIComponent(runId)}/companies`;
-  const [tick,setTick]=useState(0);
+  const [tick,setTick]=useState(0);const [page,setPage]=useState(1);
   const working=Boolean(data&&(data.active||data.companies.some(c=>c.status==='checking')));
   const savedCount=data?.companies.filter(c=>c.status==='saved').length??0;
   useEffect(()=>{
@@ -100,7 +103,8 @@ export function FoundCompanies({runId}:{runId:string}){
     {error?<p role="alert" className="p-4 text-sm">{error}</p>:null}
     {note?<p role="status" className="px-4 pt-3 text-sm">{note}</p>:null}
     {!rows.length&&!error?<p className="p-4 text-sm text-[var(--muted)]">{working?'Reading sources; companies appear here as they are named.':'No work-related companies were named by the sources read so far.'}</p>:null}
-    {rows.length?list(rows,true):null}
+    {rows.length?list(rows.slice((Math.min(page,Math.ceil(rows.length/PAGE))-1)*PAGE,Math.min(page,Math.ceil(rows.length/PAGE))*PAGE),true):null}
+    {rows.length>PAGE?<div className="border-t border-[var(--line)] px-4 py-3"><Pagination page={Math.min(page,Math.ceil(rows.length/PAGE))} size={PAGE} total={rows.length} onPage={setPage}/></div>:null}
     {other.length?<details className="border-t border-[var(--line)] p-4 text-sm"><summary className="cursor-pointer text-[var(--muted)]">{other.length} other names on those pages, not related to this work</summary><div className="mt-3">{list(other,false)}</div></details>:null}
   </section>;
 }

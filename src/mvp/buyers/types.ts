@@ -131,6 +131,8 @@ export interface BuyerSearch {
   q?: string; sort?: 'latest' | 'fit' | 'window'; page?: number; pageSize?: number;
   /** Only companies saved by this search (run id). Absent = all searches. */
   run?: string;
+  /** Leads tabs: proven by their own website or listing ("verified"), or rated likely only ("likely"). */
+  proof?: 'verified' | 'likely';
   /** doc 15 D: supply-chain tier filter. Absent = all tiers. */
   tiers?: ChainTier[];
   /** doc 15 D: "How we know" filter (tier 1 rows count as confirmed). */
@@ -219,6 +221,8 @@ export interface BuyerFacets {
 export interface BuyerSearchResult {
   rows: BuyerRow[];
   total: number;
+  /** Leads per tab with the other filters applied: all, verified, likely only. */
+  proofCounts?: { all: number; verified: number; likely: number };
   facets: BuyerFacets;
   contactsFound: number;
   contactsTotal: number;

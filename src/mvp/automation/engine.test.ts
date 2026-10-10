@@ -104,6 +104,15 @@ describe("persistent demo research-to-meeting funnel",()=>{
     await db.query("update research_sessions set state='cancelled' where run_id=$1",[s.run]);expect(await enrollCompletedSearches()).toBe(0);
     expect(mocks.fit).not.toHaveBeenCalled();expect(mocks.send).not.toHaveBeenCalled();
   });
+  it('enrolls the verified leads of a paused search, not its likely-only leads',async()=>{
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');await setFunnelEnabled(true);const s=await seed({validated:false});await attachSource(s);
+    await db.query("update runs set status='running' where id=$1",[s.run]);
+    await db.query("insert into research_sessions(run_id,state,budget) values($1,'active','{}')",[s.run]);
+    expect(await enrollCompletedSearches()).toBe(0);
+    await db.query("update search_opportunities set verification='rating' where id=$1",[s.o]);
+    await db.query("update research_sessions set state='paused' where run_id=$1",[s.run]);expect(await enrollCompletedSearches()).toBe(0);
+    await db.query("update search_opportunities set verification='website' where id=$1",[s.o]);expect(await enrollCompletedSearches()).toBe(1);
+  });
   it('automatically offers replacements if an agreed time expires or becomes occupied',async()=>{
     await setFunnelEnabled(true);const s=await seed();await processFunnelTick();
     const slots=['2026-10-12T04:30:00.000Z','2026-10-13T04:30:00.000Z'];

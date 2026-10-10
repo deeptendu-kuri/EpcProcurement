@@ -6,7 +6,7 @@ import type {SearchWorkspaceProps} from '@/components/mvp/search/search-workspac
 const LATEST='11111111-1111-4111-8111-111111111111';
 const OLDER='22222222-2222-4222-8222-222222222222';
 const seen=vi.hoisted(()=>({props:null as unknown}));
-vi.mock('@/components/mvp/search/search-workspace',()=>({SearchWorkspace:(props:SearchWorkspaceProps)=>{seen.props=props;return <div data-testid="workspace">{props.belowResults}</div>;}}));
+vi.mock('@/components/mvp/search/search-workspace',()=>({SearchWorkspace:(props:SearchWorkspaceProps)=>{seen.props=props;return <div data-testid="workspace">{props.foundCompanies}</div>;}}));
 vi.mock('@/components/mvp/tables/found-companies',()=>({FoundCompanies:({runId}:{runId:string})=><p>found companies for {runId}</p>}));
 vi.mock('@/components/mvp/search/page-data',()=>({catalogueOptions:()=>[],marketOptions:()=>[]}));
 vi.mock('@/mvp/email/config',()=>({demoEmailEnabled:()=>true}));
@@ -19,7 +19,7 @@ afterEach(()=>{cleanup();seen.props=null;});
 async function show(params:Record<string,string>={}){render(await LeadsPage({searchParams:Promise.resolve(params)}));return seen.props as SearchWorkspaceProps;}
 
 describe('Leads page (SuperSearch scoped to the user\'s searches)',()=>{
-  it('opens on the latest search with its unchecked companies under the table',async()=>{
+  it('opens on the latest search with its companies found in their own tab',async()=>{
     const props=await show();
     expect(props.basePath).toBe('/crm');
     expect(props.tab).toBe('search');
@@ -40,6 +40,6 @@ describe('Leads page (SuperSearch scoped to the user\'s searches)',()=>{
   it('shows all searches without a found-companies panel',async()=>{
     const props=await show({run:'all'});
     expect(props.state.run).toBe('all');
-    expect(props.belowResults).toBeNull();
+    expect(props.foundCompanies).toBeNull();
   });
 });

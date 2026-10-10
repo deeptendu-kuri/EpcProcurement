@@ -126,7 +126,7 @@ export async function claimJob(db:Db=getDb(),runId?:string,jobId?:string,maxRunn
 }
 export async function owned(tx:Queryable,job:ResearchJob):Promise<boolean> {
   return Boolean((await tx.query(`select j.id from research_jobs j join research_sessions s on s.run_id=j.run_id join runs r on r.id=j.run_id
-    where j.id=$1 and j.lease_token=$2 and j.state='running' and j.lease_until>now() and s.state='active' and r.status<>'cancelled' for update of j`,[job.id,job.lease_token])).rows.length);
+    where j.id=$1 and j.lease_token=$2 and j.state='running' and j.lease_until>now() and s.state in ('active','paused') and r.status<>'cancelled' for update of j`,[job.id,job.lease_token])).rows.length);
 }
 export async function completeJob(db:Db,job:ResearchJob,result:unknown,next?:{stage:ResearchJob['stage'];key:string;payload:unknown;priority?:number}[]) {
   return db.tx(async tx=>{
@@ -179,7 +179,7 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   if(session)counters.researchLimits!.bingSearches=session.budget.bingQueries;
   // Extra rounds taken because fewer buyers than wanted were saved (see extend.ts).
   if(session)counters.researchRounds=(session.budget as {extensions?:number}).extensions??0;
-  counters.researchRoundsMax=maxExtensionRounds();counters.minimumBuyers=minimumBuyers(session?.budget.targetCompanies);
+  counters.researchRoundsMax=Math.min(maxExtensionRounds(),(session?.budget as {extraRounds?:number}|undefined)?.extraRounds??maxExtensionRounds());counters.minimumBuyers=minimumBuyers(session?.budget.targetCompanies);
   const skipped=(await db.query<{count:number}>("select coalesce(sum(coalesce((result->>'skippedCount')::int,0)),0)::int+count(*) filter(where stage='read' and result ? 'skipped')::int as count from research_jobs where run_id=$1",[runId])).rows[0].count;
   counters.coverage={readsSkipped:limited+skipped+count('read','failed'),deferred:deferredUrls+count('analyse','paused'),reason:session?.stop_reason??(sourceGaps?'Some sources omit required contractor/award details.':null)};
   counters.coverageIncomplete=Boolean(counters.coverageIncomplete||sourceGaps||session?.stop_reason||failures.length||deferredUrls||incompleteReads||candidates.count>candidates.investigated);

@@ -7,7 +7,7 @@ import { getCatalogueItem } from "@/mvp/config/buyers-config";
 import { clearBuyerCache, CONFIRM_PREFIX, isUuid, loadBuyerRecords } from "./load";
 import { allSearchRecords, getBuyerPage } from "./chain-db";
 import { getLeadList } from "./lists";
-import { searchContactRecords, searchRecords } from "./search";
+import { matches, representatives, searchContactRecords, searchRecords } from "./search";
 import {hybridSearchRecords} from './hybrid';
 import { isDerivedLeadId, type BuyerRow, type BuyerSearch, type BuyerSearchResult, type BuyerView, type ContactSearchResult, type LeadList } from "./types";
 
@@ -90,8 +90,18 @@ async function scopedRecords(run: string | undefined) {
 
 /** SuperSearch buyers: `{ rows, total, facets, contactsFound, contactsTotal, page, pageSize }`. */
 export async function searchBuyers(search: BuyerSearch = {}): Promise<BuyerSearchResult> {
-  const { records, links } = await scopedRecords(search.run);
-  const result = searchRecords(records, search, new Date());
+  const { records: scoped, links } = await scopedRecords(search.run);
+  const now = new Date();
+  // Verified: its own website or listed work proves it, in this search (or in any search when none is chosen).
+  const proofOf = (r: (typeof scoped)[number]): 'verified' | 'likely' => {
+    const list = links.get(r.view.companyId) ?? [];
+    const own = search.run ? list.filter((l) => l.runId === search.run) : list;
+    return own.length && own.every((l) => l.verification === 'rating') ? 'likely' : 'verified';
+  };
+  const passing = representatives(scoped.filter((r) => matches(r, search, now, scoped))).map((g) => g.rep);
+  const proofCounts = { all: passing.length, verified: passing.filter((r) => proofOf(r) === 'verified').length, likely: passing.filter((r) => proofOf(r) === 'likely').length };
+  const records = search.proof ? scoped.filter((r) => proofOf(r) === search.proof) : scoped;
+  const result: BuyerSearchResult = { ...searchRecords(records, search, now), proofCounts };
   const byLead = new Map(records.map((r) => [r.view.leadId, r]));
   result.rows = result.rows.map((row) => {
     const record = byLead.get(row.leadId);

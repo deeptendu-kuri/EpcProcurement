@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, CheckCircle2, CircleSlash, ExternalLink, Loader2, Plus, Sparkles, Square, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, CircleSlash, ExternalLink, Loader2, Pause, Plus, Sparkles, TriangleAlert } from "lucide-react";
 import type { SearchWorkspaceData } from "@/mvp/research/workspace";
 import type { FoundCompany } from "@/mvp/research/found";
 import { marketName } from "@/mvp/config/markets";
 import { apiJson } from "../api-client";
 import { Avatar, RatingBadge } from "../search/results-table";
+import { SearchControls, type SearchKind } from "./search-controls";
 
 const POLL_MS = 4000;
 type Filter = "likely" | "all" | "not";
@@ -64,14 +65,14 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [tick, setTick] = useState(0);
-  const [confirmStop, setConfirmStop] = useState(false);
   const product = data.run.product ?? data.run.query;
-  const live = data.running || data.counts.checking > 0;
+  // A paused search is polled too: steps already running finish and their leads appear.
+  const live = data.running || data.paused || data.counts.checking > 0;
 
   useEffect(() => {
     const controller = new AbortController();
     if (tick === 0) return () => controller.abort();
-    apiJson<SearchWorkspaceData>(`/api/mvp/research/${runId}/workspace`, { signal: controller.signal }).then(setData).catch(() => undefined);
+    apiJson<SearchWorkspaceData>(`/api/mvp/research/${runId}/workspace`, { signal: controller.signal }).then((next) => { if (next?.run) setData(next); }).catch(() => undefined);
     return () => controller.abort();
   }, [runId, tick]);
   useEffect(() => {
@@ -87,15 +88,13 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
     finally { setBusy(null); }
   }, [runId]);
 
-  const stop = async () => {
-    setBusy("stop"); setNote("");
-    try {
-      await apiJson(`/api/mvp/runs/${runId}`, { method: "POST", body: { action: "cancel" } });
-      setConfirmStop(false);
-      setData((d) => ({ ...d, running: false, phase: "Stopped", run: { ...d.run, status: "cancelled", statusText: "Stopped by you" } }));
-      setTick((n) => n + 1);
-    } catch (e) { setNote(e instanceof Error ? e.message : "The search could not be stopped."); }
-    finally { setBusy(null); }
+  const kind: SearchKind = data.paused ? "paused" : data.running ? "running" : "finished";
+  // Show the new state at once; the next poll brings the details.
+  const controlled = (next: SearchKind) => {
+    setData((d) => ({ ...d, running: next === "running", paused: next === "paused",
+      phase: next === "paused" ? "Paused" : next === "running" ? "Starting" : next === "stopped" ? "Stopped" : "Finished",
+      run: { ...d.run, status: next === "stopped" ? "cancelled" : next === "finished" ? "done" : d.run.status, statusText: next === "stopped" ? "Stopped by you" : next === "finished" ? "Finished" : d.run.statusText } }));
+    setTick((n) => n + 1);
   };
 
   const relevant = data.companies.filter((c) => c.relevant);
@@ -120,28 +119,27 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
           <h1 className="page-title">{data.run.query}</h1>
           <p className="page-subtitle">{product.toLowerCase() !== data.run.query.toLowerCase() ? `${product} · ` : ""}{markets.join(" · ")} · Started {when(data.run.createdAt)}</p>
           <p className="mt-3 inline-flex items-center gap-2 text-[14px] font-medium" role="status" aria-live="polite">
-            {data.running ? <Loader2 size={16} className="animate-spin text-[var(--accent)]" aria-hidden />
+            {data.paused ? <Pause size={16} className="text-[var(--warn)]" aria-hidden />
+              : data.running ? <Loader2 size={16} className="animate-spin text-[var(--accent)]" aria-hidden />
               : data.run.status === "done" ? <CheckCircle2 size={16} className="text-[var(--good)]" aria-hidden />
               : data.run.status === "cancelled" ? <CircleSlash size={16} className="text-[var(--muted)]" aria-hidden />
               : <TriangleAlert size={16} className="text-[var(--warn)]" aria-hidden />}
-            {data.running ? `Running · ${data.phase}` : data.run.statusText}
+            {data.paused ? `Paused · ${data.leads} ${data.leads === 1 ? "lead" : "leads"} saved` : data.running ? `Running · ${data.phase}` : data.run.statusText}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {data.running && !confirmStop ? <button type="button" className="btn btn-secondary h-10 px-4" onClick={() => setConfirmStop(true)}><Square size={14} aria-hidden />Stop search</button> : null}
+          <SearchControls runId={runId} kind={kind} onDone={controlled} />
           <Link href="/find" className="btn btn-secondary h-10 px-4"><Plus size={16} aria-hidden />New search</Link>
-          <Link href={`/crm?run=${runId}`} className="btn btn-primary h-10 px-4">See leads ({data.counts.verified})<ArrowRight size={16} aria-hidden /></Link>
+          <Link href={`/crm?run=${runId}`} className="btn btn-primary h-10 px-4">See leads ({data.leads})<ArrowRight size={16} aria-hidden /></Link>
         </div>
       </header>
 
-      {data.running && confirmStop ? (
-        <div role="alertdialog" aria-label="Stop this search?" className="card flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-          <p className="text-[14px]"><span className="font-semibold">Stop this search?</span> <span className="text-[var(--text-2)]">Companies and buyers found so far are kept. No more pages are read and no more AI tokens are used.</span></p>
-          <div className="flex gap-2">
-            <button type="button" className="btn btn-secondary" onClick={() => setConfirmStop(false)} disabled={busy === "stop"}>Keep running</button>
-            <button type="button" className="btn btn-danger" onClick={() => void stop()} disabled={busy === "stop"}>{busy === "stop" ? "Stopping…" : "Stop search"}</button>
-          </div>
-        </div>
+      {data.paused ? (
+        <p className="rounded-xl bg-[var(--warn-bg)] px-4 py-3 text-[14px] text-[var(--warn)]">
+          {data.run.stopReason ?? "Paused."} Verified leads can be emailed now. <Link href={`/crm?run=${runId}`} className="font-medium underline">Review the leads</Link>, then Resume to search further or Finish now.
+        </p>
+      ) : data.running && data.pauseAfter ? (
+        <p className="text-[13px] text-[var(--muted)]">Pauses on its own at {data.pauseAfter} leads ({data.leads} so far).</p>
       ) : null}
 
       <section aria-label="Search status" className="card grid grid-cols-2 divide-[var(--line)] sm:grid-cols-3 lg:grid-cols-6 lg:divide-x">
@@ -166,7 +164,7 @@ export function SearchLiveWorkspace({ runId, initial }: { runId: string; initial
       ) : null}
 
       {data.run.error ? <p role="alert" className="rounded-xl bg-[var(--bad-bg)] px-4 py-3 text-[14px] text-[var(--bad)]">{data.run.error}</p> : null}
-      {!data.running && data.run.stopReason ? <p className="rounded-xl bg-[var(--warn-bg)] px-4 py-3 text-[13px] text-[var(--warn)]">{data.run.stopReason} Results are a batch, not the whole market.</p> : null}
+      {!data.running && !data.paused && data.run.stopReason ? <p className="rounded-xl bg-[var(--warn-bg)] px-4 py-3 text-[13px] text-[var(--warn)]">{data.run.stopReason} Results are a batch, not the whole market.</p> : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section aria-labelledby="shortlist" className="card overflow-hidden">

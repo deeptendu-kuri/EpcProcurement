@@ -115,5 +115,12 @@ describe("buyers from the database", () => {
     expect(other.rows).toHaveLength(0);
     const all = await searchBuyers({ stage: ["ready", "check", "early"] });
     expect(all.rows.length).toBeGreaterThanOrEqual(scoped.rows.length);
+    // Leads tabs: a website-proven lead is verified; once only rated, it moves to likely.
+    expect(scoped.proofCounts).toEqual({ all: scoped.total, verified: scoped.total, likely: 0 });
+    await db.query("update search_opportunities set verification='rating' where id=$1", [opps[0].id]);
+    const likely = await searchBuyers({ run, stage: ["ready", "check", "early"], proof: "likely" });
+    expect(likely.total).toBe(scoped.total);
+    expect(likely.proofCounts).toEqual({ all: scoped.total, verified: 0, likely: scoped.total });
+    expect((await searchBuyers({ run, stage: ["ready", "check", "early"], proof: "verified" })).total).toBe(0);
   });
 });

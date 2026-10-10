@@ -26,6 +26,8 @@ export default async function FindPage({ searchParams }: FindPageProps) {
   const products = getActiveProducts();
   const runParam = typeof params.run === "string" && isUuid(params.run) ? params.run : null;
   const ticketParam = typeof params.ticket === "string" ? params.ticket.slice(0, 200) : null;
+  // "Run again" from the Dashboard: the form starts with that search's material and countries.
+  const againParam = typeof params.again === "string" && isUuid(params.again) ? params.again : null;
 
   if (!products.length) {
     return (
@@ -42,7 +44,7 @@ export default async function FindPage({ searchParams }: FindPageProps) {
     const workspace = await searchWorkspace(runParam);
     if (workspace) return <SearchLiveWorkspace key={runParam} runId={runParam} initial={workspace} />;
   }
-  const [saved, selectedRun,automation] = await Promise.all([listSavedSearches(), runParam ? getRun(runParam) : Promise.resolve(null),funnelStatus()]);
+  const [saved, selectedRun,automation] = await Promise.all([listSavedSearches(), runParam ?? againParam ? getRun((runParam ?? againParam)!) : Promise.resolve(null),funnelStatus()]);
   const suggestions = catalogueOptions().slice(0, 8).map(product => product.name);
 
   return (

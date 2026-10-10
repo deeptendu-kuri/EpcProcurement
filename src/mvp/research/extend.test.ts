@@ -54,6 +54,17 @@ describe('keep researching until the minimum buyers are saved',()=>{
     expect(log).toMatch(/searching further \(round 1 of 3\)/);
   });
 
+  it('takes no extra round for a quick search (extraRounds 0)',async()=>{
+    const id=await settledRun();
+    await db.query(`update research_sessions set budget=budget||'{"extraRounds":0}'::jsonb where run_id=$1`,[id]);
+    await finishIdleResearch(db,id);
+    expect((await sessionFor(db,id))?.state).not.toBe('active');
+    const log=(await db.query<{message:string}>("select message from run_events where run_id=$1 and message like 'Quick search%'",[id])).rows;
+    expect(log).toHaveLength(1);
+    expect(researchBudget({...input,extraRounds:0}).extraRounds).toBe(0);
+    expect('extraRounds' in researchBudget(input)).toBe(false);
+  });
+
   it('finishes normally when nothing was skipped, the rounds are used up or extension is off',async()=>{
     const none=await settledRun(false);await finishIdleResearch(db,none);
     expect((await sessionFor(db,none))?.state).toBe('done');

@@ -74,6 +74,29 @@ None of the oil traders, certifiers, platforms or place names counts as a likely
 
 ## 5. Open items
 
-- **Cloud deploy:** migration 024 must be applied (`pnpm db:migrate`) before deploying. Not done; needs approval.
+- **Cloud deploy:** migrations 024–028 must be applied (`pnpm db:migrate`) before deploying. Not done; needs approval.
 - **Website lookups (24 per search):** still the hard limit on how many companies get verified. With rating, they now go to the best names first. Raising the limit costs search credits.
 - **Ratings are suggestions:** they come from one sentence and a page title, and are never shown as proof.
+
+## 6. Control a search; Leads and Dashboard (10 Oct)
+
+**When leads appear.** Verified leads are saved as each company's website or award is checked; likely leads after each list of names is rated. Leads now show at once: the buyer cache is cleared after every analysis step, and Leads checks for new leads every 5 seconds while the selected search runs.
+
+**Search control** (`src/mvp/research/control.ts`, migration 028):
+
+| Action | What happens |
+|---|---|
+| Pause | No new step starts; steps already running finish and keep their results. Nothing is cancelled. |
+| Resume | Carries on from the same saved work. |
+| Finish now | Remaining work is cancelled, likely buyers already rated are saved (no AI call), the search is marked finished and automatic email can start. |
+| Stop | As before: cancelled, nothing more is searched, no email starts. |
+| Pause after N leads | Set on Find buyers. Pauses once, when the search has saved N leads. |
+
+Automatic email now also enrols the verified leads of a paused search; likely-only leads are never emailed.
+
+**Search sizes** on Find buyers: Quick (preview budget, no extra rounds, about 10 minutes, up to 60k AI tokens), Standard (batch budget, no extra rounds, about 20 minutes, up to 120k), Deep (deep budget with the server's extra rounds).
+
+**Leads:** tabs All leads · Verified · Likely · not verified · Companies found (25 a page each), the search's status with Pause / Resume / Finish / Stop, a "N new leads" bar when the user is working in the table, New and proof tags on rows, and a one-line summary by buyer type and country.
+
+**Dashboard:** overview numbers (companies found, verified, likely, emailed, replied, meetings), cards for searches running or paused with their controls, Today (now with paused searches and likely leads to verify), best new leads this week, the day's AI allowance, meetings, and every search in a filterable table, 8 a page, with Open, Run again and Leads.
+

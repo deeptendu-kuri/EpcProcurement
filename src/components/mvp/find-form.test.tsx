@@ -20,16 +20,25 @@ describe("bounded material research form",()=>{
   it("sends research mode and target without requiring contact details",async()=>{
     api.mockRejectedValue(new Error("Unit test: no network"));render(<FindForm {...props}/>);
     fireEvent.change(screen.getByLabelText("What do you supply?"),{target:{value:"cables"}});
-    fireEvent.change(screen.getByLabelText("Research mode"),{target:{value:"deep"}});
+    fireEvent.click(screen.getByRole("radio",{name:/^Deep/}));
     expect((screen.getByLabelText("Target companies") as HTMLInputElement).value).toBe("50");
     fireEvent.change(screen.getByLabelText("Target companies"),{target:{value:"70"}});
     fireEvent.submit(screen.getByRole("form",{name:"Search for opportunities"}));
     await screen.findByRole("alert");
     expect(api).toHaveBeenCalledWith("/api/mvp/runs",expect.objectContaining({method:"POST",body:expect.objectContaining({productId:"cables",researchMode:"deep",targetCompanies:70,markets:["IN"]})}));
   });
+  it("sends a quick search with no extra rounds, and the lead count to pause at",async()=>{
+    api.mockRejectedValue(new Error("Unit test: no network"));render(<FindForm {...props}/>);
+    fireEvent.change(screen.getByLabelText("What do you supply?"),{target:{value:"cables"}});
+    expect(screen.getByRole("radio",{name:/^Quick/}).getAttribute("aria-checked")).toBe("true");
+    fireEvent.change(screen.getByLabelText("Leads before pausing"),{target:{value:"12"}});
+    fireEvent.submit(screen.getByRole("form",{name:"Search for opportunities"}));
+    await screen.findByRole("alert");
+    expect(api).toHaveBeenCalledWith("/api/mvp/runs",expect.objectContaining({body:expect.objectContaining({researchMode:"preview",extraRounds:0,targetCompanies:10,pauseAfter:12})}));
+  });
   it("rejects invalid targets before submitting a paid research request",()=>{
     render(<FindForm {...props}/>);fireEvent.change(screen.getByLabelText("What do you supply?"),{target:{value:"cables"}});
-    fireEvent.change(screen.getByLabelText("Research mode"),{target:{value:"deep"}});
+    fireEvent.click(screen.getByRole("radio",{name:/^Deep/}));
     fireEvent.change(screen.getByLabelText("Target companies"),{target:{value:"49"}});
     fireEvent.submit(screen.getByRole("form",{name:"Search for opportunities"}));
     expect(screen.getByRole("alert").textContent).toContain("between 50 and 100");

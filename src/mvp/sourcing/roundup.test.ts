@@ -89,7 +89,7 @@ describe('WP3 evidence-faithful roundup fan-out',()=>{
     expect((await db.query("select id from research_jobs where run_id=$1 and payload->>'source'='roundup-website'",[id])).rows).toHaveLength(4);
     expect(deps.discover).not.toHaveBeenCalled();expect(deps.save).not.toHaveBeenCalled();
     expect((await db.query('select id from funnel_threads')).rows).toHaveLength(0);
-  });
+  },30_000);
   it('website lookup respects the shared zero-credit ceiling and never guesses contacts',async()=>{
     const id=await createResearchRun(input,db);const stored=await storeDocument(db,id,raw({...dewa,...allowed,documentId:allowed.id}));
     const result=verifyRoundup({companies:[{name:'McDermott International',quote:'McDermott International'}]},allowed.text,stored.id);

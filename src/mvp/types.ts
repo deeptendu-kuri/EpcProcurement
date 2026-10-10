@@ -28,6 +28,10 @@ export interface RunInput {
   offline?: boolean;
   /** Doc 19: stockists and traders that supply contractors count as (reseller) buyers. Default true. */
   includeResellers?: boolean;
+  /** Pause the search once this many leads are saved, so the user can review, then resume or finish. */
+  pauseAfter?: number;
+  /** Extra rounds allowed when fewer buyers than the target are verified (0 = a quick search). Absent = the server setting. */
+  extraRounds?: number;
 }
 
 export interface SubScore {
@@ -162,7 +166,7 @@ export interface RunCounters {
   buyerPagesChecked?: number;
   deferredPages?: number;
   buyerAnalysisFailed?: number;
-  researchState?: 'active'|'partial'|'done'|'cancelled'|'failed';
+  researchState?: 'active'|'paused'|'partial'|'done'|'cancelled'|'failed';
   researchStopReason?: string|null;
   coverageIncomplete?: boolean;
   unreadablePages?: number;

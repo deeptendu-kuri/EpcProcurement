@@ -10,6 +10,8 @@ export const runInputSchema = z.object({
   researchMode: z.enum(["preview", "batch", "deep"]).optional(),
   targetCompanies: z.number().int().min(1).max(100).optional(),
   includeResellers: z.boolean().optional(),
+  pauseAfter: z.number().int().min(1).max(100).optional(),
+  extraRounds: z.number().int().min(0).max(5).optional(),
   lanes: z.array(z.enum(['trigger','roundup','capability'])).min(1).max(3).transform(lanes=>[...new Set(lanes)]).optional(),
   markets: z
     .array(z.string().trim().toUpperCase().refine(code => COUNTRY_CODES.includes(code), "Choose a valid country."))

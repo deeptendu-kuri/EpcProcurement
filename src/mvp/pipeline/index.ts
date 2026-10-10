@@ -67,6 +67,8 @@ export async function startRun(input: RunInput): Promise<string> {
   if (input.researchMode) clean.researchMode = input.researchMode;
   if (input.targetCompanies) clean.targetCompanies = input.targetCompanies;
   if (typeof input.includeResellers === "boolean") clean.includeResellers = input.includeResellers;
+  if (Number.isInteger(input.pauseAfter) && input.pauseAfter! >= 1) clean.pauseAfter = Math.min(100, input.pauseAfter!);
+  if (Number.isInteger(input.extraRounds) && input.extraRounds! >= 0) clean.extraRounds = Math.min(5, input.extraRounds!);
   if (input.lanes) clean.lanes = [...new Set(input.lanes)];
   if (!clean.leadKinds.length) clean.leadKinds = ["bid", "supply_subcontract"];
   if (!clean.markets.length) clean.markets = [...getClientProfile().markets];

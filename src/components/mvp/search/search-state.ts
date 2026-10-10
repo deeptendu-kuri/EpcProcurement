@@ -27,6 +27,7 @@ export type HowSure = (typeof HOW_SURE)[number];
 export type Reach = (typeof REACH)[number];
 export type SearchSort = (typeof SORTS)[number];
 export type ResultView = "buyers" | "contacts";
+export type ProofTab = "" | "verified" | "likely" | "found";
 
 /** Prefix of a whole catalogue category in the `sell` list (e.g. "cat:Valves"); other values are item ids. */
 export const CATEGORY_PREFIX = "cat:";
@@ -34,6 +35,8 @@ export const CATEGORY_PREFIX = "cat:";
 export interface SearchUrlState {
   /** Doc 17: the user's search (run id) the leads come from; empty = all searches. */
   run: string;
+  /** Leads tab: all leads, verified only, likely only, or the companies the search found ("found"). */
+  proof: ProofTab;
   triggerKinds:TriggerKind[];
   triggerAge:string;
   locAny: string[];
@@ -72,6 +75,7 @@ export interface SearchUrlState {
 
 export const DEFAULT_SEARCH: SearchUrlState = {
   run: "",
+  proof: "",
   triggerKinds:[],triggerAge:'',
   locAny: [],
   locNot: [],
@@ -135,6 +139,7 @@ export function parseSearchState(params: Params): SearchUrlState {
   const run = (get("run") ?? "").trim();
   return {
     run: run === "all" || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(run) ? run : "",
+    proof: (["verified", "likely", "found"] as const).find((p) => p === get("proof")) ?? "",
     triggerKinds:listOf(get('trigger'),TRIGGER_KINDS),triggerAge:['30','90','365','540','undated'].includes(get('age')??'')?get('age')!:'',
     locAny: list(get("loc")),
     locNot: list(get("locx")),
@@ -176,6 +181,7 @@ export function serializeSearchState(state: SearchUrlState): URLSearchParams {
   };
   const putList = (key: string, values: readonly string[]) => put(key, values.join(","));
   put("run", state.run);
+  put("proof", state.proof);
   put("q", state.q);
   putList('trigger',state.triggerKinds);put('age',state.triggerAge);
   putList("loc", state.locAny);
@@ -230,7 +236,7 @@ export function applySearchChange(state: SearchUrlState, change: Partial<SearchU
 export function activeFilterCount(state: SearchUrlState): number {
   let count = 0;
   for (const key of RESULT_KEYS) {
-    if (key === "sort" || key === "run") continue; // the Search picker is scope, not a filter
+    if (key === "sort" || key === "run" || key === "proof") continue; // the Search picker and the tabs are scope, not filters
     const value = state[key];
     const fallback = DEFAULT_SEARCH[key];
     if (Array.isArray(value)) count += value.length ? 1 : 0;
@@ -240,7 +246,7 @@ export function activeFilterCount(state: SearchUrlState): number {
 }
 
 export function clearedSearch(state: SearchUrlState): SearchUrlState {
-  return { ...DEFAULT_SEARCH, run: state.run, view: state.view, sort: state.sort };
+  return { ...DEFAULT_SEARCH, run: state.run, proof: state.proof, view: state.view, sort: state.sort };
 }
 
 /** A catalogue item as far as the filter needs it. */
@@ -303,5 +309,6 @@ export function toBuyerSearch(state: SearchUrlState, catalogue: CatalogueOption[
   if (state.links.length) search.linkStatus = state.links;
   if (state.q) search.q = state.q;
   if (state.run && state.run !== "all") search.run = state.run;
+  if (state.proof === "verified" || state.proof === "likely") search.proof = state.proof;
   return search;
 }

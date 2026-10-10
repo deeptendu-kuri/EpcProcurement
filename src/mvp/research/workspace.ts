@@ -20,7 +20,14 @@ export interface SearchWorkspaceData {
     createdAt: string; finishedAt: string | null; error: string | null; stopReason: string | null };
   /** Plain words for what the search is doing now. */
   phase: string;
+  /** Still working (not paused). */
   running: boolean;
+  /** Paused by the user or after the leads asked for; Resume or Finish. */
+  paused: boolean;
+  /** "Pause after N leads", when set. */
+  pauseAfter: number | null;
+  /** Leads saved so far: verified and likely. */
+  leads: number;
   minutes: number | null;
   usage: { tokens: number; tokenLimit: number | null; aiCalls: number; pagesRead: number; pageLimit: number | null; searches: number; searchLimit: number | null };
   counts: { found: number; rated: number; likely: number; verified: number; checking: number; notBuyers: number };
@@ -64,8 +71,8 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
   const run = await getRun(runId);
   if (!run) return null;
   const input = run.adhoc_query;
-  const running = run.status === 'running' || run.status === 'queued';
-  const [usage, companies, events, buyers, perCountry] = await Promise.all([
+  const open = run.status === 'running' || run.status === 'queued';
+  const [usage, companies, events, buyers, perCountry, session, leads] = await Promise.all([
     runUsage(db, [runId]).then((m) => m.get(runId)),
     listFoundCompanies(db, runId).catch(() => [] as FoundCompany[]),
     db.query<{ id: number; ts: string; stage: string; message: string }>(`select id,ts::text,stage,message from run_events where run_id=$1 order by id desc limit 30`, [runId]).then((r) => r.rows),
@@ -77,7 +84,11 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
     db.query<{ market: string; done: number; total: number }>(`select coalesce(payload->>'market',payload->'query'->>'market') as market,
         count(*) filter (where state in ('done','failed','cancelled'))::int as done, count(*)::int as total
       from research_jobs where run_id=$1 and stage='collect' and coalesce(payload->>'market',payload->'query'->>'market') is not null group by 1`, [runId]).then((r) => r.rows),
+    db.query<{ state: string }>('select state from research_sessions where run_id=$1', [runId]).then((r) => r.rows[0] ?? null),
+    db.query<{ n: number }>("select count(*)::int as n from search_opportunities where run_id=$1 and qualification<>'rejected'", [runId]).then((r) => r.rows[0].n),
   ]);
+  const paused = open && session?.state === 'paused';
+  const running = open && !paused;
   const latestStage = events.find((e) => PHASES[e.stage])?.stage;
   const relevant = companies.filter((c) => c.relevant);
   const counters = run.counters ?? {};
@@ -85,8 +96,11 @@ export async function searchWorkspace(runId: string, db: Queryable = getDb(), no
     run: { id: run.id, query: input?.query ?? 'Search', productId: input?.productId ?? null, product: input?.productId ? getCatalogueItem(input.productId)?.shortName ?? null : null,
       markets: input?.markets ?? [], status: run.status, statusText: runStatusText(run.status, counters), createdAt: run.created_at, finishedAt: run.finished_at,
       error: run.error, stopReason: counters.researchStopReason ?? null },
-    phase: running ? (latestStage ? PHASES[latestStage] : 'Starting') : run.status === 'done' ? 'Finished' : 'Stopped',
+    phase: paused ? 'Paused' : running ? (latestStage ? PHASES[latestStage] : 'Starting') : run.status === 'done' ? 'Finished' : 'Stopped',
     running,
+    paused,
+    pauseAfter: input?.pauseAfter ?? null,
+    leads,
     minutes: runMinutes(run, now),
     usage: { tokens: usage?.tokens ?? counters.researchUsage?.estimatedAiTokens ?? 0, tokenLimit: counters.researchLimits?.estimatedAiTokens ?? null,
       aiCalls: usage?.aiCalls ?? counters.researchUsage?.aiCalls ?? 0, pagesRead: counters.itemsRead ?? counters.researchUsage?.reads ?? 0,
