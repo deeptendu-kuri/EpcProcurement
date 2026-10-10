@@ -171,6 +171,17 @@ export async function getSearchBrief(db: Queryable, input: { material: string; m
   }
 }
 
+/**
+ * Does the page name one of the brief's kinds of work (English or a country's own words)? Award news names the
+ * project, almost never the valve or the pipe, so in a work-based search this, not the product name, lets an
+ * article through to the need check, which then decides who (if anyone) buys.
+ */
+export function namesWork(text: string, brief: SearchBrief): boolean {
+  const words = brief.uses.flatMap((u) => [...u.newsWords, ...Object.values(u.localWords).flat()]).filter((w) => w.length >= 2);
+  return words.some((w) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^\\p{L}\\p{N}])`, 'iu').test(text))
+    && !/\b(?:market report|market size|cagr|job vacancy)\b/i.test(text);
+}
+
 /** This country's uses first (they differ between countries), at most `n`. */
 export function usesFor(brief: SearchBrief, market: string, n = 4): BriefUse[] {
   const local = brief.uses.filter((u) => !u.countries.length || u.countries.includes(market));

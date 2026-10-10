@@ -6,6 +6,7 @@ import type { RunInput, RunRow } from "@/mvp/types";
 import { journey, uniquePublishedContacts, verifiedProspect } from "./workflow";
 import { searchedProductLabel } from '@/mvp/config/product-label';
 import {strongestTrigger,syncOpportunityTrigger,triggersForCompany} from '@/mvp/sourcing/triggers';
+import { sameCompanyName } from '@/mvp/research/company-names';
 
 export interface Opportunity {
   id: string; run_id: string; lead_id: string; keyword: string; product_id: string; product_name: string;
@@ -33,6 +34,12 @@ export function eligibleForProduct(record: BuyerRecord, productId: string): bool
     && record.signals.some(s => s === "contract_won" || s === "order_won")
     && v.sellItems.some(i => i.itemId === productId && i.fit !== "competitor");
 }
+/** A contractor that won work, whatever the fixed role table says it buys (the need check decides the item). */
+export function doesTheWork(record: BuyerRecord): boolean {
+  const v = record.view;
+  return !record.consultant && record.leadStatus !== "rejected" && v.stage !== "not_buyer" && v.role !== "owner" && v.role !== "distributor"
+    && record.signals.some(s => s === "contract_won" || s === "order_won");
+}
 /** Snapshot only evidence actually read by this search; never use a global/timestamp-based lead list. */
 export async function captureOpportunities(runId: string, input: RunInput, db: Db = getDb()): Promise<number> {
   if (!input.productId) return 0; // historic/unscoped flows are kept separate
@@ -46,10 +53,15 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
   const leadIds = (await db.query<{ id: string }>("select id from leads where kind = 'supply_subcontract' order by created_at desc limit 2000")).rows.map(l => l.id);
   const records = (await loadBuyerRecords({ db, leadIds })).sort((a,b) => b.view.fitScore - a.view.fitScore || (b.view.triggerDate ?? "").localeCompare(a.view.triggerDate ?? "") || a.view.leadId.localeCompare(b.view.leadId));
   const companies = new Set<string>();
+  // docs/mvp/20: in a work-based search a company qualifies only when the need check accepted its work for the
+  // item (the fixed role table no longer decides), and its reason is its own sentence plus why that work needs it.
+  const needs = input.brief ? (await db.query<{ company_name: string; quote: string; need_why: string | null }>(
+    "select company_name, quote, need_why from need_checks where run_id = $1 and verdict = 'lead' order by work_date desc nulls last", [runId])).rows : null;
   let count = 0;
   await db.tx(async tx => {
     for (const record of records) {
-      if (!eligibleForProduct(record, product.id)) continue;
+      const need = needs?.find(n => sameCompanyName(n.company_name, record.view.name)) ?? null;
+      if (needs ? !need || !doesTheWork(record) : !eligibleForProduct(record, product.id)) continue;
       if (!awards.some(s => s.company_id === record.view.companyId && s.project_id === record.projectId && s.evidence_ids.some(id => readIds.has(id)))) continue;
       const best=strongestTrigger(await triggersForCompany(tx,record.view.companyId,runId,product.id));
       // Hybrid work geography is independently verified; never reject a Belgian HQ for UAE work.
@@ -63,12 +75,14 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
       if (!proof.length) continue;
       if (companies.has(record.view.companyId)) continue;
       companies.add(record.view.companyId);
-      const item = record.view.sellItems.find(i => i.itemId === product.id)!;
+      const item = record.view.sellItems.find(i => i.itemId === product.id);
+      const reason = need ? `${need.quote}${need.need_why ? ` Why it needs ${searchedProductLabel(product.id, input.query)}: ${need.need_why}` : ""}`
+        : `${record.view.buyingReason} Potential need: ${item?.why ?? ""}`;
       const result = await tx.query(`insert into search_opportunities
         (run_id, lead_id, keyword, product_id, product_name, contact_role, buying_reason, evidence_ids, company_id)
         values ($1,$2,$3,$4,$5,$6,$7,$8::uuid[],$9) on conflict (run_id, company_id, product_id) do nothing returning id`,
         [runId, record.view.leadId, input.query, product.id, searchedProductLabel(product.id,input.query),
-          input.contactRole ?? "buyer", `${record.view.buyingReason} Potential need: ${item.why}`, proof.map(p => p.evidenceId), record.view.companyId]);
+          input.contactRole ?? "buyer", reason, proof.map(p => p.evidenceId), record.view.companyId]);
       count += result.rows.length;
       if(!result.rows.length)await tx.query(`update search_opportunities set evidence_ids=array(select distinct unnest(evidence_ids||$4::uuid[]))
         where run_id=$1 and company_id=$2 and product_id=$3`,[runId,record.view.companyId,product.id,proof.map(p=>p.evidenceId)]);

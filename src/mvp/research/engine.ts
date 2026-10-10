@@ -13,7 +13,8 @@ import { rssSource } from '@/mvp/pipeline/sources/rss';
 import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tavily';
 import { collectBingQuery,collectRssFeed,collectLocalNews,collectGdeltCountry} from './sources';
 import { plannedCollectJobs, type ResearchBudget, type ResearchJob } from './store';
-import { getSearchBrief, type GroundFn } from '@/mvp/discovery/brief';
+import { getSearchBrief, namesWork, type GroundFn } from '@/mvp/discovery/brief';
+import { checkNeed } from './need';
 import { autoPauseIfDue } from './control';
 import { clearBuyerCache } from '@/mvp/buyers/load';
 import { admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
@@ -53,6 +54,8 @@ export interface ResearchDeps {
   /** Injectable for fixture proofs; production still uses the existing P1/P2/P3 extractor. */
   extractAward?:typeof extractDocument;
   extractRoundup?:typeof extractRoundup;
+  /** Injectable for fixture proofs: the AI that answers the need check (docs/mvp/20). */
+  needProvider?:LLMProvider;
   lookupWebsite?:typeof collectTavilyQuery;
 }
 export const productionResearchDeps:ResearchDeps={
@@ -163,7 +166,10 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
       const pageKind=classifyPage({url:grounded.url,title:grounded.title,text:stored.text,tables,registryId:raw.research?.registryId,markets:input.markets});
       grounded.research={...grounded.research,lane:grounded.research?.lane??'company',pageKind};
       const list=pageKind==='roundup'||pageKind==='directory';
-      const candidate=pageKind!=='junk'&&!list&&buyerPageCandidate(stored.text,input.productId!)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
+      // docs/mvp/20: in a work-based search a page about the work that uses the item qualifies too (news names
+      // the project, not the valve); the need check then decides who buys.
+      const workPage=input.brief?.source==='ai'&&namesWork(stored.text,input.brief);
+      const candidate=pageKind!=='junk'&&!list&&(buyerPageCandidate(stored.text,input.productId!)||workPage)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
       const award=Boolean(raw.structured)||candidate&&['article','tender_notice','filing'].includes(pageKind);
       let associated=award||list?null:await candidateForPage(db,job.run_id,grounded);
       if(pageKind!=='junk'&&!list&&!award&&!associated){
@@ -285,9 +291,25 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         });
         if(!resolved)return {processed:true,stale:true};
         const triggers=await persistAwardTriggers(db,job.run_id,input.productId!,await awardTriggerSnapshots(db,id));
+        // Without AI (catalogue brief) the need check cannot judge: award winners follow today's path.
+        if(input.brief?.source==='ai'){
+          // docs/mvp/20: the need check decides. Only companies doing work that needs the item, in his countries,
+          // recently, with a verified sentence join the shortlist; the answer is kept so a replay costs nothing.
+          const saved=(previous as {needAnswer?:string}|undefined)?.needAnswer??null;
+          const need=await checkNeed(db,job.run_id,id,{text:doc.text,url:doc.url,title:raw.title??null,publishedAt:doc.published_at},input.brief,input.markets,
+            deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b'),saved).catch(async error=>{
+              await researchProgress(db,job.run_id,'info',`Need check skipped for one article: ${error instanceof Error?error.message.slice(0,120):'error'}.`);
+              return {result:null,answer:null};});
+          if(need.answer)await db.query(`update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2`,[job.id,job.lease_token,need.answer]);
+          const accepted=need.result?.companies.filter(c=>c.verdict==='lead')??[];
+          for(const c of accepted)await db.tx(tx=>registerCandidate(tx,job.run_id,c.name,null,id,c.quote));
+          if(need.result)await researchProgress(db,job.run_id,'check',need.result.needsItem==='yes'&&accepted.length
+            ?`${need.result.project??'Work'} needs ${input.brief.item}: ${accepted.map(c=>c.name).join(', ')} ${accepted.length===1?'does':'do'} the work.`
+            :`${need.result.project??'Article'}: no buyer of ${input.brief.item} (${need.result.companies.find(c=>c.verdict==='rejected')?.reason??need.result.needWhy??'no work named'}).`);
+        }
         // Award winners join the shortlist: rated like every other company, saved as likely leads with the
         // award as recent work, even when the announcement does not name the exact product (it rarely does).
-        await shortlistAwardWinners(db,job.run_id,id,triggers.map(t=>({...t,date:doc.published_at}))).catch(()=>0);
+        else await shortlistAwardWinners(db,job.run_id,id,triggers.map(t=>({...t,date:doc.published_at}))).catch(()=>0);
         await buildSignalsAndScore(job.run_id,{db});
         await captureOpportunities(job.run_id,input,db);
         await completeJob(db,job,{extracted,triggers,factsKept:extracted.stats.kept,factsDropped:extracted.stats.dropped,budgetLimited:providers.limited});
