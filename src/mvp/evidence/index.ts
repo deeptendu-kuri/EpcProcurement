@@ -88,7 +88,10 @@ async function drawerView(db:Queryable,data:TableDataset,companyId:string,compan
     contacts:company?.team??buildTeam('subcontractor',header.name,[]),activity:[...notes,...emails].sort((a,b)=>b.at.localeCompare(a.at))};
 }
 export async function opportunityEvidence(id:string,db:Queryable=getDb()):Promise<EvidenceDrawerView|null>{
-  const opp=(await db.query<{run_id:string;company_id:string}>('select run_id,company_id from search_opportunities where id=$1',[id])).rows[0];if(!opp)return null;
+  // A link may carry the lead id (Leads "?open=<lead>") before the table has loaded: use its latest opportunity.
+  const opp=(await db.query<{id:string;run_id:string;company_id:string}>(`select id,run_id,company_id from search_opportunities where id=$1
+    union all (select id,run_id,company_id from search_opportunities where lead_id=$1 and qualification<>'rejected' order by created_at desc limit 1) limit 1`,[id])).rows[0];if(!opp)return null;
+  id=opp.id;
   const data=await tableDataset(opp.run_id,db);const company=data.companies.find(c=>c.row.opportunityId===id);
   const view=company?await drawerView(db,data,opp.company_id,company,opp.run_id):null;
   return view?withLeadContext(db,view,opp.company_id,opp.run_id):likelyLeadView(db,opp.company_id,opp.run_id);

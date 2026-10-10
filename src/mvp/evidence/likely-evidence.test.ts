@@ -27,8 +27,9 @@ describe("evidence panel for a likely lead (not verified yet)", () => {
   afterAll(async () => { setDbForTests(undefined); await db?.close(); });
 
   it("opens with why it was rated, where it was found and a Verify action, instead of 'evidence not found'", async () => {
-    const opp = (await db.query<{ id: string; company_id: string }>("select id, company_id from search_opportunities where run_id=$1", [run])).rows[0];
-    for (const view of [await companyEvidence(opp.company_id, run, db), await opportunityEvidence(opp.id, db)]) {
+    const opp = (await db.query<{ id: string; company_id: string; lead_id: string }>("select id, company_id, lead_id from search_opportunities where run_id=$1", [run])).rows[0];
+    // Also by lead id: a Leads link (?open=<lead>) can arrive before the table has loaded.
+    for (const view of [await companyEvidence(opp.company_id, run, db), await opportunityEvidence(opp.id, db), await opportunityEvidence(opp.lead_id, db)]) {
       expect(view).not.toBeNull();
       expect(view!.proof?.level).toBe("likely");
       expect(view!.rating).toMatchObject({ role: "Offshore EPC contractor", reason: "Builds offshore pipelines that use line pipe.", buyerType: "contractor", runId: run });
