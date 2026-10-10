@@ -75,6 +75,8 @@ export async function completeWithJsonRetry(call: (request: LLMRequest, extraBod
 /** Groq (OpenAI-compatible). Models per 06 §2, e.g. "qwen3.8-27b", "openai/gpt-oss-20b". */
 // Groq answers 429 for a model's daily allowance with "tokens per day (TPD)" / "requests per day (RPD)".
 export const DAILY_LIMIT = /\bper day\b|\b(?:TPD|RPD)\b/i;
+/** Groq's "Request too large for model …": the request is bigger than the model's per-minute cap. */
+export const TOO_LARGE = /request too large/i;
 /**
  * Models tried in turn when a model's own daily allowance is used up (Groq limits each model separately,
  * over the last 24 hours). LLM_GROQ_DAILY_FALLBACK_MODEL takes a comma-separated list, or "off".
@@ -125,13 +127,16 @@ export function createGroqProvider(apiKey: string, model: string, fetchImpl?: ty
           const response = await call(m, request);
           return m === model ? response : { ...response, model: m };
         } catch (error) {
+          // A fallback model whose per-minute cap is below this request cannot serve it: try the next one
+          // (not blocked for the day). The requested model's "too large" goes to the caller, which splits.
+          if (m !== model && error instanceof LLMHttpError && (error.status === 429 || error.status === 413) && TOO_LARGE.test(error.message)) continue;
           if (!(error instanceof LLMHttpError && error.status === 429 && DAILY_LIMIT.test(error.message))) throw error;
           blocks.set(m, Date.now() + (retryAfterMs(error.message) ?? 10 * 60_000));
           if (!dailyFallbackModels().length) throw error;
         }
       }
       // Every model is out for now: say which, and when the first one frees up (the engine waits that long).
-      const next = Math.min(...models.map((m) => blocks.get(m) ?? Date.now()));
+      const next = Math.min(...models.filter(blocked).map((m) => blocks.get(m)!), Date.now() + 10 * 60_000);
       const wait = Math.max(1, Math.ceil((next - Date.now()) / 1000));
       throw new LLMHttpError("groq", 429, `groq 429: Groq's free daily AI limit (tokens per day) is used up for ${models.join(", ")}. Please try again in ${Math.floor(wait / 60)}m${wait % 60}s.`);
     },

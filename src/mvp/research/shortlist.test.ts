@@ -298,4 +298,23 @@ describe("rules from the independent web audit (10 Oct)", () => {
     expect(consistentRating({ ...contractor, reason: "Outside the searched countries; builds plants in Kuwait." }, { company: "Example EPC", identity_quote: null }, product, { markets: ["SA"] })).toBe(30);
     expect(consistentRating(contractor, { company: "Acciona", identity_quote: "Acciona will build Jubail 3B in Saudi Arabia" }, product, { markets: ["SA"] })).toBe(70);
   });
+  it("keeps a directory name with no website below the lead line until a website is found", () => {
+    const listed = { company: "Powerful Plus Contracting L.L.C", identity_quote: "Powerful Plus Contracting L.L.C", title: "Top 24 Pipeline construction contractors based in the United Arab Emirates", url: "https://revenuebase.ai/companies/pipeline-construction-contractors/uae" };
+    const fittings = "butt-weld fittings";
+    expect(consistentRating({ ...contractor, rating: 60 }, { ...listed, domain: null }, fittings)).toBe(40);
+    expect(consistentRating({ ...contractor, rating: 60 }, { ...listed, domain: "powerfulplus.ae" }, fittings)).toBe(60);
+    // Not known yet (an AI answer being parsed): no cap; the read-time check decides.
+    expect(consistentRating({ ...contractor, rating: 60 }, listed, fittings)).toBe(60);
+    // A name in a news article is not a directory entry (Acciona in "Water in Saudi Arabia"): only the bare-name cap (50).
+    expect(consistentRating(contractor, { company: "Acciona, S.A.", identity_quote: "Acciona, S.A.", title: "Water in Saudi Arabia: Desalination, Wastewater, and Privatization", url: "https://ussaudi.org/water", domain: null }, product)).toBe(50);
+  });
+  it("treats a company whose own website calls it a pipe maker as a competitor", () => {
+    const row = { company: "Al Gharbia", identity_quote: null, title: "Pipeline Manufacturers in UAE | Al Gharbia", url: "https://algharbiapipe.com", domain: "algharbiapipe.com" };
+    expect(consistentType({ ...contractor, role: "Pipeline fabricator", buyerType: "subcontractor" as const }, row, "butt-weld fittings")).toBe("competitor");
+    // A fabricator's own site that names its work, not a pipe product it makes, stays a buyer.
+    expect(consistentType({ ...contractor, role: "Piping fabricator", buyerType: "subcontractor" as const }, { ...row, company: "Embark Contracting", title: "Piping and Structural Fabrication Company in Saudi Arabia", url: "https://embarkgroups.com/services", domain: "embarkgroups.com" }, "butt-weld fittings")).toBe("subcontractor");
+  });
+  it("rates a technology commercialisation company as not a buyer", () => {
+    expect(consistentRating({ rating: 45, role: "Technology commercialization entity", reason: "TAQNIA commercializes KACST technologies; it may build pilot plants.", buyerType: "end_user" as const }, { company: "TAQNIA", identity_quote: "TAQNIA" }, product)).toBe(20);
+  });
 });

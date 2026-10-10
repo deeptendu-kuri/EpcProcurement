@@ -175,6 +175,12 @@ export const PAGE_CONTEXT = 'Page context only: ';
 const WORK_WORD = /\b(?:fabricat\w*|engineering|kejuruteraan|ingenier\w*|ingenieur\w*|vessels?|tanks?|boilers?|steel|construct\w*|contract\w*|piping|pipeline|structur\w*|marine|shipyard|heavy industr\w*|epc|projects?)\b/i;
 type Judged = Pick<RatedCompany, 'rating' | 'role' | 'reason'> & { buyerType?: BuyerType | null; also?: string[] };
 type JudgedRow = Pick<Row, 'company' | 'identity_quote'> & { title?: string | null; url?: string | null; domain?: string | null };
+/** The source page's host when the page is the company's own (its first name word leads the address). */
+const ownPageHost = (row: JudgedRow): string | null => {
+  const sourceHost = hostOf(row.url);
+  const firstWord = (row.company.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])[0];
+  return sourceHost && firstWord && sourceHost.startsWith(firstWord) ? sourceHost : null;
+};
 /** What the rules may know about the search: the stockist setting and the searched countries. */
 export interface ConsistencyOptions { resellers?: boolean; markets?: string[] }
 /**
@@ -203,14 +209,15 @@ export function consistentType(r: Judged, row: JudgedRow, productName: string, o
   // A service heading or a recruiter, job board or news site is not a buyer ("MEP Contracting", "Progressive").
   // The page it was named on counts only when that page is its own (its name leads the address, as with
   // "Progressive" on progressiverecruitment.com); a company named in a news article is not the publisher.
-  const sourceHost = hostOf(row.url);
-  const firstWord = (row.company.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])[0];
-  const ownPage = sourceHost && firstWord && sourceHost.startsWith(firstWord) ? sourceHost : null;
+  const ownPage = ownPageHost(row);
   if (genericServicePhrase(row.company) || [row.domain, ownPage].some((d) => d && nonCompanyDomain(d))) return 'not_buyer';
   if (KNOWN_NON_BUYER.test(row.company.trim()) || NON_BUYER_ORG.test(r.role) || TECH_DEAL.test(row.identity_quote ?? '')) return 'not_buyer';
   // A maker whose web address names the material is a mill, even when it also fabricates ("Al Gharbia" on algharbiapipe.com).
   const label = (row.domain ?? hostOf(row.url) ?? '').toLowerCase().replace(/^www\./, '').split('.')[0];
-  if (MAKER.test(r.role) && label && SELLER_DOMAIN.test(label.replace(/[^a-z]/g, ''))) return 'competitor';
+  // Its own website calls it a maker of pipe or fittings ("Pipeline Manufacturers in UAE | Al Gharbia" on
+  // algharbiapipe.com), whatever role the AI gave it.
+  const ownSiteMaker = Boolean(row.domain) && hostOf(row.url) === row.domain!.replace(/^www\./, '') && /\b(?:manufacturers?|makers?|mills?|producers?)\b/i.test(row.title ?? '') && /pipe|tube|fitting|flange/i.test(row.title ?? '');
+  if ((MAKER.test(r.role) || ownSiteMaker) && label && SELLER_DOMAIN.test(label.replace(/[^a-z]/g, ''))) return 'competitor';
   if (MAKER.test(r.role) && sellsMaterial(r, product) && !/fabricat/i.test(r.role)) return 'competitor';
   // It receives bids or awards the contract: the procuring owner or agency, never a contractor.
   if (AWARDS_WORK.test(row.identity_quote ?? '') && new RegExp(`^\\W*${escapeRe(row.company.split(/\s+/)[0] ?? '')}`, 'i').test(row.identity_quote ?? '')
@@ -233,6 +240,10 @@ const MAKES = /\b(?:manufactur\w*|produc\w*|makes?|mills?|sells?|suppl(?:y|ies|i
 const OWNER_NAME = /\b(?:authority|ministry|municipal\w*|utilit\w*|water|electricity|power|energy|oil|gas|petroleum|corporation)\b/i;
 /** Owners (plant, pipeline, utility owners) buy mostly through their EPCs: listed as project owners, ranked below buyers. */
 export const OWNER_CEILING = 55;
+/** A list entry with no website found yet stays below the likely-lead line (45). */
+export const UNSEEN_CEILING = 40;
+/** A directory-style page title: "Top 24 Pipeline construction contractors based in…", "Pressure Vessel Manufacturers in Malaysia". */
+const LIST_PAGE = /\b(?:top\s+\d+|\d+\s+(?:best|top|leading|largest)|list of|directory|(?:compan(?:y|ies)|contractors?|manufacturers?|fabricators?|suppliers?|firms?)\s+(?:in|based in)\b)/i;
 /**
  * Works only outside the searched countries: the AI said so ("Outside UAE…"), or its own line names
  * countries and none of them is searched ("Located … in Israel" for a Saudi search).
@@ -286,8 +297,12 @@ export function consistentRating(r: Judged, row: JudgedRow, productName: string,
   // The AI repeated the page's subject for a bare name (see parseRatings), or doubts its own rating.
   if (r.reason.startsWith(PAGE_CONTEXT)) return Math.min(r.rating, 30);
   if (WEAK.test(r.reason)) return Math.min(r.rating, 30);
-  if (/\b(?:software|licensor|licen[cs]es? (?:the )?(?:process|technology)|design verification|consultan\w*)\b/i.test(`${r.role} ${r.reason}`)) return Math.min(r.rating, 20);
+  if (/\b(?:software|licensor|licen[cs]es? (?:the )?(?:process|technology)|design verification|consultan\w*|commerciali[sz]\w*(?: \w+){0,2} technolog\w*)\b/i.test(`${r.role} ${r.reason}`)) return Math.min(r.rating, 20);
   if (bare && !WORK_WORD.test(row.company)) return Math.min(r.rating, 50);
+  // A bare name on someone else's list, with no website found, may not exist (web audit, 10 Oct: none of
+  // the three found any web presence). It waits below the lead line until a website lookup finds one.
+  // Only where the website is known to be missing (null); an AI answer being parsed does not know it yet.
+  if (bare && row.domain === null && LIST_PAGE.test(row.title ?? '') && !ownPageHost(row)) return Math.min(r.rating, UNSEEN_CEILING);
   return r.rating;
 }
 

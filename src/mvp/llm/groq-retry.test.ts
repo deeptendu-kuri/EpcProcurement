@@ -108,6 +108,20 @@ describe("Groq daily allowance fallback", () => {
     expect(error).toBeInstanceOf(LLMHttpError);
     expect(error.message).toMatch(/daily AI limit .* used up .*try again in 4m1\ds/);
   });
+  it("skips a fallback model too small for the request and reports Groq out for the day (10 Oct live audit)", async () => {
+    const tooLarge = () => new Response(JSON.stringify({ error: { message: "Request too large for model `qwen/qwen3.8-27b` in organization `org_example` service tier `on_demand` on tokens per minute (TPM): Limit 6000, Requested 6900." } }), { status: 429 });
+    const tpd = () => new Response(JSON.stringify({ error: { message: "Rate limit reached for model `openai/gpt-oss-20b` on tokens per day (TPD). Please try again in 7m30s." } }), { status: 429 });
+    const a = recorder([tpd, tooLarge]);
+    const error = await createGroqProvider("gsk_x", "openai/gpt-oss-20b", a.fetchImpl).complete({ system: "s", user: "u", singleAttempt: true }).catch((e) => e);
+    expect(a.bodies.map((b) => b.model)).toEqual(["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]);
+    // A daily-limit error, so the Cloudflare backup answers; the retry time comes from the refused model.
+    expect(error.message).toMatch(/daily AI limit .* used up .*try again in 7m(29|30)s/);
+    expect(groqBlockedModels().map((b) => b.model)).toEqual(["openai/gpt-oss-20b"]);
+    // The requested model's own "too large" still reaches the caller, which splits the batch.
+    const b = recorder([tooLarge]);
+    await expect(createGroqProvider("gsk_x", "qwen/qwen3.8-27b", b.fetchImpl).complete({ system: "s", user: "u", singleAttempt: true })).rejects.toThrow(/Request too large/);
+    expect(b.bodies).toHaveLength(1);
+  });
   it("reads Groq's retry time", () => {
     expect(retryAfterMs("Please try again in 20m58.848s.")).toBe(1_258_848);
     expect(retryAfterMs("Please try again in 1h2m3s")).toBe(3_723_000);

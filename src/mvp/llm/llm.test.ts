@@ -117,6 +117,18 @@ describe("OpenAI-compatible providers", () => {
     await expect(cf.complete({ system: "s", user: "u" })).rejects.toBeInstanceOf(LLMHttpError);
     expect(cloudflareUrl("acc")).toBe("https://api.cloudflare.com/client/v4/accounts/acc/ai/v1/chat/completions");
   });
+
+  it("keeps gpt-oss reasoning short on Cloudflare so the JSON answer fits", async () => {
+    let body: Record<string, unknown> = {};
+    const fakeFetch = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "{}" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    await createCloudflareProvider("acc", "tok", "@cf/openai/gpt-oss-20b", fakeFetch).complete({ system: "s", user: "u", json: true });
+    expect(body.reasoning_effort).toBe("low");
+    await createCloudflareProvider("acc", "tok", "@cf/meta/llama-3.1-8b-instruct", fakeFetch).complete({ system: "s", user: "u" });
+    expect(body.reasoning_effort).toBeUndefined();
+  });
 });
 
 describe("quota accounting", () => {

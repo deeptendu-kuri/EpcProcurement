@@ -7,21 +7,11 @@
  */
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
-import { getCatalogueItem } from "@/mvp/config/buyers-config";
 import audit from "./audit-10oct.json";
-import { leadDecision, type AuditRow } from "./audit-score";
+import { auditScore as score, type AuditRow } from "./audit-score";
 
 const rows = audit as AuditRow[];
-
-export function auditScore(list: AuditRow[] = rows) {
-  const saved = list.filter((r) => leadDecision(r, getCatalogueItem(r.productId)?.shortName ?? r.productId).lead);
-  const by = (g: string) => saved.filter((r) => r.grade === g).length;
-  const n = saved.length || 1;
-  const missedGood = list.filter((r) => (r.grade === "A") && !saved.includes(r)).map((r) => r.name);
-  return { audited: list.length, saved: saved.length, A: by("A"), B: by("B"), C: by("C"), D: by("D"),
-    realBuyers: Math.round((100 * (by("A") + by("B"))) / n), notBuyers: Math.round((100 * by("D")) / n), missedA: missedGood,
-    savedD: saved.filter((r) => r.grade === "D").map((r) => r.name) };
-}
+const auditScore = (list: AuditRow[] = rows) => score(list);
 
 describe("lead quality against the 10 Oct web audit", () => {
   it("is a complete audit set", () => {
@@ -54,8 +44,21 @@ describe.skipIf(!process.env.AUDIT_LIVE)("live AI re-rating of the audited compa
     const { rateRows } = await import("../shortlist");
     const { createTestDb } = await import("@/mvp/db");
     const usageDb = await createTestDb();
-    const provider = getLLM("triage", usageDb);
+    const { retryAfterMs, DAILY_LIMIT } = await import("@/mvp/llm/groq");
+    const llm = getLLM("triage", usageDb);
+    // Like the app's durable jobs: wait out a per-minute limit (up to a minute) and ask again.
+    const provider: typeof llm = { ...llm, async complete(request) {
+      for (let attempt = 0; ; attempt++) {
+        try { return await llm.complete(request); } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          const wait = retryAfterMs(message);
+          if (attempt >= 3 || !/\b429\b/.test(message) || DAILY_LIMIT.test(message) || wait === null || wait > 65_000) throw error;
+          await new Promise((r) => setTimeout(r, wait + 500));
+        }
+      }
+    } };
     const rerated: AuditRow[] = [];
+    const calls: { set: string; provider: string; aiCalls: number; warning?: string }[] = [];
     for (const set of [...new Set(rows.map((r) => r.set))]) {
       const list = rows.filter((r) => r.set === set);
       const first = list[0];
@@ -65,11 +68,11 @@ describe.skipIf(!process.env.AUDIT_LIVE)("live AI re-rating of the audited compa
         const base = list[Number(r.id)];
         rerated.push({ ...base, rating: r.raw ?? r.rating, role: r.role, reason: r.reason, type: r.buyerType ?? null, source: r.source === "ai" ? "ai" : "rules" });
       }
-      console.log(`[audit live ${set}] AI calls ${rated.aiCalls ?? 0}${rated.warning ? `; ${rated.warning}` : ""}`);
+      calls.push({ set, provider: provider.name, aiCalls: rated.aiCalls ?? 0, warning: rated.warning });
     }
     const score = auditScore(rerated);
     fs.mkdirSync("tmp", { recursive: true });
-    fs.writeFileSync("tmp/audit-live.json", JSON.stringify({ score, rows: rerated.map((r) => ({ name: r.name, grade: r.grade, rating: r.rating, type: r.type, role: r.role, reason: r.reason })) }, null, 1));
+    fs.writeFileSync("tmp/audit-live.json", JSON.stringify({ score, calls, rows: rerated.map((r) => ({ name: r.name, grade: r.grade, rating: r.rating, type: r.type, role: r.role, reason: r.reason, source: r.source })) }, null, 1));
     console.log("[audit live]", JSON.stringify(score));
     await usageDb.close();
   }, 1_800_000);
