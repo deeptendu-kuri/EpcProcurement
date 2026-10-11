@@ -20,6 +20,7 @@ import { materialOutputOnly } from '@/mvp/discovery/plan';
 import {currentWorkProof,namesProject,type CurrentWorkDocument,type CurrentWorkProof} from './current-work';
 import {ownDocumentIdentity} from './attribution';
 import {pagePublishedAt} from './page-date';
+import {missingMaterialOnly,potentialNeedReason,stainlessWorkApplication} from '@/mvp/discovery/potential-work';
 
 export type NeedRole = 'owner' | 'developer' | 'epc' | 'jv_partner' | 'subcontractor' | 'maintenance_contractor' | 'seller_of_item' | 'other_supplier' | 'consultant' | 'investor' | 'other';
 export type Verdict = 'lead' | 'owner' | 'rejected';
@@ -53,7 +54,7 @@ const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.replace(/\s+/
 export function namesCompany(quote: string, name: string): boolean {
   const core = companyKey(name), plain = quote.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   if (core.length >= 3 && plain.includes(core)) return true;
-  const first = (name.toLowerCase().match(/[\p{L}\p{N}]{4,}/u) ?? [])[0];
+  const first = (name.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []).find(w=>!['corporation','company','limited','private','engineering','construction','contracting','international','industries','group'].includes(w));
   return Boolean(first && plain.includes(first) && first.length >= 5) || (initialsOf(name).length >= 3 && new RegExp(`\\b${initialsOf(name)}\\b`, 'i').test(quote));
 }
 
@@ -109,7 +110,7 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
   try { raw = JSON.parse(firstJsonObject(text) ?? 'null') as Record<string, unknown>; } catch { return null; }
   if (!raw || typeof raw !== 'object') return null;
   const use = matchUse(brief, clip(raw.use, 120))?.name ?? null;
-  const needsItem = raw.needsItem === 'yes' || raw.needsItem === 'no' ? raw.needsItem : 'unclear';
+  let needsItem:'yes'|'no'|'unclear' = raw.needsItem === 'yes' || raw.needsItem === 'no' ? raw.needsItem : 'unclear';
   const project = clip(raw.project, 160) || null, country = clip(raw.country, 80) || null;
   const claimedMarket = workMarket(country, brief, markets);
   // An AI country is a claim, not evidence. Require the original to locate the
@@ -131,6 +132,9 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
     const identityQuote=clip(c?.identityQuote,300)||undefined;
     const quoteVerified = Boolean(literal&&(namesCompany(literal,name)||ownDocumentIdentity(doc.text,name,doc.url,identityQuote)));
     const date = workDate(quote, since, doc.publishedAt), age = monthsAgo(date, now);
+    const application=quoteVerified?stainlessWorkApplication({company:name,quote:literal!,text:doc.text,package:pkg},brief):null;
+    const reviewedNeed=Boolean(application&&use&&DOES_WORK.has(role)&&c?.buysItem!=='no'&&missingMaterialOnly(needWhy));
+    const needsOwnItem=needsItem==='yes'||reviewedNeed;
     const sells = role === 'seller_of_item' || SELLER.test(`${name} ${pkg}`) || Boolean(brief.productId&&materialOutputOnly(literal??quote,brief.productId));
     const completed = /\b(?:completed|delivered|commissioned|handed over)\b/i.test(quote)&&! /\b(?:ongoing|under construction|currently|maintenance|revamp|expansion)\b/i.test(quote);
     const owns = role === 'owner' || role === 'developer';
@@ -138,9 +142,11 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
       sells && 'sells the item (a competitor)',
       !DOES_WORK.has(role) && !owns && !sells && `role ${role}`,
       !use && 'the work is not one of the uses',
-      use && needsItem !== 'yes' && `need ${needsItem}${needWhy ? `: ${needWhy}` : ''}`,
+      use && !needsOwnItem && `need ${needsItem}${needWhy ? `: ${needWhy}` : ''}`,
+      brief.productId==='ss-duplex-pipe'&&!application&&/\b(?:transmission|cross[- ]country) pipelines?\b/i.test(pkg)&&'transmission pipeline package; stainless process-pipe need not established',
       !market && `outside the chosen countries (${country ?? 'unknown'})`,
       age !== null && age > NEED_WINDOW_MONTHS && !currentWork && `older than ${NEED_WINDOW_MONTHS} months (${date})`,
+      age !== null && age < 0 && 'future-dated work; no current buying window established',
       completed && 'completed work; no current buying window established',
       STAKE.test(quote) && !WORK.test(quote) && 'an investment, not work',
       ENGINEERING_ONLY.test(pkg) && !BUYS_MATERIAL.test(pkg) && 'engineering only, buys no material',
@@ -153,7 +159,11 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
     const verdict: Verdict = why.length ? 'rejected' : owns ? 'owner' : 'lead';
     return [{ name, role, package: pkg, quote:literal??quote, quoteVerified, since: date, verdict, identityQuote, reason: why.join('; ') || (owns ? 'owner of work that needs the item' : 'does work that needs the item') }];
   });
-  return { project, country, market, date: workDate('', null, clip(raw.date, 10) || doc.publishedAt), use, needsItem, needWhy, companies, currentWork };
+  // A reviewed application can recover a material-omission false negative, but
+  // must not retroactively approve other companies in the same article.
+  if(companies.some(c=>c.verdict==='lead')&&needsItem!=='yes')needsItem='yes';
+  return { project, country, market, date: workDate('', null, clip(raw.date, 10) || doc.publishedAt), use, needsItem,
+    needWhy:companies.some(c=>c.verdict==='lead')?potentialNeedReason(use):needWhy, companies, currentWork };
 }
 
 /**

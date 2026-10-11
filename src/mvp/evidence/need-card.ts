@@ -3,6 +3,7 @@ import type { Queryable } from '@/mvp/db';
 import type { NeedCard } from '@/mvp/buyers/types';
 import { sameCompanyName } from '@/mvp/research/company-names';
 import { marketName } from '@/mvp/config/markets';
+import {potentialNeedReason} from '@/mvp/discovery/potential-work';
 
 const ROLE_WORD: Record<string, string> = {
   epc: 'EPC contractor', jv_partner: 'Construction joint-venture partner', subcontractor: 'Subcontractor', maintenance_contractor: 'Maintenance contractor',
@@ -28,7 +29,7 @@ export async function needCard(db: Queryable, runId: string, company: string, it
   const competitor = (await db.query<{ company_name: string; package: string | null }>(
     "select company_name, package from need_checks where run_id=$1 and document_id=$2 and role='seller_of_item' limit 1", [runId, best.document_id])).rows[0];
   return {
-    item, work: best.quote, why: best.need_why ?? '', use: best.use_name, project: best.project, date: best.work_date,
+    item, work: best.quote, why: potentialNeedReason(best.use_name), use: best.use_name, project: best.project, date: best.work_date,
     window: buyingWindow(best.work_date, now), role: ROLE_WORD[best.role] ?? null, country: best.market ? marketName(best.market) : null,
     url: best.url, source: hostOf(best.url),
     competitor: competitor ? `${competitor.company_name}${competitor.package ? `: ${competitor.package}` : ''}` : null,

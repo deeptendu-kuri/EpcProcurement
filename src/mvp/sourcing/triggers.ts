@@ -7,6 +7,7 @@ import {valuesClose} from '@/mvp/pipeline/merge';
 import {namesCompany,originalQuote} from '@/mvp/discovery/evidence';
 import {countriesInQuote} from '@/mvp/discovery/locations';
 import {nonCompanyDomain} from './entities';
+import {wonConstructionContract} from './contract';
 
 export interface TriggerSql {
   id:string;company_id:string;run_id:string|null;product_id:string|null;kind:Trigger['kind'];role:Trigger['role'];
@@ -79,7 +80,7 @@ function groundedTrigger(t:Omit<Trigger,'id'>,proofs:Proof[]):Omit<Trigger,'id'>
   const title=proofs.flatMap(p=>{const q=originalQuote(p.quote,t.title);return q?[q]:[];})[0];
   if(!title)return null;
   const event=/\b(?:awards?|awarded|wins?|won|secures?|secured|bags?|received|letter of award|winner|contract award|subcontract|tender|order)\b/i;
-  if(t.kind!=='capability'&&!event.test(title))return null;
+  if(t.kind!=='capability'&&!event.test(title)&&!(t.kind==='award'&&wonConstructionContract(title)))return null;
   const date=proofs.map(p=>quotedTriggerDate(t.date,p.quote)).find(d=>d.date)??{date:null,precision:'unknown' as const};
   const valueQuote=t.valueText?proofs.flatMap(p=>{const q=originalQuote(p.quote,t.valueText!);return q?[q]:[];})[0]:null;
   const money=valueQuote?[...valueQuote.matchAll(new RegExp(MONEY_RE.source,'gi'))].map(m=>parseMoney(m[0])).find(m=>m?.usd!==null&&t.valueUsd!==null&&valuesClose(m!.usd!,t.valueUsd,0.015)):null;

@@ -12,7 +12,7 @@ export function companyNames(company:string,identityQuote:string):string[] {
   if(full!==company && identityQuote.toLowerCase().includes(full.toLowerCase()))names.push(full);
   // A reported short legal name is not an invented acronym or another company.
   const short=full.replace(/(?:[,.]?\s+(?:pvt\.?|private|ltd\.?|limited|inc\.?|incorporated|llc|plc|corporation|corp\.?))+\s*$/i,"").trim();
-  if(short!==full&&short.split(/\s+/).length>=2&&short.length>=6&&identityQuote.toLowerCase().includes(full.toLowerCase()))names.push(short);
+  if(short!==full&&(short.split(/\s+/).length>=2&&short.length>=6||/^[A-Z][A-Z0-9&.-]{2,11}$/.test(short))&&identityQuote.toLowerCase().includes(full.toLowerCase()))names.push(short);
   // An acronym is allowed only when the original company identity explicitly defines it.
   const escaped=full.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
   const acronym=identityQuote.match(new RegExp(escaped+"\\s*\\(([A-Z0-9&.-]{2,12})\\)"))?.[1];

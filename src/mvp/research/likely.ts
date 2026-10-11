@@ -19,9 +19,15 @@ import type { BuyerType } from './shortlist';
 import { sameCompanyName } from './company-names';
 import { namesWork } from '@/mvp/discovery/brief';
 import { supportedWorkProof } from '@/mvp/discovery/work-proof';
+import {potentialBuyingReason,stainlessApplicationProof} from '@/mvp/discovery/potential-work';
+import {wonConstructionContract} from '@/mvp/sourcing/contract';
+import {publicationDateProof} from './page-date';
+import {companyNames,namesCompany as literalNamesCompany} from '@/mvp/discovery/evidence';
+import {countriesInQuote} from '@/mvp/discovery/locations';
+import {articleAnalysisText} from './relevance';
 
 /** A need check's accepted company, with its source (docs/mvp/20). */
-interface NeedLead { company_name: string; role: string; quote: string; identity_quote?:string|null; need_why: string | null; work_date: string | null; market: string | null; project: string | null;
+interface NeedLead { company_name: string; role: string; quote: string; identity_quote?:string|null; need_why: string | null; use_name:string|null; work_date: string | null; market: string | null; project: string | null;
   document_id: string; text:string; package:string|null; url: string | null; tier: string | null; publisher_key: string | null }
 /** A need-proven lead's fit: its work needs the item, shown on a verified sentence. */
 const NEED_FIT = 75;
@@ -44,7 +50,7 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
   // docs/mvp/20: in a work-based search a company the need check accepted is a lead on that proof (its verified
   // sentence about work that needs the item), whatever its shortlist rating; the smoke test lost them all.
   const needs = input.brief?.uses.length ? (await db.query<NeedLead>(
-    `select n.company_name,n.role,n.quote,c.identity_quote,n.need_why,n.work_date,n.market,n.project,n.document_id,n.package,d.text,d.url,d.tier,d.publisher_key
+    `select n.company_name,n.role,n.quote,c.identity_quote,n.need_why,n.use_name,n.work_date,n.market,n.project,n.document_id,n.package,d.text,d.url,d.tier,d.publisher_key
      from need_checks n join source_documents d on d.id=n.document_id left join research_candidates c on c.run_id=n.run_id and c.company=n.company_name and c.identity_document_id=n.document_id
      where n.run_id=$1 and n.verdict='lead' and n.quote_verified=true and n.needs_item='yes' order by n.work_date desc nulls last`, [runId])).rows
       .filter(n=>supportedWorkProof({company:n.company_name,quote:n.quote,text:n.text,package:n.package,url:n.url??undefined,identityQuote:n.identity_quote??undefined},productId,input.brief!)) : [];
@@ -79,7 +85,7 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
     if (c.guessed && !listed) continue;
     const verification = listed ? 'listing' : 'rating';
     // The same form as an award winner's reason, so Leads shows "Their work" and "Why" as bullets.
-    const reason = need ? `${need.quote}${need.need_why ? ` Why it needs ${label}: ${need.need_why}` : ''}`
+    const reason = need ? potentialBuyingReason(need.quote,label,need.use_name)
       : `Likely ${label} buyer (${listed ? 'its listed work uses it' : 'rated from the source; not verified yet'}): ${c.ratingReason ?? c.ratingRole ?? 'see source'}`;
     const ok = await db.tx(async (tx) => {
       const company = await resolveBuyerCompany(tx, c.name, null, role === 'epc_contractor' ? 'main_epc' : role, c.website);
@@ -99,17 +105,57 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
       const currentProof=current&&need&&current.roleDocumentId===need.document_id?(await tx.query<{id:string}>(
         `select e.id from evidence e join run_documents r on r.document_id=e.document_id where e.id=$1 and r.run_id=$2 and e.quote_verified=true`,[current!.evidenceId,runId])).rows[0]:null;
       if(currentProof)evidence.push(currentProof.id);
+      // A source may legally name the parent in its EPC announcement and use
+      // its short name in the JV execution paragraph. Keep both literal spans;
+      // don't invent an acronym or concatenate them into one quote.
+      if(need&&!literalNamesCompany(need.quote,companyNames(need.company_name,need.quote))){
+        const identity=need.text.split(/\n+/).find(p=>literalNamesCompany(p,companyNames(need.company_name,p))&&namesWork(p,input.brief!)&&/\b(?:procurement|construction|fabrication|installation)\b/i.test(p));
+        if(identity&&identity.length<=1600){
+          const identityId=(await tx.query<{id:string}>(`insert into evidence(document_id,url,quote,extracted_by,quote_verified,agreement,tier,publisher_key)
+            values($1,$2,$3,'rule:legal-work-identity',true,'single',$4,$5) returning id`,[need.document_id,need.url,identity,need.tier??'C',need.publisher_key])).rows[0].id;
+          evidence.push(identityId);
+        }
+      }
+      const contract=Boolean(need&&wonConstructionContract(need.quote));
+      const executing=Boolean(need&&/\b(?:being executed|under construction|construction continues|construction is ongoing)\b/i.test(need.quote));
+      const application=need&&input.brief?stainlessApplicationProof({company:need.company_name,quote:need.quote,text:need.text,package:need.package},input.brief):null;
+      if(application&&application.quote!==quote){
+        const applicationId=(await tx.query<{id:string}>(`insert into evidence(document_id,url,quote,extracted_by,quote_verified,agreement,tier,publisher_key)
+          values($1,$2,$3,'rule:potential-application',true,'single',$4,$5) returning id`,[need!.document_id,need!.url,application.quote,need!.tier??'C',need!.publisher_key])).rows[0].id;
+        evidence.push(applicationId);
+      }
+      // Locate the same named work package in its nearby original paragraphs,
+      // not the contractor's HQ or the user's selected country. Keep location
+      // context separate from the contractor-role sentence.
+      const body=need?articleAnalysisText(need.text):'';
+      const position=need?body.indexOf(need.quote):-1;
+      const context=position>=0?body.slice(Math.max(0,position-2500),position+need!.quote.length+1200):'';
+      const location=need?.market&&need.package&&need.package.length>=3?context.split(/\n+/).find(p=>p.length>=80&&p.length<=1600
+        &&p.toLowerCase().includes(need.package!.toLowerCase())&&countriesInQuote(p).includes(need.market!)):null;
+      if(location&&location!==quote&&location!==application?.quote){
+        const locationId=(await tx.query<{id:string}>(`insert into evidence(document_id,url,quote,extracted_by,quote_verified,agreement,tier,publisher_key)
+          values($1,$2,$3,'rule:work-location',true,'single',$4,$5) returning id`,[need!.document_id,need!.url,location,need!.tier??'C',need!.publisher_key])).rows[0].id;
+        evidence.push(locationId);
+      }
+      const contractEvidence=[...evidence];
+      const dateProof=need&&(contract||executing)?publicationDateProof(need.text):null;
+      // Independent literal publication evidence; not an invented award date.
+      if(dateProof){
+        const dateId=(await tx.query<{id:string}>(`insert into evidence(document_id,url,quote,extracted_by,quote_verified,agreement,tier,publisher_key)
+          values($1,$2,$3,'rule:publication-date',true,'single',$4,$5) returning id`,[need!.document_id,need!.url,dateProof.quote,need!.tier??'C',need!.publisher_key])).rows[0].id;
+        evidence.push(dateId);
+      }
       const lead = (await tx.query<{ id: string }>(`insert into leads(kind,buyer_company_id,client_product_ids,score_breakdown,gate_results,class,reasons,scoring_version,run_id,buyer_type)
         values('supply_subcontract',$1,$2::text[],'{}','[]','research',$3::jsonb,1,$4,$5)
         on conflict on constraint leads_candidate_uniq do update set updated_at=now() returning id`, [company.id, [productId], JSON.stringify([{ text: reason, evidenceIds: evidence }]), runId, role])).rows[0];
-      const inserted = await tx.query(`insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,contact_role,buying_reason,evidence_ids,discovery_kind,fit_score,material_fit_kind,activity_status,verification,discovery_version)
-        values($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid[],'company',$10,$11,$12,$13,0) on conflict(run_id,company_id,product_id) do nothing returning id`,
-        [runId, lead.id, company.id, input.query ?? label, productId, label, input.contactRole ?? 'buyer', reason, evidence, need ? Math.max(c.rating ?? 0, NEED_FIT) : c.rating ?? LIKELY_MIN, !need&&c.match === 'named' ? 'explicit' : 'potential', currentProof?'ongoing':'capability_only',verification]);
+      const inserted = await tx.query(`insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,contact_role,buying_reason,evidence_ids,discovery_kind,fit_score,material_fit_kind,activity_status,verification,activity_date,activity_quote,discovery_version)
+        values($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid[],'company',$10,$11,$12,$13,$14::date,$15,0) on conflict(run_id,company_id,product_id) do nothing returning id`,
+        [runId, lead.id, company.id, input.query ?? label, productId, label, input.contactRole ?? 'buyer', reason, evidence, need ? Math.max(c.rating ?? 0, NEED_FIT) : c.rating ?? LIKELY_MIN, !need&&c.match === 'named' ? 'explicit' : 'potential', currentProof||executing?'ongoing':contract&&need?.work_date?'recent':'capability_only',verification,dateProof?.date??null,contract||executing?quote:null]);
       if (inserted.rows.length && listed && quote)
-        await storeTrigger(tx, runId, company.id, productId, need && /\b(?:awarded|wins?|won|secured|signed.{0,30}contract)\b/i.test(need.quote)
+        await storeTrigger(tx, runId, company.id, productId, need && contract
           // Its dated work on a project that needs the item (Recent work and the buying window come from this).
           ? { kind: 'award', role: role === 'subcontractor' ? 'subcontractor' : 'contractor', title: need.quote, date: need.work_date, datePrecision: need.work_date ? (need.work_date.length === 7 ? 'month' : 'day') : 'unknown',
-            valueUsd: null, valueText: null, country: need.market, projectId: null, projectName: need.project, ownerName: null, strength: 'confirmed', evidenceIds: evidence }
+            valueUsd: null, valueText: null, country: need.market, projectId: null, projectName: need.project, ownerName: null, strength: 'confirmed', evidenceIds: contractEvidence }
           : { kind: 'capability', role: role === 'subcontractor' ? 'subcontractor' : 'contractor', title: quote, date: null, datePrecision: 'unknown',
           valueUsd: null, valueText: null, country: need?.market??null, projectId: null, projectName: need?.project??null, ownerName: null, strength: 'possible', evidenceIds: evidence });
       return inserted.rows.length > 0;

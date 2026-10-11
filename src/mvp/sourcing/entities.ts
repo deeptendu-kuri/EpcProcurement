@@ -4,6 +4,8 @@ export function junkCompanyReason(name:string):string|null {
   const n=name.trim();
   if(n.length<3||n.length>180)return 'invalid company name';
   if(/@|https?:\/\/|^www\./i.test(n))return 'email address or URL, not a company name';
+  if(/\b(?:expo|conference|exhibition|trade fair)\b|\bsummit(?:\s+(?:20\d\d|on|in|for|of|at)\b|$)/i.test(n))return 'event, not a buying company';
+  if(/\b(?:ministry|department of|government of|natural resources canada)\b/i.test(n))return 'government department, not a contractor';
   if(COUNTRIES.some(c=>c.name.toLowerCase()===n.toLowerCase())||/^(?:UAE|USA|India|Dubai|Abu Dhabi|Saudi Arabia|Key Players(?: & More)?|Others|Table of Contents|Oil [&and ]+ Gas Pipelines|Contact Us|Our Services|Company Name)$/i.test(n))return 'country or generic heading';
   if(/\b(?:association|council|chamber|institute|market report|market intelligence|insights|consult\w*|Norconsult|VALDEL EC)\b/i.test(n))return 'association, consultant or publisher';
   if(/\b(?:awards?|awarded|wins?|secured|bags|essential services|how to|top \d+|market size|market outlook)\b/i.test(n))return 'article or list title';

@@ -1,0 +1,34 @@
+{
+  "capturedAt": "2026-10-11",
+  "provenance": "Actual Groq gpt-oss-20b answers retained in cached-quality-2026-10-11-1791707300937/audit.json; replay only, not new live output",
+  "answers": [
+    {
+      "urlIncludes": "markets.ft.com",
+      "answer": {
+        "project": "LNG Canada Phase 2 Expansion", "country": "Canada", "date": "2026-09",
+        "use": "oil & gas processing plant", "needsItem": "yes",
+        "needWhy": "Pipes are standard in LNG processing and construction work",
+        "companies": [
+          {"name": "Fluor Corporation", "role": "epc", "package": "engineering, procurement, fabrication, construction and commissioning", "quoteIndex": 3, "quote": "Fluor Corporation (NYSE: FLR) announced today that its joint venture with JGC Corporation has been selected to deliver engineering, procurement, fabrication, construction and commissioning for Phase 2 of LNG Canada’s liquified natural gas (LNG) export facility in Kitimat, British Columbia.", "since": null, "buysItem": "yes"},
+          {"name": "JGC Corporation", "role": "jv_partner", "package": "engineering, procurement, fabrication, construction and commissioning", "quoteIndex": 16, "quote": "Work at the LNG export facility for the Phase 2 project is being executed by JGC Fluor BC LNG II JV, a Canadian joint venture comprised of Fluor Canada Ltd (50%) and JGC Constructors (No2) BC Ltd (50%).", "since": null, "buysItem": "yes"},
+          {"name": "LNG Canada", "role": "owner", "package": "joint venture ownership of the facility", "quoteIndex": 17, "quote": "LNG Canada is a joint venture comprised of Shell (40%), PETRONAS (25%), PetroChina (15%), Mitsubishi Corporation (15%) and KOGAS (5%).", "since": null, "buysItem": "no"}
+        ]
+      }
+    },
+    {
+      "urlIncludes": "gulftoday.ae",
+      "answer": {
+        "project": null, "country": "United Arab Emirates", "date": "2025-01",
+        "use": "oil & gas processing plant", "needsItem": "unclear",
+        "needWhy": "The text does not specify the material of the pipelines or compression equipment.",
+        "companies": [
+          {"name": "ENPPI", "role": "epc", "package": "LPP", "quoteIndex": 5, "quote": "The largest contract, valued at $1.24 billion for the LPP, was awarded to a consortium consisting of Engineering for the Petroleum and Process Industries (ENPPI) and Petrojet.", "since": null, "buysItem": "yes"},
+          {"name": "Petrojet", "role": "epc", "package": "LPP", "quoteIndex": 5, "quote": "The largest contract, valued at $1.24 billion for the LPP, was awarded to a consortium consisting of Engineering for the Petroleum and Process Industries (ENPPI) and Petrojet.", "since": null, "buysItem": "yes"},
+          {"name": "China Petroleum Pipeline Engineering Company", "role": "epc", "package": "transmission pipelines", "quoteIndex": 6, "quote": "A $514 million contract for transmission pipelines was awarded to the China Petroleum Pipeline Engineering Company, while Petrofac Emirates LLC will develop the new compression facilities under a $335 million contract.", "since": null, "buysItem": "yes"},
+          {"name": "Petrofac Emirates LLC", "role": "epc", "package": "compression facilities", "quoteIndex": 6, "quote": "A $514 million contract for transmission pipelines was awarded to the China Petroleum Pipeline Engineering Company, while Petrofac Emirates LLC will develop the new compression facilities under a $335 million contract.", "since": null, "buysItem": "yes"},
+          {"name": "Adnoc Gas", "role": "owner", "package": "overall project", "quoteIndex": 7, "quote": "Fatema Al Nuaimi, Chief Executive Officer of Adnoc Gas, said: “These contract awards reaffirm Adnoc Gas’ commitment to delivering sustainable growth and maximising shareholder value.", "since": null, "buysItem": "no"}
+        ]
+      }
+    }
+  ]
+}

@@ -63,7 +63,7 @@ describe("award winners in a work-based search", () => {
     const opp = (await db.query<{ buying_reason: string }>("select buying_reason from search_opportunities where run_id=$1", [id])).rows;
     expect(opp).toHaveLength(1);
     expect(opp[0].buying_reason).toContain("received a Letter of Award (LoA) for the engineering, procurement and construction (EPC) of a gas pipeline project");
-    expect(opp[0].buying_reason).toContain("Why it needs");
+    expect(opp[0].buying_reason).toContain("Why it may need");
     expect(opp[0].buying_reason).not.toContain("Potential need");
   }, 60_000);
   it("follows the accepted project to its subcontracts, packages and suppliers' orders (stage 6)", async () => {

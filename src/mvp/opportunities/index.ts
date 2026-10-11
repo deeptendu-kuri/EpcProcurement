@@ -7,6 +7,7 @@ import { journey, uniquePublishedContacts, verifiedProspect } from "./workflow";
 import { searchedProductLabel } from '@/mvp/config/product-label';
 import {strongestTrigger,syncOpportunityTrigger,triggersForCompany} from '@/mvp/sourcing/triggers';
 import { sameCompanyName } from '@/mvp/research/company-names';
+import {potentialBuyingReason} from '@/mvp/discovery/potential-work';
 
 export interface Opportunity {
   id: string; run_id: string; lead_id: string; keyword: string; product_id: string; product_name: string;
@@ -55,8 +56,8 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
   const companies = new Set<string>();
   // docs/mvp/20: in a work-based search a company qualifies only when the need check accepted its work for the
   // item (the fixed role table no longer decides), and its reason is its own sentence plus why that work needs it.
-  const needs = input.brief ? (await db.query<{ company_name: string; quote: string; need_why: string | null }>(
-    "select company_name, quote, need_why from need_checks where run_id = $1 and verdict = 'lead' order by work_date desc nulls last", [runId])).rows : null;
+  const needs = input.brief ? (await db.query<{ company_name: string; quote: string; need_why: string | null;use_name:string|null }>(
+    "select company_name, quote, need_why,use_name from need_checks where run_id = $1 and verdict = 'lead' order by work_date desc nulls last", [runId])).rows : null;
   let count = 0;
   await db.tx(async tx => {
     for (const record of records) {
@@ -76,7 +77,7 @@ export async function captureOpportunities(runId: string, input: RunInput, db: D
       if (companies.has(record.view.companyId)) continue;
       companies.add(record.view.companyId);
       const item = record.view.sellItems.find(i => i.itemId === product.id);
-      const reason = need ? `${need.quote}${need.need_why ? ` Why it needs ${searchedProductLabel(product.id, input.query)}: ${need.need_why}` : ""}`
+      const reason = need ? potentialBuyingReason(need.quote,searchedProductLabel(product.id, input.query),need.use_name)
         : `${record.view.buyingReason} Potential need: ${item?.why ?? ""}`;
       const result = await tx.query(`insert into search_opportunities
         (run_id, lead_id, keyword, product_id, product_name, contact_role, buying_reason, evidence_ids, company_id)

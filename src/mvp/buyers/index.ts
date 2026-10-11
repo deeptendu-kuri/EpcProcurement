@@ -67,9 +67,10 @@ async function searchLinks(): Promise<Map<string, SearchLink[]>> {
 }
 /** docs/mvp/20: a work-based search's reason is "<its sentence> Why it needs <item>: <why>"; the table shows both as bullets. */
 export function needOf(reason: string | undefined): { work: string; why: string } | null {
-  const at = reason?.indexOf(' Why it needs ') ?? -1;
+  const delimiter=reason?.includes(' Why it may need ')?' Why it may need ':' Why it needs ';
+  const at = reason?.indexOf(delimiter) ?? -1;
   if (!reason || at < 0) return null;
-  const why = reason.slice(at + ' Why it needs '.length);
+  const why = reason.slice(at + delimiter.length);
   return { work: reason.slice(0, at).trim(), why: why.slice(why.indexOf(':') + 1).trim() };
 }
 /** The link for the selected search, else the latest search that saved the company. */

@@ -96,7 +96,7 @@ describe("checkNeed storage", () => {
     expect((await db.query("select 1 from need_checks where run_id=$1", [run])).rows).toHaveLength(1);
     expect(await needAccepted(db, run, "Tecnimont")).toBe(true);
     expect(await needAccepted(db, run, "Wison Engineering")).toBe(false);
-    expect((await needProofs(db, run, "Tecnimont"))[0]).toMatchObject({ why: "NGL fractionation runs at cryogenic temperatures.", use: "NGL fractionation plant", market: "AE", url: "https://n.example/a" });
+    expect((await needProofs(db, run, "Tecnimont"))[0]).toMatchObject({ why: "Its NGL fractionation plant work is a potential application for this product. Exact specification, quantity and purchasing status are unconfirmed.", use: "NGL fractionation plant", market: "AE", url: "https://n.example/a" });
   });
 });
 
@@ -146,8 +146,9 @@ describe("need-proven companies become leads (smoke test, 10 Oct)", () => {
       expect(saved.saved).toBe(1);
       const opp = (await db.query<{ buying_reason: string; verification: string; fit_score: number }>("select buying_reason, verification, fit_score from search_opportunities where run_id=$1", [run])).rows[0];
       expect(opp.verification).toBe("listing");
-      expect(opp.buying_reason.startsWith(`${text} Why it needs `)).toBe(true);
-      expect(opp.buying_reason.endsWith(": NGL fractionation runs at cryogenic temperatures.")).toBe(true);
+      expect(opp.buying_reason.startsWith(`${text} Why it may need `)).toBe(true);
+      expect(opp.buying_reason).toContain("potential application");
+      expect(opp.buying_reason).toContain("Exact specification, quantity and purchasing status are unconfirmed");
       expect(Number(opp.fit_score)).toBe(75);
       const trig = (await db.query<{ kind: string; event_date: string | null; title: string; strength: string }>("select kind, to_char(event_date, 'YYYY-MM') as event_date, title, strength from company_triggers where run_id=$1", [run])).rows[0];
       expect(trig).toMatchObject({ kind: "award", title: text, strength: "confirmed" });

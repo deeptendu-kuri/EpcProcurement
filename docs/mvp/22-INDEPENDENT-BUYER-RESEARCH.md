@@ -130,3 +130,41 @@ Buyer scarcity is not the observed cause: the captured originals already describ
 - Full suite, `--maxWorkers=2`: **1,584 passed, 10 skipped**, 157 passing files and four skipped files. Network captures are opt-in. Offline passing counts do not include a lead-quality gate for the failed live harnesses.
 - Isolated production build, `node scripts/build-local-proof.mjs`: passed. Cloud database and provider keys were blank; background delivery/research workers were disabled during the build.
 - Live lead-quality gate: **not passed**. The fresh rehearsal saved zero; the focused follow-up was blocked by a provider 429. No cloud change or email delivery was performed.
+
+## Subsequent live results and relevance-to-email repair
+
+These results supersede the zero-lead result above for the later rehearsals, not for the earlier failed runs.
+
+| Rehearsal | Scope | Saved buyers | Actual paid calls | Recorded tokens | Delivery |
+|---|---|---:|---|---:|---|
+| `cached-quality-2026-10-11-1791707300937` | Two already-stored originals, real Groq 20b, isolated PGlite | 2 Canadian contractors | 2 AI requests, no search | 4,129 | Disabled |
+| `live-quality-2026-10-11-1791707884311` | Fresh India/Canada/UAE search, normal production pacing, capped | 2 Canadian contractors on one LNG project | 6 Tavily / 6 reported credits; 12 AI HTTP requests (11 successful, one 429) | 21,809 | Disabled |
+
+The fresh run read 26 pages in 294 seconds and ended **partial** under its explicit request ceiling/source failures. India and UAE saved zero in that fresh run. This is not a passing all-country recall gate or a full uncapped search. Request ceilings blocked additional attempts before HTTP. Successful-token totals do not include unknown consumption for provider errors.
+
+Original literal quotes and company roles were valid, but the saved reasoning overstated an ASTM grade; the Canadian construction contract was labelled capability-only. Other checks rejected UAE contractors solely because articles do not specify pipe materials. An EPC event and a government ministry were also incorrectly admitted as found-company candidates, though not saved as leads.
+
+### What this additional local repair builds
+
+- A deliberately bounded, reviewed stainless-process-pipe application rule corrects only missing-material/specification false negatives. It still requires a matched brief use, a literal company-attributed scope, country and time checks, and a material-consuming contractor role. An explicit `buysItem: no`, unrelated use, fabricated quote, design/civil-only work, old work or future work still fails closed.
+- Split multi-company paragraphs into attributed clauses before inferring applications. ENPPI/Petrojet's LNG pre-conditioning package and Petrofac's compression package are potential process-pipe applications; the other contractor's transmission-pipeline package cannot borrow those applications. LPP's literal definition is retained as separate application evidence.
+- Persist and display a controlled potential-demand explanation. The model's raw answer remains available in the durable job audit, but is not shown as proof of an exact grade, quantity, order or remaining purchasing requirement.
+- Recognise EPC selection with an actual contract/Notice to Proceed as a won construction package, not a prize. Separate literal publication-date evidence from contract/work evidence; publication alone never becomes an award date. Recent/ongoing physical work is not labelled capability-only.
+- Reject event/expo headings and government departments as contractor candidates. Common legal words such as "Corporation" cannot establish an unrelated company identity.
+- Preserve full-name and short-name work paragraphs separately when an original EPC announcement establishes the legal name. A sourced legal short name such as JGC can then be used by the existing outreach attribution guard; invented acronyms and another company's work remain invalid.
+- Retain same-package location context as a separate literal quote, so the saved operating country comes from the work, not company headquarters. An event-heading filter must not discard a legitimate contractor merely because its name includes "Summit".
+- Extend the existing research/email modules; no new recipients, routes, dependencies, migration, external settings or architecture replacement.
+
+### Why no email arrived in the live lead-quality test
+
+The isolated harness explicitly disabled workers, cleared delivery credentials and prohibited email HTTP. There was **no send attempt**, not a failed Resend delivery. Missing buyer contacts did not cause this. The normal approved-inbox demo enrolls a source-backed finished/partial search, after automation was enabled, without requiring a buyer contact. Paused/running searches wait for completion; cancelled searches and historical runs do not enroll automatically. Demo sends remain limited to the configured top three and the approved inbox, not all researched companies.
+
+### Offline proof and remaining live gate
+
+`captured-need-answers.json` is an exact replay of the two retained real Groq responses, checked against the ignored audit file. It is not a fabricated successful model response or a production seed. With the repaired judge/persistence, those same originals and answers save **five potential buyers**: Fluor Corporation, JGC Corporation, ENPPI, Petrojet and Petrofac Emirates LLC. No contacts are invented. The transmission contractor and owner are not saved as stainless process-pipe buyers.
+
+`automation/research-handoff.test.ts` runs those captured answers through real need checking, candidate registration, saving, Pause/Finish control, outreach eligibility, source/ID attribution, qualification and seller introduction. Only the qualification model decision and Resend provider delivery are mocked. It asserts zero people/contact rows, zero enrollment while active or paused, three best-rated approved-inbox introductions after Finish, correct seller/customer identities, no duplicate send, and no HTTP. A passing offline mock delivery is **not proof of Gmail receipt**.
+
+Remaining release check: a separately authorised, bounded fresh live search followed by actual approved-inbox delivery, with worker/config readiness inspected first. This local patch is not pushed/deployed and does not modify historical or cloud data. No new provider credits or actual email deliveries are used by its regression tests.
+
+Final offline suite for this repair: **1,603 passed, 10 skipped** (159 passing files, four opt-in skipped files), using `--maxWorkers=2`. The 19 added tests include captured-answer relevance and real persistence/qualification-to-mocked-delivery handoff. Typecheck, lint and the isolated production build also pass. None of these results constitutes live inbox-delivery proof or a fresh multi-country lead-volume gate.
