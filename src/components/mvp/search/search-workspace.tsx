@@ -245,6 +245,9 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
   const router = useRouter();
   const toast = useToast();
   const [isPending, startTransition] = useTransition();
+  // Highlight the requested tab immediately; the server route/URL may take seconds to catch up.
+  const [proofIntent, setProofIntent] = useState<{ from: SearchUrlState; value: ProofTab } | null>(null);
+  const proof = proofIntent?.from === state ? proofIntent.value : state.proof;
   const [result, setResult] = useState<BuyerSearchResult | null>(null);
   const [contacts, setContacts] = useState<ContactSearchResult | null>(null);
   /** The query (and retry) the shown result or error belongs to; differs from the current one while loading. */
@@ -296,8 +299,8 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
   // The query without the open sidebar: opening a buyer must not re-run the search. The view and the
   // contacts page come from local state, so Buyers | Contacts switches at once.
   const queryKey = useMemo(
-    () => serializeSearchState({ ...state, open: "", view, page: view === "contacts" ? contactsPage : state.page }).toString(),
-    [state, view, contactsPage],
+    () => serializeSearchState({ ...state, proof, open: "", view, page: view === "contacts" ? contactsPage : proof !== state.proof ? 1 : state.page }).toString(),
+    [state, proof, view, contactsPage],
   );
 
   useEffect(() => {
@@ -333,10 +336,11 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
 
   const navigate = useCallback(
     (change: Partial<SearchUrlState>) => {
-      const next = applySearchChange({ ...state, open: openId, view }, change);
+      const next = applySearchChange({ ...state, proof, open: openId, view }, change);
+      if (change.proof !== undefined) setProofIntent({ from: state, value: change.proof });
       startTransition(() => router.replace(searchHref(next, basePath), { scroll: false }));
     },
-    [router, state, openId, view, basePath],
+    [router, state, proof, openId, view, basePath],
   );
 
   const switchView = (next: ResultView) => {
@@ -454,11 +458,13 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
   };
 
   const loading = tab === "search" && doneKey !== `${queryKey}#${retry}`;
+  // Never present the old search/filter's rows as if they belonged to a newly selected tab.
+  const changedView = loading && doneKey !== null && doneKey.slice(0, doneKey.lastIndexOf("#")) !== queryKey;
   const rows = result?.rows ?? [];
   const total = result?.total ?? 0;
   const counts = (latest?.key === queryKey ? latest.counts : null) ?? result?.proofCounts ?? null;
-  const shownCount = counts ? (state.proof === "verified" ? counts.verified : state.proof === "likely" ? counts.likely : counts.all) : null;
-  const waiting = result && shownCount !== null && state.proof !== "found" ? Math.max(0, shownCount - total) : 0;
+  const shownCount = counts ? (proof === "verified" ? counts.verified : proof === "likely" ? counts.likely : counts.all) : null;
+  const waiting = result && shownCount !== null && proof !== "found" ? Math.max(0, shownCount - total) : 0;
   const selectableRows = rows.filter((row) => !isDerivedRow(row));
   const allSelected = selectableRows.length > 0 && selectableRows.every((row) => selected.has(row.leadId));
   const notFound = Math.max(0, (result?.contactsTotal ?? 0) - (result?.contactsFound ?? 0));
@@ -583,7 +589,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
           <button
             type="button"
             onClick={() => setSelected(allSelected ? new Set() : new Set(selectableRows.map((row) => row.leadId)))}
-            disabled={!selectableRows.length}
+          disabled={loading || !selectableRows.length}
             className="btn btn-secondary btn-sm"
           >
             {allSelected ? <SquareCheck size={14} aria-hidden /> : <Square size={14} aria-hidden />}
@@ -599,7 +605,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
         >
           <Plus size={14} aria-hidden /> Add to list{selected.size ? ` (${selected.size})` : ""}
         </button>
-        <button type="button" onClick={() => void exportCsv()} disabled={exporting || !total} className="btn btn-secondary btn-sm" title={selected.size ? "Export the selected buyers" : "Export every buyer that matches the filters"}>
+        <button type="button" onClick={() => void exportCsv()} disabled={loading || exporting || !total} className="btn btn-secondary btn-sm" title={selected.size ? "Export the selected buyers" : "Export every buyer that matches the filters"}>
           {exporting ? <Loader2 size={14} className="animate-spin" aria-hidden /> : <Download size={14} aria-hidden />} Export
         </button>
         <button
@@ -633,7 +639,8 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
       )}
 
       <section aria-label={view === "buyers" ? "Buyers" : "Contacts"} aria-busy={loading || isPending} className={`px-4 pb-6 transition-opacity lg:px-6 ${(loading || isPending) && result ? "opacity-60" : ""}`}>
-        {error ? (
+        {loading && result ? <p role="status" className="mb-3 flex items-center gap-2 text-sm text-[var(--muted)]"><Loader2 size={14} className="animate-spin" aria-hidden />Updating this view…</p> : null}
+        {error && !loading ? (
           <EmptyState
             icon={<SearchX size={20} aria-hidden />}
             title={error.status === 404 ? "SuperSearch is not ready yet" : "The search failed"}
@@ -642,7 +649,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
           >
             <button type="button" className="btn btn-secondary" onClick={() => setRetry((value) => value + 1)}>Try again</button>
           </EmptyState>
-        ) : result === null ? (
+        ) : result === null || changedView ? (
           <div className="flex flex-col gap-2" role="status" aria-live="polite">
             <span className="sr-only">Loading buyers…</span>
             {Array.from({ length: 6 }, (_, index) => <div key={index} className="skeleton h-14 rounded-md" />)}
@@ -650,9 +657,9 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
         ) : noData ? (
           <EmptyState
             icon={<Users size={20} aria-hidden />}
-            title={state.proof === "verified" ? "No verified leads yet" : state.proof === "likely" ? "No likely leads waiting" : searchRun ? watching ? "Looking for leads…" : "No leads saved by this search yet" : "No saved companies yet"}
+            title={proof === "verified" ? "No verified leads yet" : proof === "likely" ? "No likely leads waiting" : searchRun ? watching ? "Looking for leads…" : "No leads saved by this search yet" : "No saved companies yet"}
             text={watching ? "Leads appear here as soon as the search saves them. The search page shows what it is doing now."
-              : state.proof === "verified" ? "Verify likely leads from the Likely tab, or check companies in Companies found."
+              : proof === "verified" ? "Verify likely leads from the Likely tab, or check companies in Companies found."
               : searchRun ? "Open Companies found to check the companies this search named." : "Start a material search. Its buyers appear here with the proof, contacts and email status."}
           />
         ) : view === "contacts" ? (
@@ -726,7 +733,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
           <div role="tablist" aria-label="Leads" className="flex shrink-0 gap-5 overflow-x-auto border-b border-[var(--line)] px-4 lg:px-6">
             {PROOF_TABS.filter((t) => t.id !== "found" || searchRun).map((t) => {
               const n = !counts ? null : t.id === "" ? counts.all : t.id === "verified" ? counts.verified : t.id === "likely" ? counts.likely : null;
-              const on = state.proof === t.id;
+              const on = proof === t.id;
               return (
                 <button key={t.id || "all"} type="button" role="tab" aria-selected={on} title={t.hint} onClick={() => navigate({ proof: t.id })}
                   className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 py-2.5 text-[13.5px] ${on ? "border-[var(--accent)] font-semibold text-[var(--accent)]" : "border-transparent text-[var(--text-2)] hover:text-[var(--text)]"}`}>
@@ -737,7 +744,7 @@ export function SearchWorkspace({ tab, state, catalogue, markets, demoEmail, bas
           </div>
         ) : null}
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-          {tab === "search" ? (state.proof === "found" ? <div className="px-4 py-5 lg:px-6">{foundCompanies ?? <EmptyState icon={<Users size={20} aria-hidden />} title="Choose a search" text="Companies found are listed per search. Pick one in the Search menu above." showFind={false} />}</div> : results)
+          {tab === "search" ? (proof === "found" ? <div className="px-4 py-5 lg:px-6">{foundCompanies ?? <EmptyState icon={<Users size={20} aria-hidden />} title="Choose a search" text="Companies found are listed per search. Pick one in the Search menu above." showFind={false} />}</div> : results)
             : <LeadListsView onOpenBuyer={setOpen} openId={openId} />}
         </div>
       </div>

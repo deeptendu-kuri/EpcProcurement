@@ -1,7 +1,6 @@
 import "driver.js/dist/driver.css";
 import { connection } from "next/server";
 import { isDemoMode } from "@/mvp/config/env";
-import { getAppStatus } from "@/mvp/scheduler/status";
 import type { AppStatus } from "@/mvp/types";
 import { AppShell } from "@/components/mvp/shell/app-shell";
 
@@ -12,15 +11,9 @@ const NO_STATUS: AppStatus = { lastFinishedAt: null, newGenuine: 0, queue: { run
  * /login renders without it (handled in AppShell).
  */
 export default async function MvpLayout({ children }: { children: React.ReactNode }) {
-  await connection(); // env (demo mode) and status are read per request, not baked in at build time
-  let status = NO_STATUS;
-  try {
-    status = await getAppStatus();
-  } catch (error) {
-    console.error("[layout] status unavailable", error);
-  }
+  await connection(); // read environment at runtime, without putting database status on the navigation path
   return (
-    <AppShell demoMode={isDemoMode()} initialStatus={status}>
+    <AppShell demoMode={isDemoMode()} initialStatus={NO_STATUS}>
       {children}
     </AppShell>
   );

@@ -46,26 +46,36 @@ export function useAppStatus(): StatusContextValue {
 function useStatus(initial: AppStatus): StatusContextValue {
   const [status, setStatus] = useState(initial);
   const [now, setNow] = useState(0);
+  const inFlight = useRef<AbortController | null>(null);
   const refresh = useCallback(() => {
-    apiJson<AppStatus>("/api/mvp/status")
+    if (inFlight.current || document.visibilityState === "hidden") return;
+    const controller = new AbortController();
+    inFlight.current = controller;
+    apiJson<AppStatus>("/api/mvp/status", { signal: controller.signal })
       .then((next) => {
+        if (controller.signal.aborted) return;
         setStatus(next);
         setNow(Date.now());
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => { if (inFlight.current === controller) inFlight.current = null; });
   }, []);
 
   useEffect(() => {
-    const first = setTimeout(() => setNow(Date.now()), 0);
+    const first = setTimeout(() => { setNow(Date.now()); refresh(); }, 0);
     const poll = setInterval(refresh, STATUS_POLL_MS);
     const tick = setInterval(() => setNow(Date.now()), 30_000);
     const onEvent = () => refresh();
     window.addEventListener(EVENTS.refreshStatus, onEvent);
+    document.addEventListener("visibilitychange", onEvent);
     return () => {
       clearTimeout(first);
       clearInterval(poll);
       clearInterval(tick);
       window.removeEventListener(EVENTS.refreshStatus, onEvent);
+      document.removeEventListener("visibilitychange", onEvent);
+      inFlight.current?.abort();
+      inFlight.current = null;
     };
   }, [refresh]);
 

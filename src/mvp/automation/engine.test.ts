@@ -51,6 +51,16 @@ async function replyTo(o:string,body:string,overrides:Record<string,unknown>={})
   mocks.list.mockResolvedValue({data:[email],has_more:false});mocks.read.mockResolvedValue(email);return email;
 }
 describe("persistent demo research-to-meeting funnel",()=>{
+  it("lists message-backed card facts without counting queued/reviewed messages as sent or exposing reply tokens",async()=>{
+    const {o,company}=await seed();
+    const {rows:[t]}=await db.query<{id:string}>("insert into funnel_threads(opportunity_id,company_id,product_id,reply_token,state) values($1,$2,'line-pipe','Example-token','review') returning id",[o,company]);
+    for(const [key,direction,kind,state] of [["intro","out","initial","accepted"],["followup","out","followup","accepted"],["reply","in","reply","received"],["queue","out","reply","queued"],["held","out","reply","review"]]){
+      await db.query("insert into funnel_messages(thread_id,direction,kind,dedup_key,subject,body,state,created_at) values($1,$2,$3,$4,'Example subject','Example body',$5,now()+$6::int*interval '1 second')",[t.id,direction,kind,"Example-card-"+key,state,["intro","followup","reply","queue","held"].indexOf(key)]);
+    }
+    const [row]=await listFunnelThreads(o);
+    expect(row).toMatchObject({sent_count:2,reply_count:1,followups_sent:1,pending_count:1,review_count:1,latest_state:"review",latest_subject:"Example subject",latest_preview:"Example body",hasReplyAddress:true});
+    expect(row).not.toHaveProperty("reply_token");expect(mocks.send).not.toHaveBeenCalled();
+  });
   async function incorrectlyClarifiedSelection(body='Slot 1: Thursday, 8 October 2026 at 10:00') {
     vi.setSystemTime(new Date('2026-10-07T13:20:00Z'));
     await setFunnelEnabled(true);const t=await startEmailTest('line-pipe');

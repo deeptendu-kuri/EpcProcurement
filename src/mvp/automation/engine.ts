@@ -25,6 +25,12 @@ export interface FunnelMessage {
   provider_id:string|null;rfc_message_id:string|null;in_reply_to:string|null;reply_to:string|null;
   attempts:number;first_attempt_at:string|null;error:string|null;analysed_at:string|null;created_at:string;
 }
+/** Presentation facts from stored messages, not inferred from a workflow state. No provider I/O. */
+export interface FunnelActivity {
+  sent_count:number; reply_count:number; followups_sent:number; pending_count:number; review_count:number;
+  latest_direction:string|null; latest_state:string|null; latest_kind:string|null;
+  latest_subject:string|null; latest_preview:string|null; latest_at:string|null;
+}
 const errorText=(e:unknown)=>e instanceof Error?e.message.slice(0,600):"Automation could not complete this step. Review before retrying.";
 const note=async (tx:Queryable,id:string|null,body:string)=>{if(id)await tx.query("insert into opportunity_events(opportunity_id,body) values ($1,$2)",[id,body]);};
 async function approvedDemoOpportunity(o:Opportunity|null) {
@@ -120,8 +126,17 @@ export async function startEmailTest(productId:string) {
 }
 
 export async function listFunnelThreads(opportunityId?:string) {
-  return (await getDb().query<FunnelThread&{company:string;product:string;keyword:string;run_id:string|null;project_name:string|null;why:string|null}>(`select t.*,coalesce(o.product_name,t.test_product) as product,coalesce(o.keyword,'Email workflow test — not a buyer') as keyword,o.run_id,p.name as project_name,coalesce(c.canonical_name,'Your demo inbox') as company,coalesce(nullif(o.activity_quote,''),(select tr.title from company_triggers tr where tr.company_id=o.company_id and tr.run_id=o.run_id order by tr.kind='capability',tr.created_at limit 1),o.buying_reason) as why
+  return (await getDb().query<FunnelThread&FunnelActivity&{company:string;product:string;keyword:string;run_id:string|null;project_name:string|null;why:string|null}>(`select t.*,coalesce(o.product_name,t.test_product) as product,coalesce(o.keyword,'Email workflow test — not a buyer') as keyword,o.run_id,p.name as project_name,coalesce(c.canonical_name,'Your demo inbox') as company,coalesce(nullif(o.activity_quote,''),(select tr.title from company_triggers tr where tr.company_id=o.company_id and tr.run_id=o.run_id order by tr.kind='capability',tr.created_at limit 1),o.buying_reason) as why,
+    ms.*,lm.direction as latest_direction,lm.state as latest_state,lm.kind as latest_kind,lm.subject as latest_subject,lm.preview as latest_preview,lm.created_at as latest_at
     from funnel_threads t left join search_opportunities o on o.id=t.opportunity_id left join companies c on c.id=t.company_id left join leads l on l.id=o.lead_id left join projects p on p.id=l.project_id
+    left join lateral (select count(*) filter(where direction='out' and state='accepted')::int as sent_count,
+      count(*) filter(where direction='in' and state='received')::int as reply_count,
+      count(*) filter(where direction='out' and state='accepted' and kind='followup')::int as followups_sent,
+      count(*) filter(where direction='out' and state in ('queued','sending'))::int as pending_count,
+      count(*) filter(where state='review')::int as review_count
+      from funnel_messages where thread_id=t.id) ms on true
+    left join lateral (select direction,state,kind,subject,left(body,220) as preview,created_at from funnel_messages
+      where thread_id=t.id order by created_at desc,id desc limit 1) lm on true
     ${opportunityId?"where t.opportunity_id=$1":""} order by t.created_at desc limit 200`,opportunityId?[opportunityId]:[])).rows
     .map(({reply_token,...row})=>({...row,product:searchedProductLabel(row.product_id,row.keyword,row.product),hasReplyAddress:Boolean(reply_token),
       // The proof behind this conversation, shown on the Email automation page.

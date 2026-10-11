@@ -130,6 +130,8 @@ export interface BuyerRow { /* list row: subset of BuyerView */
   searchedProduct?: string | null;
   /** Doc 17: email automation status for this company. */
   emailStatus?: string | null;
+  /** True only when a stored outbound message was accepted by the provider (not a delivery receipt). */
+  emailSent?: boolean;
   /** Doc 17: the saved opportunity for the selected or latest search. */
   opportunityId?: string | null;
   /** Doc 18: other catalogue products this company is a good fit for (besides the searched one). */

@@ -7,7 +7,7 @@ import {parseBuyerSearch} from './schema';
 import {hybridSearchRecords} from './hybrid';
 import {exampleCompany} from '@/mvp/crm/fixtures';
 const provider=vi.hoisted(()=>vi.fn());
-vi.mock('@/mvp/sourcing/triggers',async original=>({...await original<object>(),triggersForCompany:provider}));
+vi.mock('@/mvp/sourcing/triggers',async original=>({...await original<object>(),triggersForCompanies:provider}));
 afterEach(()=>vi.resetAllMocks());
 function record():BuyerRecord{
   const c=exampleCompany();return {row:{...c.row},view:{leadId:c.row.opportunityId,companyId:c.row.companyId,stage:'early',sellItems:[{itemId:'line-pipe'}]},competitorForAll:false,leadStatus:'new',createdAt:'2026-10-08',groupKey:'Example',hqCountry:'BE',siteCountry:'AE'} as unknown as BuyerRecord;
@@ -15,9 +15,9 @@ function record():BuyerRecord{
 describe('WP8 hybrid SuperSearch projections',()=>{
   it('never casts a derived lead key as a database UUID and scopes it through its root',async()=>{
     const r=record();const root=r.view.leadId;r.view.leadId='derived:Example';r.derived={key:'Example',rootLeadId:root,link:'possible'};
-    provider.mockResolvedValue([]);const query=vi.fn().mockResolvedValue({rows:[{id:root,client_product_ids:['line-pipe']}]});
+    provider.mockResolvedValue(new Map());const query=vi.fn().mockResolvedValue({rows:[{id:root,client_product_ids:['line-pipe']}]});
     await hybridSearchRecords([r],{query} as unknown as Queryable);
-    expect(query.mock.calls[0][1]).toEqual([[root]]);expect(provider).toHaveBeenCalledWith(expect.anything(),r.view.companyId,undefined,'line-pipe');
+    expect(query.mock.calls[0][1]).toEqual([[root]]);expect(provider).toHaveBeenCalledWith(expect.anything(),[r.view.companyId]);
   });
   it('never uses fetch/created date to pass a dated trigger filter',()=>{
     const r=record();expect(matches(r,{triggers:{withinDays:90}},new Date('2026-10-08'))).toBe(false);
@@ -33,10 +33,16 @@ describe('WP8 hybrid SuperSearch projections',()=>{
     expect(parseBuyerSearch({triggers:{recipient:'example@example.com'}}).ok).toBe(false);
   });
   it('hydrates only the products attached to the lead, preserving HQ geography',async()=>{
-    const r=record();provider.mockResolvedValue([exampleCompany().row.trigger]);
+    const r=record();provider.mockResolvedValue(new Map([[r.view.companyId,[{productId:'line-pipe',trigger:exampleCompany().row.trigger}]]]));
     const db={query:vi.fn().mockResolvedValue({rows:[{id:r.view.leadId,client_product_ids:['line-pipe']}]})} as unknown as Queryable;
     const [result]=await hybridSearchRecords([r],db);
-    expect(provider).toHaveBeenCalledWith(db,r.view.companyId,undefined,'line-pipe');expect(provider).toHaveBeenCalledTimes(1);
+    expect(provider).toHaveBeenCalledWith(db,[r.view.companyId]);expect(provider).toHaveBeenCalledTimes(1);
     expect(result.row.trigger?.kind).toBe('capability');expect(result.hqCountry).toBe('BE');expect(result.siteCountry).toBe('AE');
+  });
+  it('batches repeated companies and excludes a different product’s trigger',async()=>{
+    const r=record();provider.mockResolvedValue(new Map([[r.view.companyId,[{productId:'gate-globe-check',trigger:exampleCompany().row.trigger}]]]));
+    const db={query:vi.fn().mockResolvedValue({rows:[{id:r.view.leadId,client_product_ids:['line-pipe']}]})} as unknown as Queryable;
+    const results=await hybridSearchRecords([r,{...r,row:{...r.row}}],db);
+    expect(provider).toHaveBeenCalledTimes(1);expect(results.every(r=>r.row.trigger===null)).toBe(true);
   });
 });

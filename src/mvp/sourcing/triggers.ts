@@ -58,14 +58,32 @@ export async function triggersForCompany(db:Queryable,companyId:string,runId?:st
   const rows=(await db.query<TriggerSql>(`select t.*,t.event_date::text as event_date,p.name as project_name,c.canonical_name as owner_name from company_triggers t
     left join projects p on p.id=t.project_id left join companies c on c.id=p.owner_company_id
     where t.company_id=$1 and ($2::uuid is null or t.run_id=$2) and ($3::text is null or t.product_id=$3)`,[companyId,runId??null,productId??null])).rows;
-  const out:Trigger[]=[];
+  return (await verifiedTriggerRows(db,rows)).map(row=>row.trigger);
+}
+/** Read all visible companies' triggers and their proofs in two queries, not one pair per company/trigger. */
+export async function triggersForCompanies(db:Queryable,companyIds:string[]):Promise<Map<string,{productId:string|null;trigger:Trigger}[]>> {
+  const ids=[...new Set(companyIds)];
+  if(!ids.length)return new Map();
+  const rows=(await db.query<TriggerSql>(`select t.*,t.event_date::text as event_date,p.name as project_name,c.canonical_name as owner_name from company_triggers t
+    left join projects p on p.id=t.project_id left join companies c on c.id=p.owner_company_id where t.company_id=any($1::uuid[])`,[ids])).rows;
+  const out=new Map<string,{productId:string|null;trigger:Trigger}[]>();
+  for(const row of await verifiedTriggerRows(db,rows)){
+    const list=out.get(row.companyId)??[];list.push({productId:row.productId,trigger:row.trigger});out.set(row.companyId,list);
+  }
+  return out;
+}
+async function verifiedTriggerRows(db:Queryable,rows:TriggerSql[]) {
+  const allProofs=await triggerProofs(db,[...new Set(rows.flatMap(row=>row.evidence_ids))]);
+  const byId=new Map(allProofs.map(p=>[p.id,p]));
+  const out:{companyId:string;productId:string|null;trigger:Trigger}[]=[];
   for(const row of rows){
-    const proofs=await triggerProofs(db,row.evidence_ids);if(!proofs.length||!proofs.some(p=>originalQuote(p.text,row.title)))continue;
+    const proofs=row.evidence_ids.flatMap(id=>byId.has(id)?[byId.get(id)!]:[]);
+    if(!proofs.length||!proofs.some(p=>originalQuote(p.text,row.title)))continue;
     const original=triggerView({...row,evidence_ids:proofs.map(p=>p.id)});
     const checked=groundedTrigger(original,proofs);if(!checked)continue;
-    out.push({...checked,id:row.id,
+    out.push({companyId:row.company_id,productId:row.product_id,trigger:{...checked,id:row.id,
       projectName:original.projectName&&proofs.some(p=>originalQuote(p.quote,original.projectName!))?original.projectName:null,
-      ownerName:original.ownerName&&proofs.some(p=>namesCompany(p.quote,[original.ownerName!]))?original.ownerName:null});
+      ownerName:original.ownerName&&proofs.some(p=>namesCompany(p.quote,[original.ownerName!]))?original.ownerName:null}});
   }
   return out;
 }

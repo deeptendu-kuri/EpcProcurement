@@ -94,9 +94,14 @@ describe("buyers from the database", () => {
       `insert into search_opportunities (run_id, lead_id, company_id, keyword, product_id, product_name, buying_reason, evidence_ids, fit_score, material_fit_kind)
        values ($1, $2, $3, 'steel pipe', 'coating-materials', 'Pipe coating materials', 'Aramco order', '{}', 97, 'explicit') returning id`,
       [run, leads[0].id, leads[0].company_id]);
-    await db.query("insert into funnel_threads (opportunity_id, company_id, product_id, reply_token, state) values ($1, $2, 'coating-materials', 'tok-doc17', 'active')",
+    const {rows:threads}=await db.query<{id:string}>("insert into funnel_threads (opportunity_id, company_id, product_id, reply_token, state) values ($1, $2, 'coating-materials', 'tok-doc17', 'active') returning id",
       [opps[0].id, leads[0].company_id]);
     clearBuyerCache();
+    const pending=await searchBuyers({run,stage:["ready","check","early"]});
+    expect(pending.rows.every(r=>r.emailSent===false&&r.emailStatus==="Introduction pending")).toBe(true);
+    await db.query("insert into funnel_messages(thread_id,direction,kind,dedup_key,subject,body,state) values($1,'out','initial','Example-pending','Example subject','Example body','queued')",[threads[0].id]);
+    expect((await searchBuyers({run,stage:["ready","check","early"]})).rows.every(r=>r.emailSent===false)).toBe(true);
+    await db.query("update funnel_messages set state='accepted' where thread_id=$1",[threads[0].id]);
 
     const scoped = await searchBuyers({ run, stage: ["ready", "check", "early"] });
     expect(scoped.rows.length).toBeGreaterThan(0);
@@ -104,6 +109,7 @@ describe("buyers from the database", () => {
       expect(row.searches?.[0]).toEqual({ runId: run, label: expect.stringMatching(/^steel pipe · /) });
       expect(row.searchedProduct).toBe("Pipe coating materials");
       expect(row.emailStatus).toBe("Intro sent");
+      expect(row.emailSent).toBe(true);
       expect(row.opportunityId).toBe(opps[0].id);
       // Rated by the search's buyer fit; the searched product is not repeated under "also can sell".
       expect(row.fitScore).toBeGreaterThanOrEqual(97);

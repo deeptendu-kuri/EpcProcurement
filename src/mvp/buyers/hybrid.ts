@@ -1,17 +1,20 @@
 /** Add verified trigger projections to the existing cross-search records; no research side effects. */
 import type {Queryable} from '@/mvp/db';
-import {strongestTrigger,triggersForCompany,triggerStageCap} from '@/mvp/sourcing/triggers';
+import {strongestTrigger,triggersForCompanies,triggerStageCap} from '@/mvp/sourcing/triggers';
+import type {Trigger} from './types';
 import type {BuyerRecord} from './view';
 import {capabilityLabel} from '@/mvp/discovery/locations';
 export async function hybridSearchRecords(records:BuyerRecord[],db:Queryable):Promise<BuyerRecord[]>{
   const uuid=(id:string)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
   const leadOf=(r:BuyerRecord)=>r.derived?.rootLeadId??r.view.leadId;
   const scopes=(await db.query<{id:string;client_product_ids:string[]}>('select id,client_product_ids from leads where id=any($1::uuid[])',[[...new Set(records.map(leadOf).filter(uuid))]])).rows;
-  const byLead=new Map<string,Awaited<ReturnType<typeof triggersForCompany>>>();
+  const scopedProducts=new Map(scopes.map(s=>[s.id,s.client_product_ids]));
+  const allTriggers=await triggersForCompanies(db,records.map(r=>r.view.companyId).filter(uuid));
+  const byLead=new Map<string,Trigger[]>();
   for(const r of records){
     if(!uuid(r.view.companyId)){byLead.set(r.view.leadId,[]);continue;}
-    const products=scopes.find(s=>s.id===leadOf(r))?.client_product_ids??[];
-    const all=products.length? (await Promise.all(products.map(p=>triggersForCompany(db,r.view.companyId,undefined,p)))).flat():await triggersForCompany(db,r.view.companyId);
+    const products=scopedProducts.get(leadOf(r))??[];
+    const all=(allTriggers.get(r.view.companyId)??[]).filter(t=>!products.length||Boolean(t.productId&&products.includes(t.productId))).map(t=>t.trigger);
     byLead.set(r.view.leadId,all);
   }
   return records.map(r=>{

@@ -36,7 +36,7 @@ export async function getBuyerView(leadId: string): Promise<BuyerView | null> {
   return getBuyerPage(leadId);
 }
 
-interface SearchLink { runId: string; label: string; product: string; productId: string; opportunityId: string; email: string | null; fit: number; fitKind: 'explicit' | 'potential'; verification: 'website' | 'listing' | 'rating' ; reason: string ; createdAt: string }
+interface SearchLink { runId: string; label: string; product: string; productId: string; opportunityId: string; email: string | null; emailSent: boolean; fit: number; fitKind: 'explicit' | 'potential'; verification: 'website' | 'listing' | 'rating' ; reason: string ; createdAt: string }
 export const EMAIL_LABELS: Record<string, string> = {
   qualifying: "Checking fit", review: "Held for review", needs_contact: "Needs a contact", active: "Intro sent",
   engaged: "Replied", awaiting_time: "Replied", awaiting_calendar: "Replied", meeting_pending: "Replied",
@@ -49,18 +49,22 @@ const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { d
  */
 async function searchLinks(): Promise<Map<string, SearchLink[]>> {
   // The fit is the higher of the saved-lead score and the search's shortlist rating of the same company.
-  const rows = (await getDb().query<{ company_id: string; opportunity_id: string; run_id: string; product_name: string; product_id: string; fit_score: number; material_fit_kind: 'explicit' | 'potential'; verification: 'website' | 'listing' | 'rating'; buying_reason: string | null; query: string | null; created_at: string; state: string | null }>(
+  const rows = (await getDb().query<{ company_id: string; opportunity_id: string; run_id: string; product_name: string; product_id: string; fit_score: number; material_fit_kind: 'explicit' | 'potential'; verification: 'website' | 'listing' | 'rating'; buying_reason: string | null; query: string | null; created_at: string; state: string | null; email_sent: boolean }>(
     `select o.company_id, o.id as opportunity_id, o.run_id, o.product_name, o.product_id,
        greatest(o.fit_score, coalesce((select max(rc.rating) from research_candidates rc join companies cc on cc.id=o.company_id
          where rc.run_id=o.run_id and rc.rating_source is not null and regexp_replace(lower(rc.company),'[^a-z0-9]','','g')=regexp_replace(lower(cc.canonical_name),'[^a-z0-9]','','g')), 0)) as fit_score,
        o.material_fit_kind, o.verification, o.buying_reason, r.adhoc_query->>'query' as query, r.created_at::text as created_at,
-       (select t.state from funnel_threads t where t.opportunity_id=o.id and t.mode<>'email_test' order by t.created_at desc limit 1) as state
-     from search_opportunities o join runs r on r.id=o.run_id where o.qualification<>'rejected' order by r.created_at desc`)).rows;
+       ft.state, coalesce(ft.email_sent,false) as email_sent
+     from search_opportunities o join runs r on r.id=o.run_id
+     left join lateral (select t.state, exists(select 1 from funnel_messages m where m.thread_id=t.id and m.direction='out' and m.state='accepted') as email_sent
+       from funnel_threads t where t.opportunity_id=o.id and t.mode<>'email_test' order by t.created_at desc limit 1) ft on true
+     where o.qualification<>'rejected' order by r.created_at desc`)).rows;
   const links = new Map<string, SearchLink[]>();
   for (const r of rows) {
     const list = links.get(r.company_id) ?? [];
     list.push({ runId: r.run_id, label: `${r.query || r.product_name} · ${shortDate(r.created_at)}`, product: r.product_name, productId: r.product_id, opportunityId: r.opportunity_id,
-      email: r.state ? EMAIL_LABELS[r.state] ?? r.state : null, fit: Number(r.fit_score) || 0, fitKind: r.material_fit_kind, verification: r.verification, reason: r.buying_reason ?? '', createdAt: r.created_at });
+      email: r.state === 'active' && !r.email_sent ? 'Introduction pending' : r.state ? EMAIL_LABELS[r.state] ?? r.state : null,
+      emailSent: r.email_sent, fit: Number(r.fit_score) || 0, fitKind: r.material_fit_kind, verification: r.verification, reason: r.buying_reason ?? '', createdAt: r.created_at });
     links.set(r.company_id, list);
   }
   return links;
@@ -118,7 +122,7 @@ export async function searchBuyers(search: BuyerSearch = {}): Promise<BuyerSearc
     const alsoSell = (record?.view.sellItems ?? []).filter((i) => i.fit === "good" && i.itemId !== current?.productId)
       .map((i) => getCatalogueItem(i.itemId)?.shortName ?? i.name).slice(0, 4);
     return { ...row, searches: list.map((l) => ({ runId: l.runId, label: l.label })), searchedProduct: current?.product ?? null,
-      emailStatus: current ? current.email ?? "Not started" : null, opportunityId: current?.opportunityId ?? null,
+      emailStatus: current ? current.email ?? "Not started" : null, emailSent: current?.emailSent ?? false, opportunityId: current?.opportunityId ?? null,
       alsoSell, searchFit: current?.fitKind ?? null, verification: current?.verification ?? null, need: needOf(current?.reason),
       // When a search first found the company (Leads marks the ones found this week: new work since the last check).
       firstFoundAt: list.length ? list.map((l) => l.createdAt).sort()[0] : null };

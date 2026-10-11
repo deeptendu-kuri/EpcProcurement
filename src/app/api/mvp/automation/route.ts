@@ -5,8 +5,12 @@ import { listFunnelThreads,controlThread,startEmailTest,sendSellerTestIntroducti
 import { rejectCrossOrigin } from "../outreach/_origin";
 import { NO_STORE,readJson,jsonError,serverError } from "../_shared/http";
 export const runtime="nodejs";
+async function statusData() {
+  const [settings,threads]=await Promise.all([funnelStatus(),listFunnelThreads()]);
+  return {settings,threads};
+}
 export async function GET() {
-  try{return NextResponse.json({settings:await funnelStatus(),threads:await listFunnelThreads()},{headers:NO_STORE});}
+  try{return NextResponse.json(await statusData(),{headers:NO_STORE});}
   catch(e){return serverError("read sales funnel",e);}
 }
 const schema=z.discriminatedUnion("action",[
@@ -27,6 +31,6 @@ export async function POST(request:Request) {
     else if(d.action==="send_seller_test_intro")await sendSellerTestIntroduction(d.threadId);
     else if(d.action==="recover_meeting_selection")await recoverMeetingSelection(d.threadId,d.messageId);
     else await controlThread(d.threadId,d.action);
-    return NextResponse.json({settings:await funnelStatus(),threads:await listFunnelThreads()},{headers:NO_STORE});
+    return NextResponse.json(await statusData(),{headers:NO_STORE});
   } catch(e){return jsonError(409,e instanceof Error?e.message:"Automation configuration/action failed.");}
 }

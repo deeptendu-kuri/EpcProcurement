@@ -54,7 +54,7 @@ export function FoundCompanies({runId}:{runId:string}){
     catch(e){setNote(e instanceof Error?e.message:'Could not start the check.');}
     finally{setBusy(null);}
   };
-  if(!data&&!error)return null;
+  if(!data&&!error)return <p role="status" className="card p-5 text-sm text-[var(--muted)]">Loading companies found by this search…</p>;
   const all=data?.companies??[];
   // The server orders saved buyers first, then by rating; unrated companies keep the status order.
   const rows=all.filter(c=>c.relevant).sort((a,b)=>Number(Boolean(b.opportunityId))-Number(Boolean(a.opportunityId))||(b.rating??-1)-(a.rating??-1)||order[a.status]-order[b.status]);

@@ -1,5 +1,5 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BuyerRow } from "@/mvp/buyers/types";
 import { ResultsTable, ratingWord } from "./results-table";
 
@@ -16,6 +16,19 @@ const row: BuyerRow = {
 const show = (rows: BuyerRow[]) => render(<ResultsTable rows={rows} selected={new Set()} openId="" onToggle={() => {}} onOpen={() => {}} />);
 
 describe("Leads table columns (docs/mvp/18 §2)", () => {
+  it("shows Email sent only from an accepted-message fact and opens that lead’s conversation without sending",()=>{
+    const open=vi.fn(),opportunityId="22222222-2222-4222-8222-222222222222";
+    render(<ResultsTable rows={[{...row,opportunityId,emailSent:true,emailStatus:"Intro sent"}]} selected={new Set()} openId="" onToggle={()=>{}} onOpen={open} returnTo="/crm?run=all"/>);
+    expect(screen.getByText("Email sent").title).toContain("not confirmation of inbox delivery");
+    const link=screen.getByRole("link",{name:"View conversation for Kalpataru Projects"});
+    expect(link.getAttribute("href")).toBe(`/opportunities/${opportunityId}?tab=conversation&returnTo=%2Fcrm%3Frun%3Dall`);
+    fireEvent.click(link);expect(open).not.toHaveBeenCalled();
+  });
+  it("does not label queued or held email as sent",()=>{
+    show([{...row,emailSent:false,emailStatus:"Held for review",opportunityId:"22222222-2222-4222-8222-222222222222"}]);
+    expect(screen.queryByText("Email sent")).toBeNull();expect(screen.getByText("Held for review")).toBeTruthy();
+    expect(screen.getByRole("link",{name:/View conversation for/})).toBeTruthy();
+  });
   it("shows the search second, what they will buy, the rating, the email status and an Open details button last", () => {
     show([row]);
     const table = screen.getByRole("table");

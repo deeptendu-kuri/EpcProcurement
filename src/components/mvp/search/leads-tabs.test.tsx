@@ -21,9 +21,18 @@ describe("Leads tabs (docs/mvp/18 §9)", () => {
     expect(tabs.getByRole("tab", { name: /Verified\s*1/ })).toBeTruthy();
     expect(tabs.getByRole("tab", { name: /Likely · not verified\s*2/ })).toBeTruthy();
     fireEvent.click(tabs.getByRole("tab", { name: "Companies found" }));
+    expect(tabs.getByRole("tab",{name:"Companies found"}).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("found list")).toBeTruthy(); // no server response needed to switch tabs
     expect(replace).toHaveBeenCalledWith(`/crm?run=${RUN}&proof=found`, { scroll: false });
     expect(screen.getByText("Paused")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+  it("selects Verified immediately even when the server navigation and API take time",async()=>{
+    const fetch=vi.fn(async()=>new Response(JSON.stringify(empty),{status:200}));vi.stubGlobal("fetch",fetch);
+    render(<SearchWorkspace tab="search" basePath="/crm" state={{...DEFAULT_SEARCH,run:RUN}} catalogue={[]} markets={[]}/>);
+    const verified=screen.getByRole("tab",{name:/Verified/});fireEvent.click(verified);
+    expect(verified.getAttribute("aria-selected")).toBe("true");
+    expect(replace).toHaveBeenCalledWith(`/crm?run=${RUN}&proof=verified`,{scroll:false});
   });
   it("shows the companies found in their own tab", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(empty), { status: 200, headers: { "content-type": "application/json" } })));

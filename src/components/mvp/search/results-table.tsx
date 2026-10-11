@@ -240,8 +240,11 @@ export function ResultsTable({ rows, selected, openId, onToggle, onOpen, selecta
                   <RatingBadge score={row.fitScore} />
                   <div className={`mt-1 text-[12px] ${HOW_SURE_STYLES[row.howSure]}`} title="How sure we are">{HOW_SURE_LABELS[row.howSure]}</div>
                 </td>
-                <td className={TD}>
-                  {row.emailStatus ? <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-semibold ${EMAIL_TONE(row.emailStatus)}`}>{row.emailStatus}</span> : <span className="text-[var(--muted)]">—</span>}
+                <td className={TD} onClick={(event) => event.stopPropagation()}>
+                  {row.emailSent ? <span className="inline-block whitespace-nowrap rounded-full bg-blue-50 px-2.5 py-1 text-[12px] font-semibold text-blue-800" title="Accepted by the email provider. This is not confirmation of inbox delivery.">Email sent</span> : null}
+                  {row.emailStatus && (!row.emailSent || row.emailStatus !== "Intro sent") ? <span className={`block w-fit whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-semibold ${EMAIL_TONE(row.emailStatus)}`}>{row.emailStatus}</span> : !row.emailSent ? <span className="text-[var(--muted)]">—</span> : null}
+                  {row.opportunityId && !derived && row.emailStatus && row.emailStatus !== "Not started" ? <Link className="mt-2 block text-[12px] font-semibold text-[var(--accent)] hover:underline"
+                    aria-label={`View conversation for ${row.name}`} href={`/opportunities/${encodeURIComponent(row.opportunityId)}?tab=conversation&returnTo=${encodeURIComponent(returnTo)}`}>View conversation →</Link> : null}
                 </td>
                 <td className={`${TD} whitespace-nowrap text-[13px] text-[var(--text-2)]`}>
                   <b className="font-semibold text-[var(--text)]">{row.found}</b> of {row.total} found
