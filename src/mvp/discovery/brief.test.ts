@@ -76,7 +76,7 @@ describe("getSearchBrief", () => {
     const ground = async (query: string) => { grounded.push(query); return [{ title: "ADNOC awards gas plant EPC", snippet: "Example snippet", date: "2026-08-17" }]; };
     const first = await getSearchBrief(db, { material: "Stud bolts and spiral wound gaskets", markets: ["AE", "SA"], productId: "stud-bolts" }, provider, ground);
     expect(first.source).toBe("ai");
-    expect(grounded).toEqual(["Stud bolts and spiral wound gaskets project United Arab Emirates", "Stud bolts and spiral wound gaskets project Saudi Arabia"]);
+    expect(grounded).toEqual(["piping fabrication EPC construction ongoing projects United Arab Emirates", "piping fabrication EPC construction ongoing projects Saudi Arabia"]);
     expect(asked[0]).toContain("ADNOC awards gas plant EPC");
     const again = await getSearchBrief(db, { material: "stud bolts and spiral wound gaskets", markets: ["SA", "AE"], productId: "stud-bolts" }, provider, ground);
     expect(again).toEqual(first);

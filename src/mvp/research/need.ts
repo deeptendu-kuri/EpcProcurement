@@ -2,7 +2,7 @@
  * The need check (docs/mvp/20 stage 5–7): for one award article or company page in a work-search run, would the
  * work buy the searched item, and what is each named company's role in it, with the exact sentence. Only a
  * company that does the work (EPC, construction partner, subcontractor, maintenance contractor) on work that
- * needs the item, in his countries, within 18 months, with a verified sentence, becomes a lead.
+ * needs the item, in his countries, within the current-work window (or supported ongoing work), becomes a lead.
  *
  * The rules come from 13 prototype runs on 10 Oct (cryogenic valves, HDPE pipe, stud bolts; UAE, Saudi Arabia,
  * India, Norway); their numbers below refer to docs/mvp/20 §7b.
@@ -14,26 +14,34 @@ import { originalQuote } from '@/mvp/discovery/evidence';
 import { detectCountry, detectMarkets } from '@/mvp/pipeline/filter';
 import { matchUse, type SearchBrief } from '@/mvp/discovery/brief';
 import { companyKey, initialsOf, sameCompanyName } from './company-names';
-import { articleAnalysisText } from './relevance';
+import { articleAnalysisText,workAnalysisParagraphs } from './relevance';
+import { junkCompanyReason } from '@/mvp/sourcing/entities';
+import { materialOutputOnly } from '@/mvp/discovery/plan';
+import {currentWorkProof,namesProject,type CurrentWorkDocument,type CurrentWorkProof} from './current-work';
+import {ownDocumentIdentity} from './attribution';
+import {pagePublishedAt} from './page-date';
 
 export type NeedRole = 'owner' | 'developer' | 'epc' | 'jv_partner' | 'subcontractor' | 'maintenance_contractor' | 'seller_of_item' | 'other_supplier' | 'consultant' | 'investor' | 'other';
 export type Verdict = 'lead' | 'owner' | 'rejected';
-export interface NeedCompany { name: string; role: NeedRole; package: string; quote: string; quoteVerified: boolean; since: string | null; verdict: Verdict; reason: string }
+export interface NeedCompany { name: string; role: NeedRole; package: string; quote: string; quoteVerified: boolean; since: string | null; verdict: Verdict; reason: string; identityQuote?:string }
 export interface NeedResult {
   project: string | null; country: string | null; market: string | null; date: string | null; use: string | null;
   needsItem: 'yes' | 'no' | 'unclear'; needWhy: string; companies: NeedCompany[];
+  /** Supplementary progress evidence, separate from the original role/award. */
+  currentWork?:CurrentWorkProof|null;
 }
 
 const ROLES = new Set<NeedRole>(['owner', 'developer', 'epc', 'jv_partner', 'subcontractor', 'maintenance_contractor', 'seller_of_item', 'other_supplier', 'consultant', 'investor', 'other']);
 /** Roles that buy the material for the work. */
 const DOES_WORK = new Set<NeedRole>(['epc', 'jv_partner', 'subcontractor', 'maintenance_contractor']);
 /** Makers and traders are recognised by trade words, never by the item's own words (§4 check 3). */
-const SELLER = /\b(?:manufactur\w*|mills?|trading|traders?|stockists?|distribut\w*|dealers?|makers?)\b/i;
+const SELLER = /\b(?:mills?|trading|traders?|stockists?|distribut\w*|dealers?)\b/i;
 const STAKE = /\b(?:stake|shareholding|equity|acquir\w*|acquisition|invest(?:s|ed|ment|or)?)\b/i;
 const WORK = /\b(?:EPC\w*|contract\w*|construct\w*|build\w*|install\w*|fabricat\w*|engineering|maintenance|services)\b/i;
 // Rule 14: an engineering-only package (detailed engineering, FEED, design) buys no material.
 const ENGINEERING_ONLY = /\b(?:detailed|front[- ]end|basic|FEED|pre-?FEED|design|consultancy|engineering services|engineering contract|engineering role)\b/i;
 const BUYS_MATERIAL = /\b(?:EPC\w*|procurement|construct\w*|install\w*|fabricat\w*|build\w*|supply|maintenance)\b/i;
+const CIVIL_ONLY = /^(?:(?:marine|heavy|general)\s+)?(?:civil|roads?|bridges?|dredging|jetty|jetties|electrical(?: only)?)\b/i;
 /**
  * Work older than this has mostly been bought for. Big plants buy valves, pipe and fittings for 2-2.5 years after
  * the award (smoke test, 10 Oct: the Ruwais LNG EPC, awarded early 2025 and built until 2028, was dropped at 18).
@@ -56,7 +64,8 @@ export function needPrompt(doc: { text: string; url: string; title: string | nul
 Item sold: ${brief.item}${brief.mustHave.length ? ` (must-have: ${brief.mustHave.join(', ')})` : ''}. Not buyers: ${brief.notBuyers.join('; ') || 'none listed'}.
 Page (${doc.publishedAt?.slice(0, 10) ?? 'undated'}) ${doc.url}
 Title: ${doc.title ?? ''}
-Text: ${articleAnalysisText(doc.text).replace(/\s+/g, ' ').trim().slice(0, 4500)}
+Source paragraphs (original text; choose the paragraph index, do not stitch headings or rewrite punctuation):
+${workAnalysisParagraphs(doc.text,brief).map((p,n)=>`[${n}] ${p}`).join('\n')}
 Return {"project": project name or null, "country": country where the work is done or null, "date": "YYYY-MM" of the announcement or award if the text gives it, else null,
 "use": the matching use name from the list, or null if the work is none of them,
 "needsItem": judge as a procurement engineer from what the work IS; news never lists valves, pipes or gaskets, so do not require the text to name the item.
@@ -64,8 +73,10 @@ Return {"project": project name or null, "country": country where the work is do
   "no" if the work is none of the uses, or the text shows a different material doing that job (e.g. GRE or steel pipe instead of the item);
   "unclear" only if what the work is cannot be told from the text,
 "needWhy": one line explaining that verdict,
-"companies": [{"name": company, "role": one of owner|developer|epc|jv_partner|subcontractor|maintenance_contractor|seller_of_item|other_supplier|consultant|investor|other, "package": what it does in this work, "quote": one sentence copied character for character from the text (no rewording, no shortening) that names the company and its work, "since": "YYYY" or "YYYY-MM" when the text says when it got this work, else null,
+  Treat this as a POTENTIAL engineering application, never a confirmed RFQ, exact grade, quantity or purchasing status unless a literal source quote explicitly establishes it. A plant using pipes does not establish ASTM A312 TP316L demand.
+"companies": [{"name": company, "role": one of owner|developer|epc|jv_partner|subcontractor|maintenance_contractor|seller_of_item|other_supplier|consultant|investor|other, "package": what it does in this work, "quoteIndex": the integer index of the ONE paragraph proving this company's own work, "quote": optional exact sentence from that paragraph (no rewording, shortening or joining other headings), "since": "YYYY" or "YYYY-MM" when the text says when it got this work, else null,
   "buysItem": "yes" if this company's OWN package would buy the item sold (an EPC, process or piping, mechanical, tank or plant contractor usually does), "no" if its package would not (e.g. dredging, jetty or marine civil works, roads, buildings only, electrical only, drilling, engineering or design only)}]}
+If an own-company report lists its work in bullets without repeating its name, also return "identityQuote": its literal company-name header. Keep the work quote and header separate; do not stitch them into an invented sentence.
 Roles: epc = won the engineering, procurement and construction contract; jv_partner = partner in a CONSTRUCTION joint venture that won such a contract; developer = developer, sponsor or shareholder of a concession (IWP, IPP, IWTP), not the builder; owner = owns or operates the plant or field, including equity partners that co-own or co-develop a field or plant with the operator (e.g. oil majors partnering in a field) — they are never jv_partner.
 If the page is a company's own page describing its regular work, list that company with role subcontractor or maintenance_contractor and project null.`,
   };
@@ -93,26 +104,35 @@ export function workDate(quote: string, since: string | null, articleDate: strin
 const monthsAgo = (date: string | null, now: Date) => (date ? (now.getTime() - Date.parse(date.length === 7 ? `${date}-15` : date)) / 2.63e9 : null);
 
 /** Parse and judge the AI's answer for one page. */
-export function judgeNeed(text: string, doc: { text: string; publishedAt: string | null }, brief: SearchBrief, markets: string[], now = new Date()): NeedResult | null {
+export function judgeNeed(text: string, doc: { text: string; publishedAt: string | null; url?:string; related?:CurrentWorkDocument[] }, brief: SearchBrief, markets: string[], now = new Date()): NeedResult | null {
   let raw: Record<string, unknown>;
   try { raw = JSON.parse(firstJsonObject(text) ?? 'null') as Record<string, unknown>; } catch { return null; }
   if (!raw || typeof raw !== 'object') return null;
   const use = matchUse(brief, clip(raw.use, 120))?.name ?? null;
   const needsItem = raw.needsItem === 'yes' || raw.needsItem === 'no' ? raw.needsItem : 'unclear';
   const project = clip(raw.project, 160) || null, country = clip(raw.country, 80) || null;
-  const market = workMarket(country, brief, markets) ?? (project ? null : workMarket(doc.text.slice(0, 4000), brief, markets));
+  const claimedMarket = workMarket(country, brief, markets);
+  // An AI country is a claim, not evidence. Require the original to locate the
+  // work there (including documented local place names), not just a search filter.
+  const sourceMarket = workMarket(articleAnalysisText(doc.text),brief,markets);
+  const market = claimedMarket ? (claimedMarket===sourceMarket?claimedMarket:null) : (project ? null : sourceMarket);
   const needWhy = clip(raw.needWhy, 300);
+  const progress=project&&namesProject(doc.text,project)?currentWorkProof(project,doc.related??[],now):null;
+  const currentWork=progress&&workMarket(progress.quote,brief,markets)===market?progress:null;
   const companies: NeedCompany[] = (Array.isArray(raw.companies) ? raw.companies : []).slice(0, 25).flatMap((c: Record<string, unknown>) => {
     const name = clip(c?.name, 120);
-    if (!name) return [];
+    if (!name||junkCompanyReason(name)) return [];
     const role: NeedRole = ROLES.has(c?.role as NeedRole) ? (c.role as NeedRole) : 'other';
-    const pkg = clip(c?.package, 200), quote = clip(c?.quote, 600), since = clip(c?.since, 10) || null;
+    const indexed=Number.isInteger(c?.quoteIndex)&&Number(c.quoteIndex)>=0?workAnalysisParagraphs(doc.text,brief)[Number(c.quoteIndex)]:null;
+    const pkg = clip(c?.package, 200), quote = indexed&&indexed.length<=1600?indexed:clip(c?.quote, 600), since = clip(c?.since, 10) || null;
     // Literal source spans, tolerating typography/whitespace only. The sentence
     // must name the company; a fuzzy paraphrase is never verified evidence.
     const literal=originalQuote(doc.text,quote);
-    const quoteVerified = Boolean(literal&&namesCompany(literal,name));
+    const identityQuote=clip(c?.identityQuote,300)||undefined;
+    const quoteVerified = Boolean(literal&&(namesCompany(literal,name)||ownDocumentIdentity(doc.text,name,doc.url,identityQuote)));
     const date = workDate(quote, since, doc.publishedAt), age = monthsAgo(date, now);
-    const sells = role === 'seller_of_item' || SELLER.test(`${name} ${pkg}`);
+    const sells = role === 'seller_of_item' || SELLER.test(`${name} ${pkg}`) || Boolean(brief.productId&&materialOutputOnly(literal??quote,brief.productId));
+    const completed = /\b(?:completed|delivered|commissioned|handed over)\b/i.test(quote)&&! /\b(?:ongoing|under construction|currently|maintenance|revamp|expansion)\b/i.test(quote);
     const owns = role === 'owner' || role === 'developer';
     const why = [
       sells && 'sells the item (a competitor)',
@@ -120,18 +140,20 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
       !use && 'the work is not one of the uses',
       use && needsItem !== 'yes' && `need ${needsItem}${needWhy ? `: ${needWhy}` : ''}`,
       !market && `outside the chosen countries (${country ?? 'unknown'})`,
-      age !== null && age > NEED_WINDOW_MONTHS && `older than ${NEED_WINDOW_MONTHS} months (${date})`,
+      age !== null && age > NEED_WINDOW_MONTHS && !currentWork && `older than ${NEED_WINDOW_MONTHS} months (${date})`,
+      completed && 'completed work; no current buying window established',
       STAKE.test(quote) && !WORK.test(quote) && 'an investment, not work',
       ENGINEERING_ONLY.test(pkg) && !BUYS_MATERIAL.test(pkg) && 'engineering only, buys no material',
       // Smoke test, 10 Oct: the work needed the item, but a jetty contractor's own package does not buy it.
       DOES_WORK.has(role) && c?.buysItem === 'no' && 'its own package does not buy the item',
+      DOES_WORK.has(role) && c?.buysItem!=='no' && CIVIL_ONLY.test(pkg) && !/\b(?:process|piping|mechanical|EPC|procurement)\b/i.test(pkg) && 'civil or electrical-only package, not material-consuming work',
       !quoteVerified && 'sentence not found in the source',
     ].filter((x): x is string => Boolean(x));
     // Owners and developers (rule 4) on qualifying work are kept as owners: they buy through their contractors.
     const verdict: Verdict = why.length ? 'rejected' : owns ? 'owner' : 'lead';
-    return [{ name, role, package: pkg, quote:literal??quote, quoteVerified, since: date, verdict, reason: why.join('; ') || (owns ? 'owner of work that needs the item' : 'does work that needs the item') }];
+    return [{ name, role, package: pkg, quote:literal??quote, quoteVerified, since: date, verdict, identityQuote, reason: why.join('; ') || (owns ? 'owner of work that needs the item' : 'does work that needs the item') }];
   });
-  return { project, country, market, date: workDate('', null, clip(raw.date, 10) || doc.publishedAt), use, needsItem, needWhy, companies };
+  return { project, country, market, date: workDate('', null, clip(raw.date, 10) || doc.publishedAt), use, needsItem, needWhy, companies, currentWork };
 }
 
 /**
@@ -145,13 +167,37 @@ export async function checkNeed(db: Queryable, runId: string, documentId: string
     const res = await provider.complete({ ...needPrompt(doc, brief), json: true, maxTokens: 1500, temperature: 0, purpose: 'need_check', runId, singleAttempt: true });
     answer = res.text;
   }
-  const result = judgeNeed(answer, doc, brief, markets);
+  // Bounded by the run's already-read pages; never query the internet or another
+  // run to assert current work. Progress and contractor identity keep their own
+  // source documents and exact quotes.
+  const related=(await db.query<{id:string;url:string;text:string;published_at:string|null}>(
+    `select d.id,d.url,d.text,d.published_at from run_documents r join source_documents d on d.id=r.document_id
+     where r.run_id=$1 and d.published_at is not null order by d.published_at desc limit 30`,[runId])).rows
+      .map(d=>({...d,publishedAt:d.published_at}));
+  const result = judgeNeed(answer, {...doc,publishedAt:pagePublishedAt(doc.text,doc.publishedAt),related}, brief, markets);
   await db.query('delete from need_checks where run_id=$1 and document_id=$2', [runId, documentId]);
   for (const c of result?.companies ?? [])
     await db.query(`insert into need_checks(run_id,document_id,company_name,role,package,quote,quote_verified,work_date,project,project_country,market,use_name,needs_item,need_why,verdict,reason)
       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
       [runId, documentId, c.name, c.role, c.package, c.quote, c.quoteVerified, c.since, result!.project, result!.country, result!.market, result!.use, result!.needsItem, result!.needWhy, c.verdict, c.reason]);
   return { result, answer };
+}
+
+/** Arrival order must not decide whether an older, still-active contract is
+ * lost. Rejudge previously stored answers when a new same-project progress page
+ * arrives. This uses at most ten cached answers, zero new model calls. */
+export async function recheckRelatedNeeds(db:Queryable,runId:string,currentText:string,brief:SearchBrief,markets:string[],provider:LLMProvider):Promise<{documentId:string;result:NeedResult|null}[]>{
+  const rows=(await db.query<{id:string;text:string;url:string;title:string|null;published_at:string|null;project:string;answer:string}>(
+    `select distinct d.id,d.text,d.url,d.title,d.published_at,n.project,j.result->>'needAnswer' as answer
+     from need_checks n join source_documents d on d.id=n.document_id join research_jobs j on j.run_id=n.run_id and j.payload->>'documentId'=n.document_id::text
+     where n.run_id=$1 and n.verdict='rejected' and n.reason like '%older than%' and n.quote_verified=true and n.project is not null and j.result->>'needAnswer' is not null limit 10`,[runId])).rows;
+  const results=[];
+  for(const r of rows){
+    if(!namesProject(currentText,r.project))continue;
+    const need=await checkNeed(db,runId,r.id,{text:r.text,url:r.url,title:r.title,publishedAt:r.published_at},brief,markets,provider,r.answer);
+    results.push({documentId:r.id,result:need.result});
+  }
+  return results;
 }
 
 /** Follow-ups per project (docs/mvp/20 stage 6, rule 5): at most this many projects per country per search. */

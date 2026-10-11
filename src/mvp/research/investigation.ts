@@ -159,13 +159,16 @@ export async function extendInvestigation(db:Db,runId:string,c:ResearchCandidate
     let slots=Math.max(0,3-jobs.length-(raw.research?.candidateId?0:1));
     for(const link of companyPageLinks(links,domain)){
       if(!slots||link.url===raw.url)continue;
+      // Work-based sourcing proves buyers first. Generic contact/about pages
+      // cannot monopolise the first analysis budget; manual checks retain them.
+      if(input.brief&&!manual&&/\b(?:contact|about)\b/i.test(link.text+' '+new URL(link.url).pathname))continue;
       const next:RawDoc={...raw,url:link.url,title:null,text:null,research:{lane:'investigation',candidateId:c.id}};
-      if(await queueRead(tx,runId,next,budget,manual?2500:1200))slots--;
+      if(await queueRead(tx,runId,next,budget,manual?2500:input.brief?600:1200))slots--;
     }
     // A rated likely buyer is judged before more lists are read (see verifyPriority).
     const rated=(await tx.query<{rating:number|null;type:string|null}>('select rating,rating_buyer_type as type from research_candidates where id=$1',[c.id])).rows[0];
     if(buyerPageCandidate(text,input.productId!)||prior.some(p=>buyerPageCandidate(p.text,input.productId!)))
-      await addJob(tx,runId,'analyse',`bundle:${c.id}`,{candidateId:c.id},manual?2500:rated?.rating==null?1200:verifyPriority(rated.rating,rated.type));
+      await addJob(tx,runId,'analyse',`bundle:${c.id}`,{candidateId:c.id},manual?2500:input.brief?550:rated?.rating==null?1200:verifyPriority(rated.rating,rated.type));
   });
   return true;
 }

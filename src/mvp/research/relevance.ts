@@ -19,6 +19,35 @@ export function articleAnalysisText(text:string):string {
   return text.slice(0,6500);
 }
 
+/** Focus a work check on literal business paragraphs, including their immediate
+ * source context. Full-page mode preserves useful identities/contacts, but its
+ * navigation can otherwise consume the entire model excerpt. No summaries or
+ * search snippets are introduced; quotes still validate against the full saved
+ * original. Prefer actual contract/installation scope to industry navigation. */
+export function workAnalysisText(text:string,brief:SearchBrief,limit=4500):string {
+  const paragraphs=text.split(/\n+/);
+  const score=(p:string)=>/\b(?:awarded|won|wins|secured|signed|received.{0,25}contract)\b/i.test(p)?30:
+    /\b(?:EPC|procurement|fabrication|installation|maintenance contract)\b/i.test(p)?20:
+    /\b(?:construct\w*|install\w*|fabricat\w*|maintain\w*|brewery|fermentation)\b/i.test(p)?10:0;
+  const ranked=paragraphs.map((p,n)=>({n,score:score(p)})).filter(({n,score})=>score&&paragraphs[n].length>=40&&
+    namesWork(paragraphs.slice(Math.max(0,n-1),n+2).join('\n'),brief)).sort((a,b)=>b.score-a.score||a.n-b.n);
+  if(!ranked.length)return articleAnalysisText(text).slice(0,limit);
+  const selected=new Set<number>(),spans:string[]=[text.slice(0,200)];
+  let used=spans[0].length;
+  for(const {n} of ranked)for(const index of [n,n-1,n+1]){
+    if(index<0||index>=paragraphs.length||selected.has(index))continue;
+    const p=paragraphs[index];
+    if(p.length<10||used+p.length+1>limit)continue;
+    selected.add(index);spans.push(p);used+=p.length+1;
+  }
+  return spans.join('\n');
+}
+/** Paragraph references let a provider select literal source text rather than
+ * regenerate it. The returned paragraph is still verified against storage. */
+export function workAnalysisParagraphs(text:string,brief:SearchBrief):string[]{
+  return workAnalysisText(text,brief).split(/\n+/).filter(p=>p.trim().length>=10);
+}
+
 /** Cheap article triage BEFORE any P1/P2/need-check calls. Stored originals are
  * retained, but article navigation/snippets and industry keywords aren't proof. */
 export function articleResearchReason(doc:{text:string;title?:string|null;publishedAt?:string|null},

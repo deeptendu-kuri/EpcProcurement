@@ -15,8 +15,9 @@ import { COUNTRIES } from '@/mvp/config/countries';
 import { countryLanguage } from '@/mvp/config/country-meta';
 import { MATERIAL_ACTIVITIES } from '@/mvp/discovery/material';
 import { whoBuys } from '@/mvp/discovery/material-catalogue';
+import { parseMaterialSpec, specUses } from '@/mvp/discovery/spec';
 
-export const BRIEF_VERSION = 1;
+export const BRIEF_VERSION = 2;
 /** A brief is reused for this long; work in a market changes slowly, but not never. */
 export const BRIEF_TTL_DAYS = 30;
 
@@ -52,14 +53,20 @@ export interface SearchBrief {
 
 const nameOf = (code: string) => COUNTRIES.find((c) => c.code === code)?.name ?? code;
 const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+// A syntactically valid JSON answer can still contain serialized fragments as
+// string values. Never send those fragments to a paid search provider.
+const atom = (v: unknown, len: number) => {
+  const s = clip(v, len);
+  return /[{}\[\]"\\]|^(?:places|owners|countries|uses|localWords|:)$/i.test(s) ? '' : s;
+};
 const strings = (v: unknown, max: number, len = 60): string[] =>
-  Array.isArray(v) ? [...new Set(v.map((x) => clip(x, len)).filter(Boolean))].slice(0, max) : [];
+  Array.isArray(v) ? [...new Set(v.map((x) => atom(x, len)).filter(Boolean))].slice(0, max) : [];
 const SIZE = /\b\d+(?:[./-]\d+)?\s?(?:"|inch(?:es)?|in\b|mm\b|nb\b|dn\b|nps\b)|\b(?:dn|nps)\s?\d+|\bsch(?:edule)?\s?\d+/i;
 const GENERIC_WORK_WORDS=new Set(['plant','plants','gas','oil','water','process','project','projects','contract','contracts','construction','network','pipeline','facility','industrial','engineering','energy','maintenance']);
 /** Cached briefs sometimes contain only "plant". Use the actual work phrase in
  * searches rather than spending requests on a generic industrial keyword. */
 export function workQueryWords(use:BriefUse):string[] {
-  const specific=use.newsWords.filter(w=>!GENERIC_WORK_WORDS.has(w.toLowerCase()));
+  const specific=use.newsWords.filter(w=>!GENERIC_WORK_WORDS.has(w.toLowerCase())&&atom(w,80));
   return specific.length?specific:[use.name];
 }
 
@@ -78,6 +85,18 @@ export function seedFacts(productId: string | null): string[] {
   const roles = getNeedsMap().rules.flatMap((rule) => rule.groups.flatMap((group) =>
     group.items.filter((item) => item.id === productId).map((item) => `${rule.label}: ${item.why ?? ''}`.trim())));
   return [...new Set([...activities, ...roles])].slice(0, 10);
+}
+
+/** Procurement applications, not company seeds or confirmed requirements. The
+ * stainless catalogue previously knew only the word 'piping', so a malformed or
+ * narrow brief could lose entire consuming industries. Keep these in its plan. */
+function consumingUses(productId:string|null):BriefUse[] {
+  if(productId!=='ss-duplex-pipe')return [];
+  return [
+    {name:'oil & gas processing plant',newsWords:['gas processing','LNG','NGL'],why:'Potential corrosion-resistant process piping; exact grade and purchase requirement must be checked.'},
+    {name:'chemical process plant',newsWords:['chemical plant','petrochemical','process piping'],why:'Potential process-piping application; exact specification is not established by the project type.'},
+    {name:'food and pharmaceutical process plant',newsWords:['brewery','fermentation','pharmaceutical'],why:'Potential hygienic process piping; the required grade and finish remain unconfirmed.'},
+  ].map(u=>({...u,countries:[],localWords:{}}));
 }
 
 export function briefPrompt(material: string, markets: string[], ground: string[], seed: string[]): { system: string; user: string } {
@@ -106,7 +125,7 @@ export function parseBrief(text: string, material: string, markets: string[], pr
   if (!raw || typeof raw !== 'object') return null;
   const own = itemWords(material, clip(raw.item, 80));
   const uses: BriefUse[] = (Array.isArray(raw.uses) ? raw.uses : []).slice(0, 6).flatMap((u: Record<string, unknown>) => {
-    const name = clip(u?.name, 80);
+    const name = atom(u?.name, 80);
     // Rule 6: a use's headline words are the work, never the item's own words.
     const newsWords = strings(u?.newsWords, 4, 40).filter((w) => !isItemWord(w, own));
     if (!name || !newsWords.length) return [];
@@ -118,10 +137,10 @@ export function parseBrief(text: string, material: string, markets: string[], pr
   const buying = raw.buying === 'project' || raw.buying === 'steady' ? raw.buying : 'both';
   const placesRaw = (raw.places && typeof raw.places === 'object' ? raw.places : {}) as Record<string, unknown>;
   return {
-    version: BRIEF_VERSION, item: clip(raw.item, 80) || material, source: 'ai', productId,
+    version: BRIEF_VERSION, item: atom(raw.item, 80) || material, source: 'ai', productId,
     // Check 4: conditions only, never sizes.
     mustHave: strings(raw.mustHave, 6, 80).filter((m) => !SIZE.test(m)),
-    buying, uses,
+    buying, uses: [...consumingUses(productId).filter(u=>!uses.some(v=>v.name.toLowerCase()===u.name.toLowerCase())),...uses].slice(0,9),
     buyerRoles: strings(raw.buyerRoles, 6, 80), notBuyers: strings(raw.notBuyers, 8, 100), owners: strings(raw.owners, 6, 80),
     places: Object.fromEntries(markets.map((m) => [m, strings(placesRaw[m], 11, 40)])),
   };
@@ -130,12 +149,21 @@ export function parseBrief(text: string, material: string, markets: string[], pr
 /** Today's knowledge as a brief: the catalogue item's activities and buyers (used when the AI is unavailable). */
 export function catalogueBrief(material: string, markets: string[], productId: string | null): SearchBrief {
   const item = productId ? getCatalogueItem(productId) : undefined;
-  const activities = productId ? [...(MATERIAL_ACTIVITIES[productId] ?? [])] : [];
+  const activities = productId ? [...(MATERIAL_ACTIVITIES[productId] ?? []), ...specUses(productId,parseMaterialSpec(material))] : [];
   const own = itemWords(material, item?.shortName ?? '');
-  const uses = activities.slice(0, 4).map((a) => ({ name: a, newsWords: a.split(/\s+/).filter((w) => w.length >= 3 && !isItemWord(w, own)).slice(0, 3),
+  const uses = activities.map((a) => ({ name: a, newsWords: a.split(/\s+/).filter((w) => w.length >= 3 && !isItemWord(w, own)).slice(0, 3),
     why: `${a} uses ${item?.shortName ?? material}.`, countries: [], localWords: {} })).filter((u) => u.newsWords.length);
-  return { version: BRIEF_VERSION, item: item?.shortName ?? material, mustHave: [], buying: 'both', uses, buyerRoles: productId ? whoBuys(productId) : [],
+  return { version: BRIEF_VERSION, item: item?.shortName ?? material, mustHave: [], buying: 'both', uses:[...consumingUses(productId),...uses], buyerRoles: productId ? whoBuys(productId) : [],
     notBuyers: [], owners: [], places: Object.fromEntries(markets.map((m) => [m, []])), source: 'catalogue', productId };
+}
+
+/** Search the consuming work, not an ASTM catalogue. This is planning knowledge,
+ * never a list of seeded companies or evidence of any specific purchase. */
+export function groundingQuery(material: string, productId: string | null, market: string): string {
+  const spec = productId ? specUses(productId, parseMaterialSpec(material)) : [];
+  const activities = productId ? MATERIAL_ACTIVITIES[productId] ?? [] : [];
+  const work = spec[0] ?? activities[0] ?? material;
+  return `${work} EPC construction ongoing projects ${nameOf(market)}`;
 }
 
 /** Same wording and countries → same brief ("Cryogenic  Valves" = "cryogenic valves"; country order ignored). */
@@ -162,7 +190,7 @@ export async function getSearchBrief(db: Queryable, input: { material: string; m
   if (!provider || provider.name === 'mock') return fallback;
   const lines: string[] = [];
   if (ground) for (const market of markets) {
-    const found = await ground(`${input.material} project ${nameOf(market)}`, market).catch(() => []);
+    const found = await ground(groundingQuery(input.material,input.productId,market), market).catch(() => []);
     for (const f of found.slice(0, 6)) lines.push(`- ${f.date ?? ''} ${clip(f.title, 140)}: ${clip(f.snippet, 220)}`);
   }
   try {

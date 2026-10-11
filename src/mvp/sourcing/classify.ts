@@ -17,11 +17,17 @@ export function classifyPage(page:ClassifyPage):PageKind {
   const names=new Set((page.text.match(/\b[A-Z][\w&.-]*(?:\s+[A-Z][\w&.-]*){1,6}\b/g)??[])
     .filter(name=>/\b(?:Limited|Ltd|LLC|Corp|Company|Contracting|Engineering|International|AS)\b/.test(name)));
   const awards=/\b(?:awards?|awarded|wins?|won|secured|orders?)\b/i.test(title+'\n'+page.text);
-  if(awards&&(names.size>=6||/\b(?:awards?\s+\d{1,3}\s+contracts?|\d{1,3}\s+(?:contracts?|awardees))\b/i.test(title)))return 'roundup';
+  // Investor-release navigation can name dozens of organisations. It is not a
+  // roundup merely because the release contains one EPC announcement.
+  if(awards&&(names.size>=6&&/\b(?:multiple|several|contractors|awardees|winners|contracts)\b/i.test(title)||/\b(?:awards?\s+\d{1,3}\s+contracts?|\d{1,3}\s+(?:contracts?|awardees))\b/i.test(title)))return 'roundup';
   if(/\b(?:top\s+\d+|list of|leading\s+\d+)\b/i.test(title)||/\/top-\d+-/.test(url.pathname))return 'roundup';
   const lines=page.text.split('\n');
   const rows=lines.filter(l=>l.split('|').length>=3).length;
-  if((page.tables?.reduce((n,t)=>n+t.length,0)??0)>=6||rows>=6||/\/(?:directory|impcat|companies|contractors-list)(?:\/|$)/i.test(url.pathname)&&names.size>=6)return 'directory';
+  // Pipe dimensions, grades and financial statements are tables too, not lists
+  // of buyers. Require an actual company-list signal before the fan-out pass.
+  const companyTable=page.tables?.some(t=>t.length>=6&&t[0].some(c=>/\b(?:company|contractor|member|business)\s*(?:name|details)?\b/i.test(c)));
+  const namedRows=rows>=6&&/\b(?:company name|contractor name|member directory)\b/i.test(page.text);
+  if(companyTable||namedRows||/\/(?:directory|impcat|companies|contractors-list)(?:\/|$)/i.test(url.pathname)&&names.size>=6)return 'directory';
   if(newsPublisher(url.hostname)||page.ogType==='article'||/\/(?:news|articles?|press-releases?)\b|\/20\d{2}\//i.test(url.pathname)||awards&&/\/companies\/|\.ece$/.test(url.pathname))return 'article';
   return 'company_site';
 }

@@ -3,13 +3,15 @@ import { COUNTRIES } from '@/mvp/config/countries';
 export function junkCompanyReason(name:string):string|null {
   const n=name.trim();
   if(n.length<3||n.length>180)return 'invalid company name';
+  if(/@|https?:\/\/|^www\./i.test(n))return 'email address or URL, not a company name';
   if(COUNTRIES.some(c=>c.name.toLowerCase()===n.toLowerCase())||/^(?:UAE|USA|India|Dubai|Abu Dhabi|Saudi Arabia|Key Players(?: & More)?|Others|Table of Contents|Oil [&and ]+ Gas Pipelines|Contact Us|Our Services|Company Name)$/i.test(n))return 'country or generic heading';
   if(/\b(?:association|council|chamber|institute|market report|market intelligence|insights|consult\w*|Norconsult|VALDEL EC)\b/i.test(n))return 'association, consultant or publisher';
   if(/\b(?:awards?|awarded|wins?|secured|bags|essential services|how to|top \d+|market size|market outlook)\b/i.test(n))return 'article or list title';
   return null;
 }
 const NEWS_PUBLISHERS=['saudigulfprojects.com','marinelink.com','maritime-executive.com','worldoil.com','fastmarkets.com','mysteel.net','mysteel.com','oilfieldtechnology.com','hydrocarbonengineering.com','manilatimes.net','pipeline-journal.net','offshore-mag.com','ogj.com','energy-pedia.com','argusmedia.com','spglobal.com','reuters.com','thehindubusinessline.com','business-standard.com','constructionweekonline.com','gulfnews.com','offshore-energy.biz','economictimes.indiatimes.com',
-  'hindustantimes.com','livemint.com','indiatimes.com','thenationalnews.com','zawya.com','meed.com','arabnews.com','khaleejtimes.com'];
+  'hindustantimes.com','livemint.com','indiatimes.com','thenationalnews.com','zawya.com','meed.com','arabnews.com','khaleejtimes.com',
+  'ft.com','upstreamonline.com','gulftoday.ae','businesswire.com'];
 export function newsPublisher(domain:string):boolean {
   const host=domain.toLowerCase();return NEWS_PUBLISHERS.some(d=>host===d||host.endsWith('.'+d));
 }

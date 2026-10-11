@@ -14,7 +14,7 @@ import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tav
 import { collectBingQuery,collectRssFeed,collectLocalNews,collectGdeltCountry} from './sources';
 import { plannedCollectJobs, type ResearchBudget, type ResearchJob } from './store';
 import { getSearchBrief, namesWork, type GroundFn } from '@/mvp/discovery/brief';
-import { checkNeed, FOLLOW_SEARCHES_PER_COUNTRY, followKey, followUpQueries, projectsToFollow } from './need';
+import { checkNeed,recheckRelatedNeeds, FOLLOW_SEARCHES_PER_COUNTRY, followKey, followUpQueries, projectsToFollow } from './need';
 import { autoPauseIfDue } from './control';
 import { clearBuyerCache } from '@/mvp/buyers/load';
 import { addJob,admitDeferredDiscovery,completeJob,claimJob,enqueueRawDocs,markBudget,owned,parkJob,researchProgress,reserveAnalysis,reserveBudget,sessionFor } from './store';
@@ -45,7 +45,10 @@ import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@
 import { rateCandidates } from './shortlist';
 import { planChainSearches } from './chain';
 import { saveLikelyBuyers } from './likely';
+import {registerNeedCandidates} from './need-candidates';
+import {pagePublishedAt} from './page-date';
 import { articleResearchReason,articleAnalysisText } from './relevance';
+import {fairGroundingDocs} from './routing';
 import {SOURCING_REGISTRY,collectRegistry,registryPageTargets,registryReadWarning,registryRaw} from '@/mvp/sourcing/registry';
 
 export interface ResearchDeps {
@@ -165,6 +168,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         if(pdfPages){await reserveBudget(db,job.run_id,'pdf_pages',job.key,pdfPages,20);await markBudget(db,job.run_id,'pdf_pages',job.key,'completed');}
       }
       // storeDocument deduplicates content/URL; all later quotes retain the stored original's provenance.
+      publishedAt=pagePublishedAt(text??'',publishedAt??null);
       const stored=await storeDocument(db,job.run_id,{...raw,url:finalUrl,text,title,publishedAt,publisherKey:raw.publisherKey??publisherKeyFor(finalUrl)});
       await db.query('insert into run_documents(run_id,document_id) values($1,$2) on conflict do nothing',[job.run_id,stored.id]);
       const original=(await db.query<{url:string;title:string|null;source_key:string;source_name:string;tier:RawDoc['tier'];published_at:string|null;is_sample:boolean}>('select url,title,source_key,source_name,tier,published_at,is_sample from source_documents where id=$1',[stored.id])).rows[0];
@@ -176,7 +180,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         ?articleResearchReason({text:stored.text,title:grounded.title,publishedAt:grounded.publishedAt},input.productId!,input.brief):null;
       // docs/mvp/20: in a work-based search a page about the work that uses the item qualifies too (news names
       // the project, not the valve); the need check then decides who buys.
-      const workPage=input.brief?.source==='ai'&&namesWork(stored.text,input.brief);
+      const workPage=Boolean(input.brief?.uses.length&&namesWork(articleAnalysisText(stored.text),input.brief));
       const candidate=pageKind!=='junk'&&!list&&!articleSkip&&(buyerPageCandidate(stored.text,input.productId!)||workPage)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
       const award=Boolean(raw.structured)||candidate&&['article','tender_notice','filing'].includes(pageKind);
       let associated=award||list||articleSkip?null:await candidateForPage(db,job.run_id,grounded);
@@ -216,7 +220,8 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
       const repeat=award&&!raw.structured&&(await db.query<{title:string|null}>("select payload->'raw'->>'title' as title from research_jobs where run_id=$1 and stage='analyse' and payload->>'kind'='analyse:award'",[job.run_id])).rows.some(r=>sameStory(r.title,grounded.title));
       const next:Parameters<typeof completeJob>[3]=list?
         [{stage:'analyse',key:`roundup:${stored.id}`,payload:{kind:'analyse:roundup',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY[pageKind]}]:award?
-        [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:repeat?REPEAT_STORY_PRIORITY:EXTRACTOR_PRIORITY[pageKind]}]:
+        [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:repeat?REPEAT_STORY_PRIORITY:input.brief?1300:EXTRACTOR_PRIORITY[pageKind]}]:
+        candidate&&workPage?[{stage:'analyse',key:`work:${stored.id}`,payload:{kind:'analyse:work',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY.company_site+100}]:
         candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:Math.max(EXTRACTOR_PRIORITY.company_site,buyerResearchPriority(grounded,stored.text,input))}]:[];
       await completeJob(db,job,{documentId:stored.id,candidate,award,pageKind,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},next);
       await markBudget(db,job.run_id,'read',job.key,'completed');
@@ -233,7 +238,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         const groundDocs:RawDoc[]=[];
         const ground:GroundFn|null=web?async(query,market)=>{
           const key=`brief-ground:${market}`;
-          const planned={key,market,lane:'news' as const,activityIndex:0,query,topic:'news' as const,days:365};
+          const planned={key,market,lane:'company' as const,activityIndex:0,query,topic:'general' as const};
           let docs=await cachedTavilyQuery(ctx,planned);
           if(docs===null){
             // One grounding search per country, on its own allowance (its pages are read too).
@@ -241,7 +246,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
             try{docs=await deps.collect('tavily',ctx,{source:'tavily',query:planned});await markBudget(db,job.run_id,'brief_search',key,'completed');}
             catch{await markBudget(db,job.run_id,'brief_search',key,'unknown');return [];}
           }
-          groundDocs.push(...docs.map(d=>({...d,market:d.market??market,research:{lane:'news' as const,...d.research,sourcingLane:'trigger' as const}})));
+          groundDocs.push(...docs.map(d=>({...d,market:d.market??market,research:{lane:'company' as const,...d.research,sourcingLane:'capability' as const}})));
           return docs.map(d=>({title:d.title??'',snippet:(d.text??'').slice(0,300),date:d.publishedAt?.slice(0,10)??null}));
         }:null;
         const provider=deps.briefProvider??budgetedAwardProviders(db,job.run_id,'brief',session.budget).provider('extract_a','openai/gpt-oss-120b');
@@ -255,15 +260,38 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
           // transaction: enqueueRawDocs would also mark this job done, and the brief and plan would be lost
           // (Render, 11 Oct: a fresh search stored neither).
           const reading=new Set((await tx.query<{key:string}>("select key from research_jobs where run_id=$1 and stage='read'",[job.run_id])).rows.map(r=>r.key));
-          for(const raw of groundDocs){
+          for(const raw of fairGroundingDocs(groundDocs,planned)){
             if(reading.has(raw.url)||junkReason(raw.url,raw.title,input.markets))continue;
-            if(await queueRead(tx,job.run_id,raw,{maxPages:session.budget.maxPages},1600))reading.add(raw.url);
+            if(await queueRead(tx,job.run_id,raw,{maxPages:session.budget.maxPages},EXTRACTOR_PRIORITY.company_site))reading.add(raw.url);
           }
           return true;
         }))return {processed:true,stale:true};
-        await completeJob(db,job,{brief:{source:brief.source,uses:brief.uses.map(u=>u.name)}},jobs);
+        // Retain URLs not yet admitted too; idle admission can reuse them with
+        // zero provider calls after the initial country-balanced pages drain.
+        await completeJob(db,job,{brief:{source:brief.source,uses:brief.uses.map(u=>u.name)},docs:groundDocs},jobs);
         await researchProgress(db,job.run_id,'check',`Looking for companies doing: ${brief.uses.map(u=>u.name).join(' · ')}${brief.notBuyers.length?`. Not: ${brief.notBuyers.slice(0,3).join(' · ')}`:''}. ${jobs.length} searches planned.`);
         return {processed:true};
+      }
+      if(job.payload.kind==='analyse:work'){
+        const id=String(job.payload.documentId),raw=job.payload.raw as RawDoc;
+        const doc=(await db.query<{text:string;url:string;published_at:string|null}>('select text,url,published_at from source_documents where id=$1',[id])).rows[0];
+        if(!doc?.text||!input.brief)throw new Error('Saved work original or brief unavailable.');
+        const previous=(await db.query<{result:{needAnswer?:string}|null}>('select result from research_jobs where id=$1',[job.id])).rows[0]?.result;
+        const providers=budgetedAwardProviders(db,job.run_id,id,session.budget);
+        const need=await checkNeed(db,job.run_id,id,{text:doc.text,url:doc.url,title:raw.title??null,publishedAt:doc.published_at},input.brief,input.markets,
+          deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b'),previous?.needAnswer);
+        if(!await db.tx(tx=>owned(tx,job)))return {processed:true,stale:true};
+        if(need.answer)await db.query("update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2",[job.id,job.lease_token,need.answer]);
+        const accepted=need.result?.companies.filter(c=>c.verdict==='lead')??[];
+        await registerNeedCandidates(db,job.run_id,id,need.result);
+        for(const prior of await recheckRelatedNeeds(db,job.run_id,doc.text,input.brief,input.markets,deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b')))
+          await registerNeedCandidates(db,job.run_id,prior.documentId,prior.result);
+        const saved=await saveLikelyBuyers(db,job.run_id,input);
+        await completeJob(db,job,{needAnswer:need.answer,saved:saved.saved,accepted:accepted.map(c=>c.name)});
+        await researchProgress(db,job.run_id,'check',saved.saved
+          ?`Saved ${saved.saved} source-backed potential buyers from their own work. No contact or extra project-extraction pass required.`
+          :`Work check: no new buyer saved (${need.result?.companies.find(c=>c.verdict==='rejected')?.reason??'no qualifying company scope'}).`);
+        await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};
       }
       if(job.payload.kind==='analyse:roundup'){
         const id=String(job.payload.documentId);
@@ -311,8 +339,9 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         if(workNeed?.answer)await db.query("update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2",[job.id,job.lease_token,workNeed.answer]);
         if(!await db.tx(tx=>owned(tx,job)))return {processed:true,stale:true};
         if(workNeed?.result){
-          const accepted=workNeed.result.companies.filter(c=>c.verdict==='lead');
-          for(const c of accepted)await db.tx(tx=>registerCandidate(tx,job.run_id,c.name,null,id,c.quote));
+          await registerNeedCandidates(db,job.run_id,id,workNeed.result);
+          for(const prior of await recheckRelatedNeeds(db,job.run_id,doc.text,input.brief!,input.markets,deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b')))
+            await registerNeedCandidates(db,job.run_id,prior.documentId,prior.result);
           const saved=await saveLikelyBuyers(db,job.run_id,input);
           if(saved.saved)await researchProgress(db,job.run_id,'check',`Saved ${saved.saved} source-backed potential buyers before project extraction. Contacts and exact specifications remain unconfirmed.`);
           if(!workNeed.result.companies.some(c=>['lead','owner'].includes(c.verdict))){
@@ -344,7 +373,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
               return {result:null,answer:null};});
           if(need.answer)await db.query(`update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2`,[job.id,job.lease_token,need.answer]);
           const accepted=need.result?.companies.filter(c=>c.verdict==='lead')??[];
-          for(const c of accepted)await db.tx(tx=>registerCandidate(tx,job.run_id,c.name,null,id,c.quote));
+          await registerNeedCandidates(db,job.run_id,id,need.result);
           // Save source-backed work now, not only when every queued article has
           // drained. A user pause must retain these companies even without contacts.
           const savedLeads=await saveLikelyBuyers(db,job.run_id,input);

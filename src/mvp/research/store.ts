@@ -9,7 +9,7 @@ import { loadCompanyBundle } from '@/mvp/discovery/bundle';
 import { feedUrls } from '@/mvp/pipeline/sources/rss';
 import { readLaneLimits } from './registry';
 import { queueRead } from './investigation';
-import { prioritiseDiscoveryDocs } from './routing';
+import { prioritiseDiscoveryDocs,fairGroundingDocs } from './routing';
 import { maxExtensionRounds, minimumBuyers } from './limits';
 import { sourcePlan,tavilyTask } from '@/mvp/sourcing/plan';
 import { junkReason } from '@/mvp/sourcing/junk';
@@ -286,7 +286,7 @@ export async function enqueueRawDocs(db:Db,job:ResearchJob,docs:RawDoc[],maxPage
       // A duplicate must not use this query's fair share or appear as deferred.
       if(existing.has(raw.url))continue;
       if(admitted>=fairCap){deferred++;continue;}
-      const priority=raw.research?.sourcingLane==='trigger'?1000:raw.research?.sourcingLane==='roundup'?1050:raw.research?.sourcingLane==='capability'?1150:raw.research?.lane==='directory'?48:35;
+      const priority=raw.research?.sourcingLane==='trigger'?(input.brief?1250:1000):raw.research?.sourcingLane==='roundup'?1050:raw.research?.sourcingLane==='capability'?1150:raw.research?.lane==='directory'?48:35;
       if(await queueRead(tx,job.run_id,raw,{maxPages},priority)){admitted++;existing.add(raw.url);}else deferred++;
     }
     await tx.query(`update research_jobs set state='done',result=$3::jsonb,lease_token=null,lease_until=null where id=$1 and lease_token=$2`,[job.id,job.lease_token,JSON.stringify({urls:clean.length,deferred,docs:clean,skippedCount:docs.length-clean.length})]);
@@ -310,9 +310,9 @@ export async function admitDeferredDiscovery(db:Db,runId:string):Promise<number>
     if(await hasPendingWork(tx))return 0;
     if((await tx.query("select id from research_jobs where run_id=$1 and stage='collect' and state in ('queued','running','paused') and coalesce(payload->>'sourcingLane','')<>'capability' limit 1",[runId])).rows.length)return 0;
     const input=(await tx.query<{adhoc_query:RunInput}>('select adhoc_query from runs where id=$1',[runId])).rows[0].adhoc_query;
-    const sources=(await tx.query<{id:string;result:{docs?:RawDoc[];deferred?:number}}>("select id,result from research_jobs where run_id=$1 and stage='collect' and state='done' and payload->>'source'='tavily' order by priority desc,created_at,id",[runId])).rows;
+    const sources=(await tx.query<{id:string;stage:string;result:{docs?:RawDoc[];deferred?:number}}>("select id,stage,result from research_jobs where run_id=$1 and state='done' and (stage='collect' and payload->>'source'='tavily' or stage='analyse' and key='brief') order by priority desc,created_at,id",[runId])).rows;
     const existing=new Set((await tx.query<{key:string}>("select key from research_jobs where run_id=$1 and stage='read'",[runId])).rows.map(r=>r.key));
-    const pending=sources.map(s=>({source:s,docs:prioritiseDiscoveryDocs(s.result.docs??[],input).filter(d=>!existing.has(d.url))}));
+    const pending=sources.map(s=>({source:s,docs:(s.stage==='analyse'?fairGroundingDocs(s.result.docs??[],input):prioritiseDiscoveryDocs(s.result.docs??[],input)).filter(d=>!existing.has(d.url))}));
     let added=0;
     // Round-robin admission prevents one successful query swallowing the others.
     while(pending.some(p=>p.docs.length)){

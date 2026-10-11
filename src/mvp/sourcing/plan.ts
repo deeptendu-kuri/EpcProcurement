@@ -55,7 +55,7 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
     const add=(lane:SourcingLane,source:SourceTask['source'],n:number,extra:Partial<SourceTask>)=>{
       if(input.lanes&&!input.lanes.includes(lane))return;
       const round=rounds[lane]=(rounds[lane]??-1)+1;
-      const priority=input.brief&&source==='tavily'?1100-n*60:BASE_PRIORITY[lane];
+      const priority=input.brief&&source==='tavily'?({trigger:1260,capability:1220,roundup:1190}[lane])-n*100-order:BASE_PRIORITY[lane];
       // Work-based requests share the first paid-query tier across the lanes.
       // Otherwise Quick's entire allowance was spent on trigger news before a
       // single contractor-list or company search could run.
@@ -69,7 +69,10 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
       const words=(n:number)=>workQueryWords(work[n]).slice(0,2).join(' ');
       // ── trigger: awards for the work that uses the item, in English, the country's language, GDELT and tenders ──
       work.forEach((_,n)=>add('trigger','bing-query',n,{query:`${words(n)} contract awarded ${name}`}));
-      add('trigger','tavily',0,{query:`${words(0)} EPC contract awarded ${name}`,topic:'news',days:540});
+      // Owner construction/progress pages and corporate project releases matter
+      // as much as news. General search includes those originals and older EPC
+      // contracts that are still being executed, rather than only recent awards.
+      add('trigger','tavily',0,{query:`${work[0].name} EPC contractor ongoing construction projects ${name}`,topic:'general'});
       if(work[1])add('trigger','tavily',1,{query:`${words(1)} contract awarded ${name}`,topic:'news',days:540});
       const local=work.find(u=>u.localWords[code]?.length);
       add('trigger','local-news',0,{query:`${words(0)} contract ${name}`,material:workQueryWords(work[0])[0],work:work[0].name,
@@ -86,7 +89,7 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
         add('roundup','registry',n,{url:registry.url,registryId:registry.id,priority:1950,includeDomains:[new URL(registry.url).hostname.replace(/^www\./,'')]});
       }
       add('roundup','tavily',0,{query:`${work[0].name} contractors ${name} list top companies`,topic:'general'});
-      if(input.includeResellers!==false)add('roundup','tavily',1,{query:`${material} stockists suppliers ${name}`,topic:'general'});
+      if(input.includeResellers===true)add('roundup','tavily',1,{query:`${material} stockists suppliers ${name}`,topic:'general'});
       work.slice(0,2).forEach((use,n)=>add('capability','tavily',n,{query:`${use.name} contractor ${name} projects`,topic:'general'}));
       return;
     }
@@ -111,7 +114,9 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
     if(uses[1])add('capability','tavily',2,{query:`${uses[1]} contractor ${name}`,topic:'general'});
   });
   // Priority by lane first; within a lane, each country's first search before anyone's second.
-  return tasks.map(t=>({...t,priority:t.priority-t.round*10}))
+  // Free news tasks must not demote a country's first paid request simply
+  // because that country's brief contains more applications/local queries.
+  return tasks.map(t=>({...t,priority:t.priority-(input.brief&&t.source==='tavily'?0:t.round*10)}))
     .sort((a,b)=>b.priority-a.priority||a.round-b.round||a.order-b.order)
     .map(t=>{const task:SourceTask&{round?:number;order?:number}={...t};delete task.round;delete task.order;return task as SourceTask;});
 }
