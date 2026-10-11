@@ -1,0 +1,185 @@
+{
+  "capturedRun": "d020dc0d-bd7d-4699-8ed5-03957d537947",
+  "brief": {
+    "item": "Stainless steel pipe ASTM A312 TP316L",
+    "uses": [
+      {
+        "why": "Potential corrosion-resistant process piping; exact grade and purchase requirement must be checked.",
+        "name": "oil & gas processing plant",
+        "countries": [],
+        "newsWords": [
+          "gas processing",
+          "LNG",
+          "NGL"
+        ],
+        "localWords": {}
+      },
+      {
+        "why": "Potential process-piping application; exact specification is not established by the project type.",
+        "name": "chemical process plant",
+        "countries": [],
+        "newsWords": [
+          "chemical plant",
+          "petrochemical",
+          "process piping"
+        ],
+        "localWords": {}
+      },
+      {
+        "why": "Potential hygienic process piping; the required grade and finish remain unconfirmed.",
+        "name": "food and pharmaceutical process plant",
+        "countries": [],
+        "newsWords": [
+          "brewery",
+          "fermentation",
+          "pharmaceutical"
+        ],
+        "localWords": {}
+      },
+      {
+        "why": "TP316L piping resists corrosion from aggressive chemicals in feedstock and product streams",
+        "name": "petrochemical plant new build",
+        "countries": [
+          "IN",
+          "AE"
+        ],
+        "newsWords": [
+          "petrochemical",
+          "plant",
+          "EPC"
+        ],
+        "localWords": {
+          "AE": [
+            "مصنع البتروكيماويات",
+            "مشروع EPC"
+          ]
+        }
+      },
+      {
+        "why": "Duplex and 316L piping used for acid gas removal and utility loops during upgrades",
+        "name": "refinery revamp",
+        "countries": [
+          "IN",
+          "CA"
+        ],
+        "newsWords": [
+          "refinery",
+          "revamp",
+          "upgrade"
+        ],
+        "localWords": {
+          "AE": [
+            "محطة تكرير",
+            "تحديث"
+          ]
+        }
+      },
+      {
+        "why": "High‑temperature, high‑pressure service with corrosive sour gas requires TP316L pipe",
+        "name": "natural gas processing plant",
+        "countries": [
+          "IN",
+          "CA"
+        ],
+        "newsWords": [
+          "gas",
+          "processing",
+          "facility"
+        ],
+        "localWords": {
+          "AE": [
+            "معالجة الغاز",
+            "منشأة"
+          ]
+        }
+      },
+      {
+        "why": "Marine environment demands corrosion‑resistant 316L for seawater and fuel lines",
+        "name": "offshore platform support systems",
+        "countries": [
+          "AE"
+        ],
+        "newsWords": [
+          "offshore",
+          "platform"
+        ],
+        "localWords": {
+          "AE": [
+            "منصة بحرية",
+            "أنابيب"
+          ]
+        }
+      }
+    ],
+    "buying": "both",
+    "owners": [],
+    "places": {
+      "AE": [
+        "الإمارات العربية المتحدة",
+        "Abu Dhabi",
+        "Dubai",
+        "Sharjah",
+        "Al Ain",
+        "Ras Al Khaimah",
+        "Fujairah",
+        "Khor Fakkan",
+        "Jebel Ali",
+        "Al Dhafra"
+      ],
+      "CA": [
+        "Canada",
+        "Calgary",
+        "Edmonton",
+        "Toronto",
+        "Vancouver",
+        "St. John’s",
+        "Halifax",
+        "Winnipeg",
+        "Saskatoon",
+        "Quebec City"
+      ],
+      "IN": [
+        "भारत",
+        "Mumbai",
+        "Delhi",
+        "Chennai",
+        "Kolkata",
+        "Visakhapatnam",
+        "Ahmedabad",
+        "Jamnagar",
+        "Kochi",
+        "Bangalore"
+      ]
+    },
+    "source": "ai",
+    "version": 2,
+    "mustHave": [
+      "ASTM A312",
+      "TP316L"
+    ],
+    "notBuyers": [
+      "standard carbon steel pipe suppliers",
+      "low‑temperature cryogenic pipe vendors"
+    ],
+    "productId": "ss-duplex-pipe",
+    "buyerRoles": [
+      "EPC contractors",
+      "plant engineering procurement teams",
+      "fabrication/spool shops"
+    ]
+  },
+  "pages": [
+    {
+      "url": "https://www.gulftoday.ae/business/2025/01/10/adnoc-gas-awards-21-billion-in-contracts-for-lng-infrastructure",
+      "text": "News\nOpinion\nCulture\nLifestyle\nSport\nBusiness\nBusiness\nAdnoc Gas awards $2.1 billion in contracts for LNG infrastructure\nLast updated: January 10, 2025 | 18:09\nThe compression facilities will be located within Adnoc Gas’ Habshan 5 plant.\nAdnoc Gas and its subsidiaries (together referred to as Adnoc Gas), a world-class integrated gas processing company, announced the awarding of three enabling contracts worth $2.1 billion (approx Dhs8.00 billion) for an LNG pre-conditioning plant (LPP), compression facilities and transmission pipelines to supply feedstock to the Ruwais LNG Project.\nThe LPP and compression facilities will be located within Adnoc Gas’ Habshan 5 plant, part of one of the world’s largest integrated gas processing complexes. The five plants of the Habshan Complex have a combined capacity to process 6.1 billion standard cubic feet of gas per day.\nThe newly awarded transmission pipelines will connect the Habshan Complex with the Ruwais LNG facility.\nThe largest contract, valued at $1.24 billion for the LPP, was awarded to a consortium consisting of Engineering for the Petroleum and Process Industries (ENPPI) and Petrojet.\nA $514 million contract for transmission pipelines was awarded to the China Petroleum Pipeline Engineering Company, while Petrofac Emirates LLC will develop the new compression facilities under a $335 million contract.\nFatema Al Nuaimi, Chief Executive Officer of Adnoc Gas, said: “These contract awards reaffirm Adnoc Gas’ commitment to delivering sustainable growth and maximising shareholder value. We are investing in world-class infrastructure and innovative technologies as we expand our capacity in LNG liquefaction and strengthen our position as a global player.The awards also underline our commitment to making strategic and targeted investments that enable the delivery of our most significant projects, allowing us to continue meeting our customers’ demands internationally.”\nAdnoc Gas is developing the Ruwais LNG project on behalf of its largest shareholder, Adnoc. The capital expenditure (CAPEX) for the LPP, compression facilities and transmission pipelines, does not form part of the costs previously outlined by Adnoc Gas for its intended acquisition of Adnoc’s majority stake in the Ruwais LNG project once the plant becomes operational in 2028.\nThe three contracts will establish the key infrastructure needed to supply feedstock to the Ruwais LNG export facility. This investment is part of the $15 billion CAPEX plan through 2029, as outlined in Adnoc Gas’ recent strategy update.\nWhen it becomes fully operational, the Ruwais LNG plant will more than double Adnoc Gas’ current LNG production capacity to more than 15 million tonnes per annum (mtpa).\nThe export facility will feature two liquefaction trains, each with a processing capacity of 4.8 mtpa, powered by clean grid electricity-a first in the Middle East and North Africa region.\nUpon completion, Ruwais LNG will be one of the lowest-carbon intensity LNG plants in the world, leveraging artificial intelligence and other advanced digital technologies to enhance safety, minimise emissions and drive efficiency.\nUAE Economy\nAdnoc\nLNG\nRelated articles\nMost Popular Stories\nPDF SUBSCRIPTION\nCONTACT US\nPRIVACY POLICY\nPublishing Policy\nTerms and Conditions",
+      "publishedAt": "2025-01-10T12:39:00.000Z",
+      "answer": "{\"project\":null,\"country\":\"United Arab Emirates\",\"date\":\"2025-01\",\"use\":null,\"needsItem\":\"unclear\",\"needWhy\":\"The text does not specify the material or pipe type used in the LNG infrastructure projects.\",\"companies\":[{\"name\":\"Engineering for the Petroleum and Process Industries (ENPPI)\",\"role\":\"epc\",\"package\":\"LPP\",\"quoteIndex\":5,\"quote\":\"The largest contract, valued at $1.24 billion for the LPP, was awarded to a consortium consisting of Engineering for the Petroleum and Process Industries (ENPPI) and Petrojet.\",\"since\":null,\"buysItem\":\"yes\"},{\"name\":\"Petrojet\",\"role\":\"epc\",\"package\":\"LPP\",\"quoteIndex\":5,\"quote\":\"The largest contract, valued at $1.24 billion for the LPP, was awarded to a consortium consisting of Engineering for the Petroleum and Process Industries (ENPPI) and Petrojet.\",\"since\":null,\"buysItem\":\"yes\"},{\"name\":\"Petrofac Emirates LLC\",\"role\":\"epc\",\"package\":\"compression facilities\",\"quoteIndex\":6,\"quote\":\"Petrofac Emirates LLC will develop the new compression facilities under a $335 million contract.\",\"since\":null,\"buysItem\":\"yes\"},{\"name\":\"China Petroleum Pipeline Engineering Company\",\"role\":\"epc\",\"package\":\"transmission pipelines\",\"quoteIndex\":6,\"quote\":\"A $514 million contract for transmission pipelines was awarded to the China Petroleum Pipeline Engineering Company.\",\"since\":null,\"buysItem\":\"yes\"}]}"
+    },
+    {
+      "url": "https://www.domain-b.com/markets/stock-markets-india/l-t-wins-major-bpcl-petrochemical-contract-worth-up-to-%E2%82%B910-000-crore-stock-edges-higher",
+      "text": "L&T wins ‘major’ BPCL petrochemical contract worth up to ₹10,000 crore; stock edges higher | Domain-b.com\nStay updated with DomainB! Subscribe for the latest business news from domain-b.com.\nSubscribe\nMaybe Later\nX\nPEOPLE\nin the news\ninterviews\nprofiles\nCOMPANIES/ORG\nfirms / companies\nA\nB\nC\nD\nE\nF\nG\nH\nI\nJ\nK\nL\nM\nN\nO\nP\nQ\nR\nS\nT\nU\nV\nW\nX\nY\nZ\nbanking & finance\ninsurance\nmutual funds\nad,MR and PR agencies\norganisations\nacademic\nchambers, associations\ngovernment\ninternational organisations\nNGOs\nregulatory agencies\nMANAGEMENT\nconsulting\ncorporate finance\ngeneral\nHRD\nM&A/restructuring\nmarketing & advertising\noperations\nquality\nINDUSTRY\ngeneral\nindustry monitor\nTECHNOLOGY\nartificial intelligence\nbiotech & pharma\nelectronics\nengineering\ngeneral\nhealth & medicine\ninformation technology\nmaterials\nnanotechnology\nFINANCE\nbanks & institutions\ncompanies\ngeneral\ncredit cards\ncredit ratings\nfinance review\ngeneral\ninsurance\ncompanies\ngeneral\npolicies\nMARKETS\nbrokers\ncommodities\ncredit ratings\nCARE\ncrisil\nfitch ratings India\nICRA\nmoody's investor\nstandard & poor's\ngeneral\nmutual funds\nfunds\ngeneral\nstockmarkets - India\nBSE\ngeneral\nNSE\nSEBI\nworld stock markets\nECONOMY\nagriculture\nenvironment\ngeneral\ngovernment\ngovt policies\ninfrastructure\naviation\ngeneral\nhousing\noil & gas\nports\npower\nrailways\nroads\nshipping\nspace\ntelecom\ntransportation\nwater\ninvestments\ntrade\nunion budget\nunion budget 2024\nunion budget 2019\nunion budget 2018\nunion budget 2017\nunion budget 2016\nunion budget 2015\nunion budget 2014\nprevious union budgets\nworld economy\nENVIRONMENT\nDEFENCE\nair\nIndian air force\nUS air force\narms & munitions\ndefence general\ndefence production\nland\nIndian army\nsea\nIndian navy\nWEB STORIES\nVIDEOS\nINFORMACHINE\nBUSINESS HISTORY\nWebsite\nYouTube Channel\nX\nSearch\nHOME\nMarkets\nStock markets - India\nMore reports on:\nLarsen & Toubro,\nPetrochemicals\nL&T wins ‘major’ BPCL petrochemical contract worth up to ₹10,000 crore; stock edges higher\nBy Cygnus | 23 Dec 2025\nL&T has secured a 'major' contract valued up to ₹10,000 crore to set up India’s largest polyethylene unit at BPCL’s Bina refinery. (Image: AI Generated)\n1\nLarsen & Toubro (L&T) has secured a significant contract valued between ₹5,000 crore and ₹10,000 crore from Bharat Petroleum Corporation Ltd (BPCL), reinforcing its leadership in India’s downstream hydrocarbon engineering and construction space. The order involves the engineering, procurement, construction, and commissioning (EPCC) of a massive polyethylene manufacturing unit at BPCL’s Bina refinery complex in Madhya Pradesh.\nThe project involves setting up two polymer trains with a combined capacity of 575 kilo tonnes per annum (KTPA) each. Once completed, this linear low-density polyethylene (LLDPE) and high-density polyethylene (HDPE) “swing unit” will be the largest of its kind in India. The contract is being executed on a Lump-Sum Turnkey (LSTK) basis.\nFollowing the announcement, L&T shares edged higher on the NSE, trading at ₹4,082.20 (up 0.24%) during the afternoon session, touching an intraday high of ₹4,095.00.\nSubramanian Sarma, Deputy Managing Director and President at L&T, commented: “This is a major order that will not only strengthen our balance sheet but also provide impetus to our demonstrated credentials in the downstream hydrocarbon EPC space.”\nCentral to BPCL’s ₹49,000 Crore Expansion\nThe new polymer unit is a critical component of BPCL’s broader ₹49,000 crore Bina Petrochemicals and Refinery Expansion Project. This initiative aims to raise the refinery’s capacity from 7.8 million tonnes per annum (MMTPA) to 11 MMTPA, transforming it into a fully integrated petrochemical complex. The project aligns with the ‘Aatmanirbhar Bharat’ mission by significantly boosting domestic polymer production for the packaging, automotive, and consumer goods sectors.\nAccelerating the Green Energy Transition\nWhile cementing its dominance in the hydrocarbon sector, L&T is simultaneously scaling its green energy portfolio. The company is targeting annual renewable EPC orders of 10–12 gigawatts (GW), with an ambitious goal to reach a cumulative renewable portfolio of nearly 38 GW by FY26.\nIn the green hydrogen space, L&T has established a primary manufacturing base at Hazira, Gujarat, where it pioneered a 1 MW indigenous electrolyser. The company recently achieved a new milestone with its 1 MW facility at the Kandla Green Hydrogen Hub (Deendayal Port), which is now operational and producing approximately 18 kg of hydrogen per hour.\nExecutive Summary\nL&T has clinched a landmark contract from BPCL worth up to ₹10,000 crore to build India’s largest LLDPE/HDPE swing unit at the Bina refinery. This project is the linchpin of BPCL’s ₹49,000 crore expansion to increase refining capacity to 11 MMTPA. While maintaining its leadership in hydrocarbons, L&T is successfully diversifying into green energy, evidenced by its operational 1 MW electrolyser projects in Hazira and Kandla, positioning the firm as a leader in India’s dual energy transition.\nFAQs\nQ1: What exactly has L&T won from BPCL?\nL&T won an EPCC (Engineering, Procurement, Construction, and Commissioning) contract to build India’s largest LLDPE/HDPE swing unit, consisting of two production trains with a capacity of 575 KTPA each.\nQ2: How much is the contract worth?\nIt is valued in the range of ₹5,000 crore to ₹10,000 crore, which falls under L&T’s “Major” order internal classification.\nQ3: What is a “swing unit”?\nA swing unit offers operational flexibility by allowing the facility to switch production between Linear Low-Density Polyethylene (LLDPE) and High-Density Polyethylene (HDPE) based on current market demand.\nQ4: How does this impact BPCL’s Bina refinery?\nIt integrates downstream petrochemical production directly into the refinery, which is undergoing a massive capacity hike from 7.8 MMTPA to 11 MMTPA.\nQ5: What is L&T’s progress in Green Hydrogen?\nL&T has successfully operationalized 1 MW electrolysers at both its Hazira manufacturing plant and the Kandla Port hub, utilizing indigenously developed technology to produce green hydrogen.\nOther articles in the section\nThe $115 billion reset as Indian IT faces agentic squeeze and traditional models fray\nMaruti Suzuki to challenge ₹5,786 crore income tax assessment order\nOil shock drives surge in rupee options trading as bearish bets rise\nPhonePe pauses $10B IPO as geopolitical “friction” rattles global markets\nIOC, BPCL, HPCL face margin pressure as oil volatility rises: S&P\nBharat Coking Coal Debuts with 96% Surge, Valued at $2.2 Billion\nInfosys partners with AWS to scale Generative AI; Shares jump to intraday high\nOla Electric founder clears ₹260 crore debt via stake sale; stock hits record low\nZomato shares rise on block deal, SoftBank potentially selling\nLatest articles\nLohum starts Zimbabwe lithium operations with first ore shipment\nOpenAI deepens Samsung alliance on next-generation AI chips\nGoogle commits €13 billion to Finnish AI infrastructure with nuclear deal\nTexas audits 474 GW data centre queue as US tackles speculative power demand\nChina issues overseas competition guidelines for automakers as exports expand\nPrivate investment strengthens as India records 7.8% GDP growth in Q1\nSwitzerland keeps October 1 transparency register launch despite hack fears\nUS 10-year yield tests 4.75% as hawkish Fed signals lift rate bets\nEPA weighs refinery waivers of up to 1.8 billion RINs amid farm backlash\nFeatured articles\nThe decoupling paradox: Why Wall Street keeps funding AI despite $100 oil\nBy Axel Miller | 11 May 2026\nAI infrastructure stocks continue rallying despite $100 oil as investors bet on productivity gains and semiconductor demand in 2026.\nHybrid bonding gains attention as AI chip packaging demand grows\nBy Cygnus | 23 Apr 2026\nHybrid bonding is driving AI chip packaging demand as backend technologies gain importance in the semiconductor supply chain.\nThe agentic transition: how enterprises are scaling AI from pilot to profit\nBy Cygnus | 22 Apr 2026\nAI has entered its execution era. Discover how companies like Valeo and Microsoft are scaling agentic AI systems—from copilots to autonomous workflows driving real business impact.\nPost-splashdown: What Artemis II taught us about the ‘deep space wall’\nBy Axel Miller | 15 Apr 2026\nArtemis II splashdown marks a breakthrough in deep space exploration. Discover AVATAR radiation data, Orion’s distance record, and insights shaping NASA’s 2028 Moon mission.\nCan aviation go green? The multi-billion dollar race for sustainable fuel\nBy Cygnus | 10 Apr 2026\nAirlines are racing to adopt sustainable aviation fuel, but limited supply and high costs challenge the future of green aviation.\nThe battery race: who will control the future of electric vehicles?\nBy Axel Miller | 08 Apr 2026\nThe global battery race is reshaping the electric vehicle industry, with China, the US, and Europe competing for control over supply chains and technology.\nAI vs governments: Who controls the future of intelligence?\nBy Cygnus | 07 Apr 2026\nGovernments and AI companies like OpenAI and Anthropic are shaping the future of intelligence amid rising policy conflicts and global competition.\nStrait of Hormuz: how one chokepoint controls the global economy\nBy Axel Miller | 06 Apr 2026\nThe Strait of Hormuz is a critical global chokepoint. Learn how disruptions impact oil prices, shipping, and the global economy.\nThe $2 trillion AI infrastructure race: Who will control global compute?\nBy Cygnus | 06 Apr 2026\nAI spending is set to exceed $2 trillion in 2026, driving a global race in data centers, chips, and energy infrastructure.\nOther articles in the section\nThe $115 billion reset as Indian IT faces agentic squeeze and traditional models fray\nMaruti Suzuki to challenge ₹5,786 crore income tax assessment order\nOil shock drives surge in rupee options trading as bearish bets rise\nPhonePe pauses $10B IPO as geopolitical “friction” rattles global markets\nIOC, BPCL, HPCL face margin pressure as oil volatility rises: S&P\nBharat Coking Coal Debuts with 96% Surge, Valued at $2.2 Billion\nInfosys partners with AWS to scale Generative AI; Shares jump to intraday high\nOla Electric founder clears ₹260 crore debt via stake sale; stock hits record low\nZomato shares rise on block deal, SoftBank potentially selling\nLatest articles\nLohum starts Zimbabwe lithium operations with first ore shipment\nOpenAI deepens Samsung alliance on next-generation AI chips\nGoogle commits €13 billion to Finnish AI infrastructure with nuclear deal\nTexas audits 474 GW data centre queue as US tackles speculative power demand\nChina issues overseas competition guidelines for automakers as exports expand\nPrivate investment strengthens as India records 7.8% GDP growth in Q1\nSwitzerland keeps October 1 transparency register launch despite hack fears\nUS 10-year yield tests 4.75% as hawkish Fed signals lift rate bets\nEPA weighs refinery waivers of up to 1.8 billion RINs amid farm backlash\nInformachine Private Limited\nFollow us on:\nOther products\nInformachine File Manager\nInformachine Digital Office\nInformachine Grabber\nInformachine SYNC\nInformachine BACKUP\nInformachine News Trackers Individual Edition\nBusiness History channel\nCompany\nAbout Us\nContact Us\nDisclaimer\nPrivacy Policy\nTerms of Service\nLocation\n601, Aggarwal Trade Centre, Tower B, Sector 11, CBD Belapur, Navi Mumbai, Maharashtra - 400614, India.\nPhone: +91-22-4751 1659\nSales Enquiry: +91-22-4751 1659\nEmail: marketing@informachine.com\n© 2026\nInformachine Private Limited\nAll rights reserved.\nHome\nWeb Stories\nPeople\nCompanies\nManagement\nIndustry\nTechnology\nFinance\nMarkets\nEconomy\nEnvironment\nDefence\nWe use cookies to enhance your browsing experience. By continuing to use our website you agree to our policies\nRead the policyAccept",
+      "publishedAt": "2025-12-23T08:25:49.000Z",
+      "answer": "{\"project\":\"LLDPE/HDPE swing unit at BPCL Bina refinery\",\"country\":\"India\",\"date\":\"2025-12\",\"use\":\"petrochemical plant new build\",\"needsItem\":\"unclear\",\"needWhy\":\"The text does not mention any specific pipe or material, so it is not clear whether ASTM A312 TP316L is required.\",\"companies\":[{\"name\":\"Larsen & Toubro (L&T)\",\"role\":\"epc\",\"package\":\"engineering, procurement, construction, and commissioning of the polyethylene unit\",\"quoteIndex\":8,\"quote\":\"Larsen & Toubro (L&T) has secured a significant contract valued between ₹5,000 crore and ₹10,000 crore from Bharat Petroleum Corporation Ltd (BPCL), reinforcing its leadership in India’s downstream hydrocarbon engineering and construction space. The order involves the engineering, procurement, construction, and commissioning (EPCC) of a massive polyethylene manufacturing unit at BPCL’s Bina refinery complex in Madhya Pradesh.\",\"since\":\"2025-12\",\"buysItem\":\"yes\"}]}"
+    }
+  ]
+}

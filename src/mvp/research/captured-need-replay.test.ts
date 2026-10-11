@@ -36,6 +36,13 @@ describe('actual captured AI answers replayed offline',()=>{
   it.each(['no','unclear'])('can correct a %s caused only by missing material wording',needsItem=>{
     expect(judge({...answer,needsItem}).companies.filter(c=>c.verdict==='lead')).toHaveLength(3);
   });
+  it('recovers a null use caused by missing material wording, not an unrelated-use verdict',()=>{
+    const result=judge({...answer,use:null,needsItem:'unclear',needWhy:'The text does not specify the material or pipe type used in the LNG infrastructure projects.'});
+    expect(result.companies.filter(c=>c.verdict==='lead').map(c=>c.name)).toEqual(['ENPPI','Petrojet','Petrofac Emirates LLC']);
+    expect(result.use).toBe('oil & gas processing plant');
+    expect(result.companies.find(c=>c.name.startsWith('China Petroleum'))?.verdict).toBe('rejected');
+    expect(judge({...answer,use:null,needsItem:'no',needWhy:'Water network work, not a process plant.'}).companies.filter(c=>c.verdict==='lead')).toHaveLength(0);
+  });
   it.each([
     {needWhy:'This package does not require stainless steel pipe.'},
     {use:null,needsItem:'no',needWhy:'Water network work, not a process plant.'},

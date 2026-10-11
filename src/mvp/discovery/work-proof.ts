@@ -2,18 +2,20 @@ import type { Queryable } from '@/mvp/db';
 import type { SearchBrief } from './brief';
 import { namesWork } from './brief';
 import { materialOutputOnly } from './plan';
-import { originalQuote } from './evidence';
+import { originalQuote,companyNames,namesCompany as literalNamesCompany } from './evidence';
 import { sameCompanyName } from '@/mvp/research/company-names';
 import { namesCompany } from '@/mvp/research/need';
 import { articleAnalysisText } from '@/mvp/research/relevance';
 import {ownDocumentIdentity} from '@/mvp/research/attribution';
+import {engineeringOnlySource,otherStainlessPipe} from './work-scope';
 
 /** A work check is inference, not proof of a purchase/specification. Recheck the
  * stored source before BOTH lead saving and demo qualification use that inference. */
 export function supportedWorkProof(proof:{company:string;quote:string;text:string;package?:string|null;url?:string;identityQuote?:string},
   productId:string,brief:SearchBrief):boolean {
   const quote=originalQuote(proof.text,proof.quote);
-  if(!quote||(!namesCompany(quote,proof.company)&&!ownDocumentIdentity(proof.text,proof.company,proof.url,proof.identityQuote))||materialOutputOnly(quote,productId))return false;
+  if(!quote||(!namesCompany(quote,proof.company)&&!ownDocumentIdentity(proof.text,proof.company,proof.url,proof.identityQuote))||materialOutputOnly(quote,productId)
+    ||engineeringOnlySource(quote,clause=>literalNamesCompany(clause,companyNames(proof.company,quote))))return false;
   // The company-attributed contract sentence may refer to a plant described in
   // its neighbouring paragraph. Context informs application; it is not RFQ proof.
   const body=articleAnalysisText(proof.text);
@@ -24,10 +26,9 @@ export function supportedWorkProof(proof:{company:string;quote:string;text:strin
   const scope=`${quote} ${proof.package??''}`;
   const otherPipe:Record<string,RegExp>={
     'hdpe-pipe':/\b(?:GRP|GRE|fiberglass|glass reinforced|ductile iron|steel pipes?|steel pipelines?)\b/i,
-    'ss-duplex-pipe':/\b(?:HDPE|polyethylene|PVC|GRP|GRE|ductile iron)\b/i,
     'line-pipe':/\b(?:HDPE|polyethylene|PVC|GRP|GRE|ductile iron)\b/i,
   };
-  return !otherPipe[productId]?.test(scope);
+  return productId==='ss-duplex-pipe'?!otherStainlessPipe(scope):!otherPipe[productId]?.test(scope);
 }
 
 /** Only same-run, same-company accepted need checks, never a freeform CRM reason. */

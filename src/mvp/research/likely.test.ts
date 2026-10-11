@@ -55,6 +55,14 @@ describe("likely buyers become leads (docs/mvp/19 §6)", () => {
     expect(minimumBuyers(undefined)).toBe(10);
     expect(minimumBuyers(1)).toBe(2);
   });
+  it('does not promote a designer from a rating-only interpretation (Example fixture)',async()=>{
+    const text='Example Designer won a FEED contract for a gas processing plant in UAE.';
+    const r=(await db.query<{id:string}>("insert into runs(status) values('running') returning id")).rows[0].id;
+    await db.query("insert into research_sessions(run_id,budget) values($1,'{}')",[r]);
+    const d=await storeDocument(db,r,{...list,url:'https://example.com/design-contract',text});
+    await db.query("insert into research_candidates(run_id,key,company,identity_document_id,identity_quote,state,rating,rating_role,rating_reason,rating_buyer_type,rating_source) values($1,'example-designer','Example Designer',$2,$3,'review',80,'EPC contractor','Example model misclassification','contractor','ai')",[r,d.id,text]);
+    expect((await saveLikelyBuyers(db,r,input)).saved).toBe(0);
+  });
   it("scores a regular buyer that names the material well without an award; an award is a bonus", () => {
     expect(buyerPriority("explicit", "capability_only", "B").score).toBe(82);
     expect(buyerPriority("application", "capability_only", "B").score).toBe(67);

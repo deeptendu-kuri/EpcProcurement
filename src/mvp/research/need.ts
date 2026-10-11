@@ -10,7 +10,7 @@
 import type { Queryable } from '@/mvp/db';
 import type { LLMProvider } from '@/mvp/llm';
 import { firstJsonObject } from '@/mvp/llm/groq';
-import { originalQuote } from '@/mvp/discovery/evidence';
+import { originalQuote,companyNames,namesCompany as literalNamesCompany } from '@/mvp/discovery/evidence';
 import { detectCountry, detectMarkets } from '@/mvp/pipeline/filter';
 import { matchUse, type SearchBrief } from '@/mvp/discovery/brief';
 import { companyKey, initialsOf, sameCompanyName } from './company-names';
@@ -21,10 +21,11 @@ import {currentWorkProof,namesProject,type CurrentWorkDocument,type CurrentWorkP
 import {ownDocumentIdentity} from './attribution';
 import {pagePublishedAt} from './page-date';
 import {missingMaterialOnly,potentialNeedReason,stainlessWorkApplication} from '@/mvp/discovery/potential-work';
+import {engineeringOnlySource} from '@/mvp/discovery/work-scope';
 
 export type NeedRole = 'owner' | 'developer' | 'epc' | 'jv_partner' | 'subcontractor' | 'maintenance_contractor' | 'seller_of_item' | 'other_supplier' | 'consultant' | 'investor' | 'other';
 export type Verdict = 'lead' | 'owner' | 'rejected';
-export interface NeedCompany { name: string; role: NeedRole; package: string; quote: string; quoteVerified: boolean; since: string | null; verdict: Verdict; reason: string; identityQuote?:string }
+export interface NeedCompany { name: string; role: NeedRole; package: string; quote: string; quoteVerified: boolean; since: string | null; verdict: Verdict; reason: string; identityQuote?:string; applicationUse?:string }
 export interface NeedResult {
   project: string | null; country: string | null; market: string | null; date: string | null; use: string | null;
   needsItem: 'yes' | 'no' | 'unclear'; needWhy: string; companies: NeedCompany[];
@@ -133,7 +134,11 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
     const quoteVerified = Boolean(literal&&(namesCompany(literal,name)||ownDocumentIdentity(doc.text,name,doc.url,identityQuote)));
     const date = workDate(quote, since, doc.publishedAt), age = monthsAgo(date, now);
     const application=quoteVerified?stainlessWorkApplication({company:name,quote:literal!,text:doc.text,package:pkg},brief):null;
-    const reviewedNeed=Boolean(application&&use&&DOES_WORK.has(role)&&c?.buysItem!=='no'&&missingMaterialOnly(needWhy));
+    // A null model use caused ONLY by missing pipe/specification wording can be
+    // recovered from the reviewed, company-attributed original application.
+    // It is not authority to override unrelated work or an own-package rejection.
+    const companyUse=use??(application&&missingMaterialOnly(needWhy)?application:null);
+    const reviewedNeed=Boolean(application&&companyUse&&DOES_WORK.has(role)&&c?.buysItem!=='no'&&missingMaterialOnly(needWhy));
     const needsOwnItem=needsItem==='yes'||reviewedNeed;
     const sells = role === 'seller_of_item' || SELLER.test(`${name} ${pkg}`) || Boolean(brief.productId&&materialOutputOnly(literal??quote,brief.productId));
     const completed = /\b(?:completed|delivered|commissioned|handed over)\b/i.test(quote)&&! /\b(?:ongoing|under construction|currently|maintenance|revamp|expansion)\b/i.test(quote);
@@ -141,15 +146,15 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
     const why = [
       sells && 'sells the item (a competitor)',
       !DOES_WORK.has(role) && !owns && !sells && `role ${role}`,
-      !use && 'the work is not one of the uses',
-      use && !needsOwnItem && `need ${needsItem}${needWhy ? `: ${needWhy}` : ''}`,
+      !companyUse && 'the work is not one of the uses',
+      companyUse && !needsOwnItem && `need ${needsItem}${needWhy ? `: ${needWhy}` : ''}`,
       brief.productId==='ss-duplex-pipe'&&!application&&/\b(?:transmission|cross[- ]country) pipelines?\b/i.test(pkg)&&'transmission pipeline package; stainless process-pipe need not established',
       !market && `outside the chosen countries (${country ?? 'unknown'})`,
       age !== null && age > NEED_WINDOW_MONTHS && !currentWork && `older than ${NEED_WINDOW_MONTHS} months (${date})`,
       age !== null && age < 0 && 'future-dated work; no current buying window established',
       completed && 'completed work; no current buying window established',
       STAKE.test(quote) && !WORK.test(quote) && 'an investment, not work',
-      ENGINEERING_ONLY.test(pkg) && !BUYS_MATERIAL.test(pkg) && 'engineering only, buys no material',
+      (engineeringOnlySource(literal??quote,clause=>literalNamesCompany(clause,companyNames(name,literal??quote))) || ENGINEERING_ONLY.test(pkg) && !BUYS_MATERIAL.test(pkg)) && 'engineering only, buys no material',
       // Smoke test, 10 Oct: the work needed the item, but a jetty contractor's own package does not buy it.
       DOES_WORK.has(role) && c?.buysItem === 'no' && 'its own package does not buy the item',
       DOES_WORK.has(role) && c?.buysItem!=='no' && CIVIL_ONLY.test(pkg) && !/\b(?:process|piping|mechanical|EPC|procurement)\b/i.test(pkg) && 'civil or electrical-only package, not material-consuming work',
@@ -157,13 +162,14 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
     ].filter((x): x is string => Boolean(x));
     // Owners and developers (rule 4) on qualifying work are kept as owners: they buy through their contractors.
     const verdict: Verdict = why.length ? 'rejected' : owns ? 'owner' : 'lead';
-    return [{ name, role, package: pkg, quote:literal??quote, quoteVerified, since: date, verdict, identityQuote, reason: why.join('; ') || (owns ? 'owner of work that needs the item' : 'does work that needs the item') }];
+    return [{ name, role, package: pkg, quote:literal??quote, quoteVerified, since: date, verdict, identityQuote, applicationUse:companyUse??undefined, reason: why.join('; ') || (owns ? 'owner of work that needs the item' : 'does work that needs the item') }];
   });
   // A reviewed application can recover a material-omission false negative, but
   // must not retroactively approve other companies in the same article.
   if(companies.some(c=>c.verdict==='lead')&&needsItem!=='yes')needsItem='yes';
-  return { project, country, market, date: workDate('', null, clip(raw.date, 10) || doc.publishedAt), use, needsItem,
-    needWhy:companies.some(c=>c.verdict==='lead')?potentialNeedReason(use):needWhy, companies, currentWork };
+  const acceptedUse=use??companies.find(c=>c.verdict==='lead')?.applicationUse??null;
+  return { project, country, market, date: workDate('', null, clip(raw.date, 10) || doc.publishedAt), use:acceptedUse, needsItem,
+    needWhy:companies.some(c=>c.verdict==='lead')?potentialNeedReason(acceptedUse):needWhy, companies, currentWork };
 }
 
 /**
@@ -189,7 +195,7 @@ export async function checkNeed(db: Queryable, runId: string, documentId: string
   for (const c of result?.companies ?? [])
     await db.query(`insert into need_checks(run_id,document_id,company_name,role,package,quote,quote_verified,work_date,project,project_country,market,use_name,needs_item,need_why,verdict,reason)
       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-      [runId, documentId, c.name, c.role, c.package, c.quote, c.quoteVerified, c.since, result!.project, result!.country, result!.market, result!.use, result!.needsItem, result!.needWhy, c.verdict, c.reason]);
+      [runId, documentId, c.name, c.role, c.package, c.quote, c.quoteVerified, c.since, result!.project, result!.country, result!.market, c.applicationUse??result!.use, result!.needsItem, c.verdict==='lead'?potentialNeedReason(c.applicationUse??result!.use):result!.needWhy, c.verdict, c.reason]);
   return { result, answer };
 }
 

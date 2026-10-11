@@ -27,6 +27,27 @@ async function exampleOpportunity(text='Example EPC won the EPC contract for con
   return {o:{...opportunity,id,run_id:run,name:'Example EPC',product_id:'line-pipe',product_name:'Line pipe',keyword:'line pipe',buying_reason:text,evidence_ids:[evidence]} as Opportunity,doc,evidence,company,url};
 }
 describe("grounded Groq sales decisions",()=>{
+  it('blocks design-only source evidence before spending an AI qualification request (Example fixture)',async()=>{
+    const s=await exampleOpportunity('Example EPC won a FEED design contract for a gas processing plant in the UAE.');
+    expect((await qualifyBuyer({...s.o,product_id:'ss-duplex-pipe',product_name:'Stainless process pipe'})).approved).toBe(false);
+    expect(complete).not.toHaveBeenCalled();
+  });
+  it('gives the model bounded stainless application guidance without asserting a grade (Example fixture)',async()=>{
+    const text='Example EPC delivers engineering, procurement and construction of an LNG export facility in the UAE.';
+    const s=await exampleOpportunity(text);
+    const b:SearchBrief={version:1,item:'Stainless steel pipe ASTM A312 TP316L',source:'ai',productId:'ss-duplex-pipe',mustHave:[],buying:'project',buyerRoles:[],notBuyers:[],owners:[],places:{AE:[]},uses:[{name:'oil & gas processing plant',newsWords:['LNG'],why:'Potential process piping',countries:['AE'],localWords:{}}]};
+    const o={...s.o,product_id:'ss-duplex-pipe',product_name:b.item};
+    await db.query('update runs set adhoc_query=$2::jsonb where id=$1',[o.run_id,JSON.stringify({productId:o.product_id,brief:b})]);
+    await db.query("insert into research_sessions(run_id,budget) values($1,'{}')",[o.run_id]);
+    await db.query("insert into need_checks(run_id,document_id,company_name,role,quote,quote_verified,needs_item,verdict) values($1,$2,'Example EPC','epc',$3,true,'yes','lead')",[o.run_id,s.doc,text]);
+    complete.mockResolvedValue({text:JSON.stringify({approved:true,confidence:.6,reason:'Potential process-piping application, grade unconfirmed',companyEvidenceId:s.evidence,productEvidenceId:s.evidence})});
+    expect((await qualifyBuyer(o)).approved).toBe(true);
+    const request=complete.mock.calls.at(-1)![0],data=JSON.parse(request.user);
+    expect(data.applicationRule).toContain('does not establish ASTM A312 TP316L');
+    expect(data.productEvidenceKinds[s.evidence]).toBe('application');
+    expect(request.system).toContain('missing stainless/ASTM wording alone is not a rejection reason');
+    expect(Buffer.byteLength(request.user,'utf8')).toBeLessThanOrEqual(QUALIFICATION_DATA_BYTES);
+  });
   it('uses the same literal work-check proof as discovery for demo qualification, never a guessed CRM reason',async()=>{
     const text='Example EPC won the EPC contract for an LNG liquefaction plant in the UAE.';
     const s=await exampleOpportunity(text);

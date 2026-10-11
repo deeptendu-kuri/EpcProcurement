@@ -3,6 +3,7 @@ import {matchUse} from './brief';
 import {materialOutputOnly} from './plan';
 import {originalQuote} from './evidence';
 import {namesCompany} from '@/mvp/research/need';
+import {otherStainlessPipe} from './work-scope';
 
 /** Reviewed application knowledge, NOT proof of a material order. Deliberately
  * bounded to the stainless-process-pipe false negatives observed in the live
@@ -15,7 +16,7 @@ export function stainlessApplicationProof(proof:{company:string;quote:string;tex
   // Own-company report bullets may omit the name. Attribution is checked by
   // judgeNeed/supportedWorkProof; never use a nameless half of a shared paragraph.
   const scope=own.length?own.join(' '):clauses.length===1?proof.quote:'';
-  if(!scope||/\b(?:HDPE|polyethylene|PVC|GRP|GRE|ductile iron|transmission pipelines?|cross[- ]country pipelines?|jetty|jetties|dredging)\b/i.test(scope))return null;
+  if(!scope||otherStainlessPipe(scope)||/\b(?:transmission pipelines?|cross[- ]country pipelines?|jetty|jetties|dredging)\b/i.test(scope))return null;
   const rules:[RegExp,string][]=[
     [/\b(?:gas processing|LNG.{0,100}(?:plant|facility|terminal|export|liquef)|NGL.{0,60}(?:plant|train|fractionation)|compression facilities|pre[- ]conditioning plant)\b/i,'oil & gas processing plant'],
     [/\b(?:chemical|petrochemical)\s+(?:process\s+)?(?:plant|complex)|\brefiner(?:y|ies)\b/i,'chemical process plant'],

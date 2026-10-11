@@ -25,6 +25,7 @@ import {publicationDateProof} from './page-date';
 import {companyNames,namesCompany as literalNamesCompany} from '@/mvp/discovery/evidence';
 import {countriesInQuote} from '@/mvp/discovery/locations';
 import {articleAnalysisText} from './relevance';
+import {engineeringOnlySource} from '@/mvp/discovery/work-scope';
 
 /** A need check's accepted company, with its source (docs/mvp/20). */
 interface NeedLead { company_name: string; role: string; quote: string; identity_quote?:string|null; need_why: string | null; use_name:string|null; work_date: string | null; market: string | null; project: string | null;
@@ -81,6 +82,7 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
       && (work ? namesWork(quote!, input.brief!) : materialEvidenceKind(quote!, productId) !== 'none'));
     // Every lead of a work-based search has a source sentence about the work.
     if (work && !listed) continue;
+    if(quote&&engineeringOnlySource(quote,clause=>literalNamesCompany(clause,companyNames(c.name,quote))))continue;
     // A plain-rule guess (no AI yet) becomes a lead only with its listed work as evidence.
     if (c.guessed && !listed) continue;
     const verification = listed ? 'listing' : 'rating';

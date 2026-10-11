@@ -168,3 +168,39 @@ The isolated harness explicitly disabled workers, cleared delivery credentials a
 Remaining release check: a separately authorised, bounded fresh live search followed by actual approved-inbox delivery, with worker/config readiness inspected first. This local patch is not pushed/deployed and does not modify historical or cloud data. No new provider credits or actual email deliveries are used by its regression tests.
 
 Final offline suite for this repair: **1,603 passed, 10 skipped** (159 passing files, four opt-in skipped files), using `--maxWorkers=2`. The 19 added tests include captured-answer relevance and real persistence/qualification-to-mocked-delivery handoff. Typecheck, lint and the isolated production build also pass. None of these results constitutes live inbox-delivery proof or a fresh multi-country lead-volume gate.
+
+## Production-app local rehearsal with real delivery, and checkpoint repair
+
+Both runs below used the actual production Next.js app, its browser search form, normal provider pacing, real Tavily/Groq, a fresh isolated local PGlite database, and automation enabled before submission. Input: stainless steel pipe ASTM A312 TP316L for process piping; India, Canada and UAE; Quick, no auto-pause or extra rounds. No fixture company, URL or answer was seeded into either fresh search. No Render, cloud database, migration, push or deployment was performed.
+
+| Stage | Original saved prospects | Requests/cost | Outcome |
+|---|---:|---|---|
+| Run `1648f22b-72ce-414e-9fc8-593c7cc5289b` | 3: Fluor, JGC and Worley Engineering | 12 actual Tavily requests; 23,591 recorded research tokens; Cloudflare 429 failures | 320 seconds. Two introductions delivered, but Worley's FEED-only scope was an admission failure and JGC was held for review incorrectly. User confirmed Fluor receipt. Worley's demo conversation was paused. **Quality gate failed.** |
+| Fresh run `d020dc0d-bd7d-4699-8ed5-03957d537947` | 4 Canadian entities: Fluor Corporation, JGC Corporation, Fluor Canada Ltd and JGC Constructors (No2) BC Ltd | 12 Tavily requests/credits; 22 actual AI HTTP requests including two Cloudflare 429s; 31,581 recorded research tokens, 35,689 successful HTTP-response tokens including qualification | 427 seconds. Three introductions automatically delivered only to the approved inbox: Fluor Corporation, JGC Corporation and Fluor Canada Ltd. JGC was no longer held and Worley was rejected. India/UAE still saved zero. **Fresh country-coverage gate failed.** |
+| Same-run checkpoint recovery after the next judge repair | +4: Larsen & Toubro (India); ENPPI, Petrojet and Petrofac Emirates LLC (UAE) | Zero new HTTP, AI or email requests | Exact stored real answers and original pages passed through the production need-check, candidate-registration and saving functions. The local UI now displays 8 opportunities. **This is recovery, NOT another fresh search or a passing fresh-search gate.** |
+
+The four Canadian entities represent two corporate groups on one project. Do not market them as four unrelated customers. Contacts remain zero; role placeholders are not identified people. Exact grade, quantities and remaining purchasing needs remain unconfirmed.
+
+The fresh runs settled at `runs.status=done` and `research_sessions.state=done`, but requests were blocked by the explicit rehearsal ceiling and additional analysis was skipped at its budget. The UI correctly labels the latter run "Finished · partial". Completion does not establish exhaustive source coverage. Two blocked Tavily attempts in the second run were never sent; the UI's 14 reserved search units are not 14 paid requests. Its hard request guard persisted counters across the later local restart.
+
+### Repairs grounded in these failures
+
+- Inspect original company-attributed clauses for design/FEED-only scope before saving or qualifying a buyer. An invented model package such as "EPC" cannot override a literal FEED contract. Rated candidates cannot bypass this guard.
+- Supply the bounded email fit request with stainless-process application guidance. Physical LNG EPC/JV work supports a potential application, not proof of ASTM A312 TP316L. Preserve AI rejection for incompatible work and require real cited evidence IDs.
+- Recover a null model use only when its reason is missing material/specification wording and the original company-attributed application matches the reviewed stainless rule. Unrelated-use, explicit own-package rejection, country, time, quote and role guards remain.
+- Distinguish a polymer-manufacturing unit's output from its piping material. A polyethylene plant can have potential stainless-process applications; an explicitly polyethylene/HDPE/PVC piping package cannot borrow that inference.
+- Store each company's recovered application separately, not another contractor's scope. The transmission-pipeline contractor remains excluded.
+
+The second run's two exact responses and pages are test-only `live-app-need-regressions.json`. They are never production seeds. Regression tests check both rejections and recovery. A separate ignored, no-HTTP checkpoint harness applied the same production persistence functions to the stopped local test database and confirmed all evidence quotes exist in that run's originals, four recovered prospects and zero person/contact rows.
+
+Final checks after these repairs: **1,613 tests passed, 10 opt-in tests skipped**, typecheck, lint and isolated production build passed. The separate local-database checkpoint test also passed. Browser proof confirmed the eight loaded rows, functioning evidence drawer/workspace links and three email conversations; screenshot waiting was adjusted for hydration and combined company/product link text, not product code.
+
+Artifacts are ignored: `tmp/live-app-20261011/` and `tmp/live-app-20261011-r2/`. The latter preserves `audit.json` before recovery, `audit-recovered.json`, `checkpoint-recovery.json`, network counters, delivery receipts and screenshots. Private configuration and browser state are not committed.
+
+### Still unproven / follow-up
+
+- A NEW uncached search with the final null-use/polymer repairs has not run. The zero-additional-cost recovery must not be presented as fresh live recall. Another charged search needs separate approval.
+- Repeated news coverage still spends analysis on the same project before later country pages. Country-aware first-pass prioritisation, project-story dedupe and postponing optional extraction remain efficiency improvements; merely raising token caps is not a demonstrated fix.
+- Corporate-group outreach dedupe is not implemented. The current cap is three legal-company opportunities, not three unrelated groups.
+- This isolated database has no Google Calendar consent. Reply analysis and meeting booking were not exercised in this rehearsal; do not reuse older meeting proof as proof for this database.
+- Cloud deployment remains separate. A working persistent cloud database is needed before the later Render rehearsal; a new API key alone does not resolve database quota exhaustion.
