@@ -48,6 +48,26 @@ describe("grounded Groq sales decisions",()=>{
     expect(request.system).toContain('missing stainless/ASTM wording alone is not a rejection reason');
     expect(Buffer.byteLength(request.user,'utf8')).toBeLessThanOrEqual(QUALIFICATION_DATA_BYTES);
   });
+  it('uses same-run revalidated need proof without a second AI veto ONLY for the approved-inbox demo',async()=>{
+    vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');
+    const text='Example EPC delivers engineering, procurement and construction of a petrochemical plant in the UAE.';
+    const s=await exampleOpportunity(text);
+    const b:SearchBrief={version:2,item:'Stainless process pipe',source:'ai',productId:'ss-duplex-pipe',mustHave:[],buying:'project',buyerRoles:[],notBuyers:[],owners:[],places:{AE:[]},uses:[{name:'chemical process plant',newsWords:['petrochemical'],why:'Potential process piping',countries:['AE'],localWords:{}}]};
+    const o={...s.o,product_id:'ss-duplex-pipe',product_name:b.item};
+    await db.query('update runs set adhoc_query=$2::jsonb where id=$1',[o.run_id,JSON.stringify({productId:o.product_id,brief:b})]);
+    await db.query("insert into research_sessions(run_id,budget) values($1,'{}')",[o.run_id]);
+    await db.query("insert into need_checks(run_id,document_id,company_name,role,quote,quote_verified,needs_item,verdict) values($1,$2,'Example EPC','epc',$3,true,'yes','lead')",[o.run_id,s.doc,text]);
+    complete.mockRejectedValue(new Error('Example duplicate qualification must not run'));
+    expect(await qualifyBuyer(o,{demoFallback:true})).toMatchObject({approved:true,basis:'demo_verified_work',reason:expect.stringContaining('unconfirmed')});
+    expect(complete).not.toHaveBeenCalled();
+    // The non-demo path still requires the AI decision; it is not overridden.
+    complete.mockResolvedValue({text:JSON.stringify({approved:false,reason:'Example negative real-buyer decision',companyEvidenceId:null,productEvidenceId:null})});
+    expect((await qualifyBuyer(o)).approved).toBe(false);expect(complete).toHaveBeenCalledOnce();
+    complete.mockClear();await db.query("update companies set types='{owner}' where id=$1",[s.company]);
+    expect((await qualifyBuyer(o,{demoFallback:true})).approved).toBe(false);
+    await db.query("update need_checks set quote_verified=false where run_id=$1",[o.run_id]);
+    complete.mockClear();expect((await qualifyBuyer(o,{demoFallback:true})).approved).toBe(false);expect(complete).not.toHaveBeenCalled();
+  });
   it('uses the same literal work-check proof as discovery for demo qualification, never a guessed CRM reason',async()=>{
     const text='Example EPC won the EPC contract for an LNG liquefaction plant in the UAE.';
     const s=await exampleOpportunity(text);

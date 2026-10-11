@@ -83,7 +83,8 @@ describe('buyer-first real-page regression replay (no live requests)',()=>{
     expect(evidence.every(e=>e.text.includes(e.quote))).toBe(true);
     expect((await db.query('select 1 from people')).rows).toHaveLength(0);
     expect((await db.query('select 1 from contact_points')).rows).toHaveLength(0);
-    expect(extraction.mock.calls[0][1]?.includePeople).toBe(false);
+    expect(extraction).not.toHaveBeenCalled();
+    expect((await db.query("select id from research_jobs where run_id=$1 and payload->>'kind'='analyse:award-details'",[run])).rows).toHaveLength(1);
     expect(deps.read).not.toHaveBeenCalled();
   },60000);
 });

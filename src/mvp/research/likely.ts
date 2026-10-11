@@ -26,12 +26,11 @@ import {companyNames,namesCompany as literalNamesCompany} from '@/mvp/discovery/
 import {countriesInQuote} from '@/mvp/discovery/locations';
 import {articleAnalysisText} from './relevance';
 import {engineeringOnlySource} from '@/mvp/discovery/work-scope';
+import {needPriorityScore} from './need';
 
 /** A need check's accepted company, with its source (docs/mvp/20). */
 interface NeedLead { company_name: string; role: string; quote: string; identity_quote?:string|null; need_why: string | null; use_name:string|null; work_date: string | null; market: string | null; project: string | null;
   document_id: string; text:string; package:string|null; url: string | null; tier: string | null; publisher_key: string | null }
-/** A need-proven lead's fit: its work needs the item, shown on a verified sentence. */
-const NEED_FIT = 75;
 
 export const LIKELY_MIN = 45;
 export const LIKELY_MAX_PER_SEARCH = 60;
@@ -57,13 +56,16 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
       .filter(n=>supportedWorkProof({company:n.company_name,quote:n.quote,text:n.text,package:n.package,url:n.url??undefined,identityQuote:n.identity_quote??undefined},productId,input.brief!)) : [];
   const needFor = (name: string) => needs.find((n) => sameCompanyName(n.company_name, name)) ?? null;
   const work = Boolean(input.brief?.uses.length);
+  const nonBuilders=work?(await db.query<{company_name:string}>(
+    "select distinct company_name from need_checks where run_id=$1 and quote_verified=true and role in ('owner','developer','consultant','seller_of_item')",[runId])).rows:[];
   const picks = (await listFoundCompanies(db, runId))
     // Smoke test, 10 Oct: names rated without any source sentence (Fluor on LNG Canada, a package name) became
     // leads. In a work-based search a rated company needs its own sentence naming the brief's work.
-    // Two AI checks that disagree: the stricter wins (smoke test 3: the need check took a jetty contractor on an LNG
-    // project, the rating said "Not this work" — jetty work rarely buys cryogenic valves).
-    .filter((c) => !c.opportunityId && ((needFor(c.name) && !(work && (c.rating ?? 100) <= 30 && /^Not this work/.test(c.ratingReason ?? '')))
+    // Source-checked own work decides admission. A second generic shortlist
+    // rating cannot veto this evidence; recency changes ordering, not admission.
+    .filter((c) => !c.opportunityId && (needFor(c.name)
       || (c.relevant && (c.rating ?? 0) >= LIKELY_MIN && c.buyerType && ROLE[c.buyerType]
+      && !nonBuilders.some(n=>sameCompanyName(n.company_name,c.name))
       && (!work || Boolean(c.quote && namesWork(c.quote, input.brief!))))))
     .slice(0, LIKELY_MAX_PER_SEARCH);
   if (!picks.length) return { saved: 0, listing: 0 };
@@ -152,7 +154,7 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
         on conflict on constraint leads_candidate_uniq do update set updated_at=now() returning id`, [company.id, [productId], JSON.stringify([{ text: reason, evidenceIds: evidence }]), runId, role])).rows[0];
       const inserted = await tx.query(`insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,contact_role,buying_reason,evidence_ids,discovery_kind,fit_score,material_fit_kind,activity_status,verification,activity_date,activity_quote,discovery_version)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid[],'company',$10,$11,$12,$13,$14::date,$15,0) on conflict(run_id,company_id,product_id) do nothing returning id`,
-        [runId, lead.id, company.id, input.query ?? label, productId, label, input.contactRole ?? 'buyer', reason, evidence, need ? Math.max(c.rating ?? 0, NEED_FIT) : c.rating ?? LIKELY_MIN, !need&&c.match === 'named' ? 'explicit' : 'potential', currentProof||executing?'ongoing':contract&&need?.work_date?'recent':'capability_only',verification,dateProof?.date??null,contract||executing?quote:null]);
+        [runId, lead.id, company.id, input.query ?? label, productId, label, input.contactRole ?? 'buyer', reason, evidence, need ? needPriorityScore(need.work_date,contract,Boolean(currentProof)||executing) : c.rating ?? LIKELY_MIN, !need&&c.match === 'named' ? 'explicit' : 'potential', currentProof||executing?'ongoing':contract&&need?.work_date?'recent':'capability_only',verification,dateProof?.date??null,contract||executing?quote:null]);
       if (inserted.rows.length && listed && quote)
         await storeTrigger(tx, runId, company.id, productId, need && contract
           // Its dated work on a project that needs the item (Recent work and the buying window come from this).

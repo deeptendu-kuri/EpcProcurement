@@ -33,7 +33,7 @@ async function ask(system: string,data: unknown) {
   return parse(result.text);
 }
 type QualificationEvidence = {id:string;document_id?:string|null;quote:string;url:string;text:string|null;own_run:boolean;company_domain:string|null;company_types?:string[]|null};
-type BuyerQualification = {approved:boolean;reason:string;basis?:'demo_evidence_fallback'};
+type BuyerQualification = {approved:boolean;reason:string;basis?:'demo_evidence_fallback'|'demo_verified_work'};
 /** Full source pages stay server-side. Repeated page text must never inflate an AI request. */
 export const QUALIFICATION_DATA_BYTES = 10_000;
 function qualificationData(o:Opportunity,quotes:QualificationEvidence[],workProof:Set<string>) {
@@ -81,6 +81,16 @@ export async function qualifyBuyer(o: Opportunity,options:{demoFallback?:boolean
     .filter(q=>!engineeringOnlySource(q.quote,clause=>namesCompany(clause,companyNames(o.name,q.quote))));
   if (!quotes.length || o.is_sample) return {approved:false,reason:"No verified real-source evidence for this product opportunity."};
   const workProof=o.run_id?await workProofEvidence(getDb(),o,quotes):new Set<string>();
+  // In the approved-inbox demo, a same-run need check has already established
+  // this company's literal material-consuming work. Revalidate its stored
+  // evidence rather than buying a second, conflicting AI verdict or requiring
+  // an exact grade/contact. This never relaxes real-buyer contact validation.
+  if(options.demoFallback&&prospectDemoEnabled()&&getLLM('draft').name==='groq'&&o.qualification!=='rejected'){
+    const blocked=new Set(['owner','project_owner','developer','consultant','manufacturer','supplier','distributor']);
+    const proof=quotes.find(q=>workProof.has(q.id)&&q.own_run&&q.text&&originalQuote(q.text,q.quote)
+      &&!(q.company_types?.length&&q.company_types.every(t=>blocked.has(t))));
+    if(proof)return {approved:true,basis:'demo_verified_work',reason:`Demo-only, same-search verified work check (${proof.id}) establishes a potential ${o.product_name} application for ${o.name}. Exact specification and purchasing status are unconfirmed. Buyer contacts are not validated; delivery remains approved-inbox-only.`};
+  }
   const productEvidenceIds=quotes.filter(q=>buyerPageCandidate(q.quote,o.product_id)||workProof.has(q.id)).map(q=>q.id);
   if(!productEvidenceIds.length)return {approved:false,reason:"The original product evidence does not establish buying-compatible work for the exact searched product. No email sent."};
   const schema=z.object({approved:z.boolean(),confidence:z.number().min(0).max(1).catch(0),reason:z.string().min(1).max(1500),

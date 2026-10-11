@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type Db } from "@/mvp/db";
 import type { LLMProvider } from "@/mvp/llm";
 import type { SearchBrief } from "@/mvp/discovery/brief";
-import { checkNeed, judgeNeed, needAccepted, needProofs, workDate, workMarket } from "./need";
+import { checkNeed, judgeNeed, needAccepted, needProofs, needPriorityScore, workDate, workMarket } from "./need";
 
 const brief = (over: Partial<SearchBrief> = {}): SearchBrief => ({
   version: 1, item: "Cryogenic valves", mustHave: ["−196 °C service"], buying: "project", source: "ai", productId: "gate-globe-check",
@@ -149,14 +149,14 @@ describe("need-proven companies become leads (smoke test, 10 Oct)", () => {
       expect(opp.buying_reason.startsWith(`${text} Why it may need `)).toBe(true);
       expect(opp.buying_reason).toContain("potential application");
       expect(opp.buying_reason).toContain("Exact specification, quantity and purchasing status are unconfirmed");
-      expect(Number(opp.fit_score)).toBe(75);
+      expect(Number(opp.fit_score)).toBe(needPriorityScore('2026-08-17',true,false));
       const trig = (await db.query<{ kind: string; event_date: string | null; title: string; strength: string }>("select kind, to_char(event_date, 'YYYY-MM') as event_date, title, strength from company_triggers where run_id=$1", [run])).rows[0];
       expect(trig).toMatchObject({ kind: "award", title: text, strength: "confirmed" });
       // The engine keeps a trigger date only when the sentence states it; this one does not.
       expect(trig.event_date).toBeNull();
     } finally { await db.close(); }
   }, 60_000);
-  it("does not save it when the rating AI judged its own work is not the work (two checks disagree: the stricter wins)", async () => {
+  it("does not save incompatible own work, regardless of its generic shortlist rating", async () => {
     const { saveLikelyBuyers } = await import("./likely");
     const { registerCandidate } = await import("./investigation");
     const db = await createTestDb();

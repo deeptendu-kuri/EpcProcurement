@@ -87,6 +87,7 @@ describe('saved genuine company work to approved-inbox demo handoff',()=>{
     expect(threads.map(t=>({state:t.state,reason:t.reason}))).toEqual(expect.arrayContaining([expect.objectContaining({state:'active'})]));
     expect(threads.every(t=>t.state==='active'&&t.person_id===null&&t.recipient==='hritikdebnath00@gmail.com')).toBe(true);
     expect(mocks.contact).not.toHaveBeenCalled();expect(noProvider.complete).not.toHaveBeenCalled();
+    expect(mocks.complete).not.toHaveBeenCalled(); // source-backed demo needs no second paid AI qualification
     expect(mocks.send).toHaveBeenCalledTimes(3);
     for(const [message] of mocks.send.mock.calls){
       expect(message.body).toContain('Hi Hritik Debnath');expect(message.body).toContain('Seller: Deeptendu Kuri');

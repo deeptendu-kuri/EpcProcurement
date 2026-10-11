@@ -1,5 +1,5 @@
 import type {SearchBrief} from './brief';
-import {matchUse} from './brief';
+import {matchUse,namesWork} from './brief';
 import {materialOutputOnly} from './plan';
 import {originalQuote} from './evidence';
 import {namesCompany} from '@/mvp/research/need';
@@ -34,6 +34,16 @@ export function stainlessApplicationProof(proof:{company:string;quote:string;tex
 
 export function stainlessWorkApplication(proof:{company:string;quote:string;text:string;package?:string|null},brief:SearchBrief):string|null {
   return stainlessApplicationProof(proof,brief)?.use??null;
+}
+
+/** Match an application from this company's own source clause, not an exact
+ * product/grade mention. It is a potential use, never proof of an order. Other
+ * companies' packages in a shared paragraph cannot donate that application. */
+export function sourceWorkApplication(company:string,quote:string,brief:SearchBrief):string|null {
+  const clauses=quote.split(/\s+(?:while|whereas|but)\s+|;\s*/i);
+  const own=clauses.filter(c=>namesCompany(c,company));
+  const scope=own.length?own.join('\n'):clauses.length===1?quote:'';
+  return brief.uses.find(use=>namesWork(scope,{...brief,uses:[use]}))?.name??null;
 }
 
 /** Only a missing-material/specification rationale can be corrected by reviewed

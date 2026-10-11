@@ -197,7 +197,7 @@ const NON_BUYER_ORG = /\b(?:investment|investors?|holding compan\w*|fund|banks?|
 /** Well-known names that are not pipe buyers: consultants, equipment makers, defunct contractors. */
 const KNOWN_NON_BUYER = /^(?:aecom|black\s*&\s*veatch|jacobs|wsp|atkins(?:realis)?|mott macdonald|fichtner|parsons|arcadis|dar al[- ]handasah|siemens(?: energy)?|alstom|general electric|ge vernova|abb|schneider electric|honeywell|emerson|mitsubishi power|abengoa)\b/i;
 /** Its own line says it receives or invites bids, or awards a contract: the procuring owner or agency, not a contractor. */
-const AWARDS_WORK = /\b(?:receives?|invites?|qualif(?:y|ies)|shortlists?)\s+(?:\w+\s+){0,2}(?:bids?|bidders|offers)\b|\bawards?\s+(?:\w+\s+){0,4}(?:contract|deal|package)\b/i;
+const AWARDS_WORK = /\b(?:receives?|invites?|qualif(?:y|ies)|shortlists?)\s+(?:\w+\s+){0,2}(?:bids?|bidders|offers)\b|\b(?:awards?|has awarded|have awarded)\s+(?:\w+\s+){0,4}(?:contracts?|deals?|packages?)\b/i;
 /** Its own line is a technology or licence deal, not construction work. */
 const TECH_DEAL = /\b(?:technology (?:package|licen\w*|contract|agreement)|licen[cs]e (?:agreement|deal)|process licen\w*)\b/i;
 /** The web address or the page it was named on says it sells the material: a pipe mill or stockist. */

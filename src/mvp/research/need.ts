@@ -20,7 +20,7 @@ import { materialOutputOnly } from '@/mvp/discovery/plan';
 import {currentWorkProof,namesProject,type CurrentWorkDocument,type CurrentWorkProof} from './current-work';
 import {ownDocumentIdentity} from './attribution';
 import {pagePublishedAt} from './page-date';
-import {missingMaterialOnly,potentialNeedReason,stainlessWorkApplication} from '@/mvp/discovery/potential-work';
+import {missingMaterialOnly,potentialNeedReason,stainlessWorkApplication,sourceWorkApplication} from '@/mvp/discovery/potential-work';
 import {engineeringOnlySource} from '@/mvp/discovery/work-scope';
 
 export type NeedRole = 'owner' | 'developer' | 'epc' | 'jv_partner' | 'subcontractor' | 'maintenance_contractor' | 'seller_of_item' | 'other_supplier' | 'consultant' | 'investor' | 'other';
@@ -55,8 +55,14 @@ const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.replace(/\s+/
 export function namesCompany(quote: string, name: string): boolean {
   const core = companyKey(name), plain = quote.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   if (core.length >= 3 && plain.includes(core)) return true;
-  const first = (name.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []).find(w=>!['corporation','company','limited','private','engineering','construction','contracting','international','industries','group'].includes(w));
-  return Boolean(first && plain.includes(first) && first.length >= 5) || (initialsOf(name).length >= 3 && new RegExp(`\\b${initialsOf(name)}\\b`, 'i').test(quote));
+  // Generic legal/business tails may be omitted (McDermott International ->
+  // McDermott), but a geographic subsidiary must not borrow the parent's quote
+  // (Fluor Canada -> Fluor). Never use merely the first distinctive word.
+  const words=name.toLowerCase().replace(/\([^)]*\)/g,' ').match(/[\p{L}\p{N}]+/gu)??[];
+  const tails=new Set(['corporation','corp','company','co','limited','ltd','private','pvt','inc','llc','plc','international','engineering','construction','contracting','industrial','industries','group','global','services']);
+  while(words.length>1&&tails.has(words.at(-1)!))words.pop();
+  const short=words.join(' ');
+  return Boolean(short.length>=3&&literalNamesCompany(quote,[short])) || (initialsOf(name).length >= 3 && new RegExp(`\\b${initialsOf(name)}\\b`, 'i').test(quote));
 }
 
 export function needPrompt(doc: { text: string; url: string; title: string | null; publishedAt: string | null }, brief: SearchBrief): { system: string; user: string } {
@@ -76,6 +82,7 @@ Return {"project": project name or null, "country": country where the work is do
   "unclear" only if what the work is cannot be told from the text,
 "needWhy": one line explaining that verdict,
   Treat this as a POTENTIAL engineering application, never a confirmed RFQ, exact grade, quantity or purchasing status unless a literal source quote explicitly establishes it. A plant using pipes does not establish ASTM A312 TP316L demand.
+  A contract win is a stronger buying signal, NOT a requirement. Regular material-consuming work also qualifies. Do not reject a potential buyer for missing contract value, contact, email, exact specification or an unknown date; leave unknown facts null. Recency is ranked later.
 "companies": [{"name": company, "role": one of owner|developer|epc|jv_partner|subcontractor|maintenance_contractor|seller_of_item|other_supplier|consultant|investor|other, "package": what it does in this work, "quoteIndex": the integer index of the ONE paragraph proving this company's own work, "quote": optional exact sentence from that paragraph (no rewording, shortening or joining other headings), "since": "YYYY" or "YYYY-MM" when the text says when it got this work, else null,
   "buysItem": "yes" if this company's OWN package would buy the item sold (an EPC, process or piping, mechanical, tank or plant contractor usually does), "no" if its package would not (e.g. dredging, jetty or marine civil works, roads, buildings only, electrical only, drilling, engineering or design only)}]}
 If an own-company report lists its work in bullets without repeating its name, also return "identityQuote": its literal company-name header. Keep the work quote and header separate; do not stitch them into an invented sentence.
@@ -133,12 +140,19 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
     const identityQuote=clip(c?.identityQuote,300)||undefined;
     const quoteVerified = Boolean(literal&&(namesCompany(literal,name)||ownDocumentIdentity(doc.text,name,doc.url,identityQuote)));
     const date = workDate(quote, since, doc.publishedAt), age = monthsAgo(date, now);
-    const application=quoteVerified?stainlessWorkApplication({company:name,quote:literal!,text:doc.text,package:pkg},brief):null;
+    const application=quoteVerified?(brief.productId==='ss-duplex-pipe'
+      ?stainlessWorkApplication({company:name,quote:literal!,text:doc.text,package:pkg},brief)
+      :sourceWorkApplication(name,literal!,brief)):null;
     // A null model use caused ONLY by missing pipe/specification wording can be
     // recovered from the reviewed, company-attributed original application.
     // It is not authority to override unrelated work or an own-package rejection.
-    const companyUse=use??(application&&missingMaterialOnly(needWhy)?application:null);
-    const reviewedNeed=Boolean(application&&companyUse&&DOES_WORK.has(role)&&c?.buysItem!=='no'&&missingMaterialOnly(needWhy));
+    // A valid model verdict may still misname the application (e.g. LNG as a
+    // petrochemical plant). Prefer this company's literal brief-matching work
+    // for the description; this fallback never recovers a null/negative verdict.
+    const sourceUse=application??(needsItem==='yes'&&use&&quoteVerified?sourceWorkApplication(name,literal!,brief):null);
+    const companyUse=sourceUse&&(needsItem==='yes'||missingMaterialOnly(needWhy))?sourceUse:use;
+    const reviewedNeed=Boolean(application&&companyUse&&DOES_WORK.has(role)&&c?.buysItem!=='no'&&missingMaterialOnly(needWhy)
+      &&(brief.productId==='ss-duplex-pipe'||needsItem!=='no'));
     const needsOwnItem=needsItem==='yes'||reviewedNeed;
     const sells = role === 'seller_of_item' || SELLER.test(`${name} ${pkg}`) || Boolean(brief.productId&&materialOutputOnly(literal??quote,brief.productId));
     const completed = /\b(?:completed|delivered|commissioned|handed over)\b/i.test(quote)&&! /\b(?:ongoing|under construction|currently|maintenance|revamp|expansion)\b/i.test(quote);
@@ -232,13 +246,29 @@ export function followUpQueries(project: string, item: string): string[] {
 export async function projectsToFollow(db: Queryable, runId: string, result: NeedResult): Promise<{ project: string; market: string }[]> {
   if (result.needsItem !== 'yes' || !result.project || !result.market || !result.companies.some((c) => c.verdict === 'lead' || c.verdict === 'owner')) return [];
   const followed = (await db.query<{ key: string }>(`select key from research_jobs where run_id=$1 and stage='collect' and key like 'follow:%'`, [runId])).rows.map((r) => r.key);
-  const slug = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').slice(0, 60);
-  if (followed.some((k) => k.startsWith(`follow:${result.market}:${slug(result.project!)}:`))) return [];
-  const projects = new Set(followed.filter((k) => k.startsWith(`follow:${result.market}:`)).map((k) => k.split(':')[2]));
+  const local=followed.filter(k=>k.startsWith(`follow:${result.market}:`));
+  if (local.some(k=>projectFollowKey(k.split(':')[2])===projectFollowKey(result.project!))) return [];
+  const projects = new Set(local.map(k=>projectFollowKey(k.split(':')[2])));
   return projects.size >= FOLLOW_PROJECTS_PER_COUNTRY ? [] : [{ project: result.project, market: result.market }];
 }
 export const followKey = (market: string, project: string, n: number) =>
-  `follow:${market}:${project.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').slice(0, 60)}:${n}`;
+  `follow:${market}:${projectFollowKey(project)}:${n}`;
+
+/** Word-order changes must not buy another set of queries for the same named
+ * project. Phase numbers remain distinctive; existing legacy keys also match. */
+export function projectFollowKey(project:string):string {
+  return [...new Set(project.toLowerCase().normalize('NFKD').replace(/\p{M}/gu,'').split(/[^\p{L}\p{N}]+/u)
+    .filter(w=>w&&!['the','of','for','project','expansion','phase'].includes(w)))].sort().join('-').slice(0,60);
+}
+
+/** Ranking, not admission: date/contact/contract value may be missing. */
+export function needPriorityScore(date:string|null,contract:boolean,ongoing:boolean,now=new Date()):number {
+  const age=monthsAgo(date,now);
+  if(ongoing)return 90;
+  if(contract&&age!==null&&Number.isFinite(age)&&age>=0&&age<=18)return 85;
+  if(contract&&age!==null&&Number.isFinite(age)&&age>=0&&age<=NEED_WINDOW_MONTHS)return 80;
+  return contract?75:65;
+}
 
 export interface NeedProof { company: string; quote: string; why: string; use: string | null; project: string | null; date: string | null; market: string | null; documentId: string; url: string | null }
 /** A company's accepted need checks in a run (strongest first: most recent work). */

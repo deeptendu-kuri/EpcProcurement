@@ -221,7 +221,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
       const next:Parameters<typeof completeJob>[3]=list?
         [{stage:'analyse',key:`roundup:${stored.id}`,payload:{kind:'analyse:roundup',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY[pageKind]}]:award?
         [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:repeat?REPEAT_STORY_PRIORITY:input.brief?1300:EXTRACTOR_PRIORITY[pageKind]}]:
-        candidate&&workPage?[{stage:'analyse',key:`work:${stored.id}`,payload:{kind:'analyse:work',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY.company_site+100}]:
+        candidate&&workPage?[{stage:'analyse',key:`work:${stored.id}`,payload:{kind:'analyse:work',documentId:stored.id,raw:grounded},priority:input.brief?1300:EXTRACTOR_PRIORITY.company_site+100}]:
         candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:Math.max(EXTRACTOR_PRIORITY.company_site,buyerResearchPriority(grounded,stored.text,input))}]:[];
       await completeJob(db,job,{documentId:stored.id,candidate,award,pageKind,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},next);
       await markBudget(db,job.run_id,'read',job.key,'completed');
@@ -322,7 +322,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         for(const warning of roundup.warnings)await researchProgress(db,job.run_id,'info',warning);
         await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};
       }
-      if(job.payload.kind==='analyse:award'){
+      if(job.payload.kind==='analyse:award'||job.payload.kind==='analyse:award-details'){
         const id=String(job.payload.documentId),raw=job.payload.raw as RawDoc;
         const doc=(await db.query<{text:string;url:string;published_at:string|null}>('select text,url,published_at from source_documents where id=$1',[id])).rows[0];
         if(!doc?.text||doc.url!==raw.url)throw new Error('Saved award original is unavailable.');
@@ -331,9 +331,9 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         const providers=budgetedAwardProviders(db,job.run_id,id,session.budget);
         // Decide whether anyone buys THIS material before paying for project,
         // scope and comparison extraction. Keep the answer as a recovery checkpoint.
-        const workNeed=input.brief?.source==='ai'?await checkNeed(db,job.run_id,id,
+        const workNeed=input.brief?.uses.length?await checkNeed(db,job.run_id,id,
           {text:doc.text,url:doc.url,title:raw.title??null,publishedAt:doc.published_at},input.brief,input.markets,
-          deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b'),previous?.needAnswer).catch(async error=>{
+          deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b'),previous?.needAnswer??job.payload.needAnswer as string|undefined).catch(async error=>{
             await researchProgress(db,job.run_id,'info',`Need check unavailable: ${error instanceof Error?error.message.slice(0,120):'error'}.`);
             return {result:null,answer:null};}):null;
         if(workNeed?.answer)await db.query("update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2",[job.id,job.lease_token,workNeed.answer]);
@@ -350,6 +350,27 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
             await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};
           }
         }
+        // First find the buyers across countries. Rich project/scope extraction
+        // must not spend 3-4 extra calls on the first story ahead of other work.
+        // The durable follow-on keeps the exact answer and original; no second
+        // paid need check, new schema or provider architecture is introduced.
+        if(input.brief?.uses.length&&job.payload.kind==='analyse:award'){
+          if(!workNeed?.result||!workNeed.answer){
+            await completeJob(db,job,{needAnswer:workNeed?.answer??null,budgetLimited:true,skipped:'Need check unavailable; no speculative buyer or further paid extraction.'});
+          }else{
+            const follow=process.env.TAVILY_API_KEY?.trim()?await projectsToFollow(db,job.run_id,workNeed.result):[];
+            const next:{stage:'collect'|'analyse';key:string;payload:Record<string,unknown>;priority:number}[]=[
+              {stage:'analyse',key:`award-details:${id}`,payload:{kind:'analyse:award-details',documentId:id,raw,needAnswer:workNeed.answer},priority:200},
+            ];
+            for(const {project,market} of follow)for(const [n,query] of followUpQueries(project,input.brief.item).entries())
+              next.push({stage:'collect',key:followKey(market,project,n),payload:{source:'tavily',sourcingLane:'trigger',
+                query:{key:followKey(market,project,n),market,lane:'news',activityIndex:0,query,topic:'general',sourcingLane:'trigger'}},priority:300});
+            const accepted=workNeed.result.companies.filter(c=>c.verdict==='lead');
+            await completeJob(db,job,{needAnswer:workNeed.answer,accepted:accepted.map(c=>c.name),detailsDeferred:true},next);
+            await researchProgress(db,job.run_id,'check',`${workNeed.result.project??'Work'}: ${accepted.length} potential ${input.brief.item} buyers saved from evidence. Other countries checked before optional project details.`);
+          }
+          await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};
+        }
         const extracted=previous?.extracted??await (deps.extractAward??extractDocument)(
           {text:raw.structured?doc.text:articleAnalysisText(doc.text),url:doc.url,publishedAt:doc.published_at,structured:raw.structured},
           {db,runId:job.run_id,provider:providers.provider,singleAttempt:true,includePeople:false,onNote:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)});
@@ -363,7 +384,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         if(!resolved)return {processed:true,stale:true};
         const triggers=await persistAwardTriggers(db,job.run_id,input.productId!,await awardTriggerSnapshots(db,id));
         // Without AI (catalogue brief) the need check cannot judge: award winners follow today's path.
-        if(input.brief?.source==='ai'){
+        if(input.brief?.uses.length){
           // docs/mvp/20: the need check decides. Only companies doing work that needs the item, in his countries,
           // recently, with a verified sentence join the shortlist; the answer is kept so a replay costs nothing.
           const saved=(previous as {needAnswer?:string}|undefined)?.needAnswer??null;
@@ -383,7 +404,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
           for(const {project,market} of follow)await db.tx(async tx=>{
             for(const [n,query] of followUpQueries(project,input.brief!.item).entries())
               await addJob(tx,job.run_id,'collect',followKey(market,project,n),{source:'tavily',sourcingLane:'trigger',
-                query:{key:followKey(market,project,n),market,lane:'news',activityIndex:0,query,topic:'general',sourcingLane:'trigger'}},1900);
+                query:{key:followKey(market,project,n),market,lane:'news',activityIndex:0,query,topic:'general',sourcingLane:'trigger'}},300);
           });
           if(follow.length)await researchProgress(db,job.run_id,'check',`Following ${follow.map(f=>f.project).join(', ')}: its subcontracts, packages and suppliers' orders.`);
           if(need.result)await researchProgress(db,job.run_id,'check',need.result.needsItem==='yes'&&accepted.length

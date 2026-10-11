@@ -129,7 +129,14 @@ export async function claimJob(db:Db=getDb(),runId?:string,jobId?:string,maxRunn
       and (j.state='queued' or j.state='running' and j.lease_until<now())
       and (select count(*) from research_jobs busy where busy.run_id=j.run_id and busy.state='running' and busy.lease_until>now())<$3
       and not (j.stage='analyse' and exists(select 1 from research_jobs ai where ai.run_id=j.run_id and ai.stage='analyse' and ai.state='running' and ai.lease_until>now()))
-      order by j.priority desc,j.created_at,j.id for update of j,s skip locked limit 1`,[runId??null,jobId??null,Math.max(1,maxRunning)])).rows[0];
+      order by (j.priority - case
+        when j.stage='analyse' and j.payload->>'kind' in ('analyse:award','analyse:work')
+          and j.payload->'raw'->>'market' is not null
+        then least(750,250*(select count(*)::int from research_jobs checked
+          where checked.run_id=j.run_id and checked.stage='analyse' and checked.state='done'
+          and checked.payload->>'kind' in ('analyse:award','analyse:work')
+          and checked.payload->'raw'->>'market'=j.payload->'raw'->>'market'))
+        else 0 end) desc,j.created_at,j.id for update of j,s skip locked limit 1`,[runId??null,jobId??null,Math.max(1,maxRunning)])).rows[0];
     if(!job)return null;
     await tx.query(`update research_jobs set state='running',lease_token=$2,lease_until=now()+interval '5 minutes',attempts=attempts+1,updated_at=now() where id=$1`,[job.id,token]);
     await tx.query(`update runs set status='running',started_at=coalesce(started_at,now()) where id=$1 and status<>'cancelled'`,[job.run_id]);
