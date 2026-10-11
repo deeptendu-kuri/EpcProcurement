@@ -55,6 +55,13 @@ const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.replace(/\s+/
 const strings = (v: unknown, max: number, len = 60): string[] =>
   Array.isArray(v) ? [...new Set(v.map((x) => clip(x, len)).filter(Boolean))].slice(0, max) : [];
 const SIZE = /\b\d+(?:[./-]\d+)?\s?(?:"|inch(?:es)?|in\b|mm\b|nb\b|dn\b|nps\b)|\b(?:dn|nps)\s?\d+|\bsch(?:edule)?\s?\d+/i;
+const GENERIC_WORK_WORDS=new Set(['plant','plants','gas','oil','water','process','project','projects','contract','contracts','construction','network','pipeline','facility','industrial','engineering','energy','maintenance']);
+/** Cached briefs sometimes contain only "plant". Use the actual work phrase in
+ * searches rather than spending requests on a generic industrial keyword. */
+export function workQueryWords(use:BriefUse):string[] {
+  const specific=use.newsWords.filter(w=>!GENERIC_WORK_WORDS.has(w.toLowerCase()));
+  return specific.length?specific:[use.name];
+}
 
 /** The item's own words ("stud bolts and gaskets" → stud, bolt, gasket), which never count as work words (rule 6). */
 export function itemWords(...texts: string[]): Set<string> {
@@ -177,9 +184,23 @@ export async function getSearchBrief(db: Queryable, input: { material: string; m
  * article through to the need check, which then decides who (if anyone) buys.
  */
 export function namesWork(text: string, brief: SearchBrief): boolean {
-  const words = brief.uses.flatMap((u) => [...u.newsWords, ...Object.values(u.localWords).flat()]).filter((w) => w.length >= 2);
-  return words.some((w) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^\\p{L}\\p{N}])`, 'iu').test(text))
-    && !/\b(?:market report|market size|cagr|job vacancy)\b/i.test(text);
+  if(/\b(?:market report|market size|cagr|job vacancy)\b/i.test(text))return false;
+  const generic=GENERIC_WORK_WORDS;
+  const has=(phrase:string,span:string)=>new RegExp(`(?:^|[^\\p{L}\\p{N}])${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^\\p{L}\\p{N}])`, 'iu').test(span);
+  // "Plant" or "gas" alone matched strike/finance stories and navigation. Match a
+  // distinctive work phrase, or two related words in the SAME short source span.
+  return brief.uses.some(u=>{
+    const words=[u.name,...u.newsWords,...Object.values(u.localWords).flat()].filter(w=>w.length>=2);
+    return text.split(/\n+|(?<=[.!?])\s+/).some(span=>{
+      const bounded=span.slice(0,1600);
+      const canonical=bounded.toLowerCase().replace(/\bprocessing\b/g,'process');
+      const useWords=u.name.toLowerCase().replace(/\bprocessing\b/g,'process').match(/[\p{L}\p{N}]+/gu)??[];
+      const core=useWords.filter(w=>!['and','or','oil','plant','plants','project','facility','industrial','engineering'].includes(w));
+      return words.some(w=>!generic.has(w.toLowerCase())&&has(w,bounded))
+        || core.length>=2&&core.every(w=>has(w,canonical))
+        || [...new Set(u.newsWords.map(w=>w.toLowerCase()))].filter(w=>has(w,bounded)).length>=2;
+    });
+  });
 }
 
 /**

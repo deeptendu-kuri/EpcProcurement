@@ -7,6 +7,7 @@ import { LLMHttpError, QuotaExceededError } from "@/mvp/llm/types";
 import { freshReply, replySchema, type ReplyDecision } from "./policy";
 import { companyNames, namesCompany, originalQuote, otherWorkSubject } from "@/mvp/discovery/evidence";
 import { buyerPageCandidate, buyingActivities, materialEvidenceKind } from "@/mvp/discovery/plan";
+import { workProofEvidence } from '@/mvp/discovery/work-proof';
 
 function parse(text: string): unknown {
   const start=text.indexOf("{");const end=text.lastIndexOf("}");
@@ -30,17 +31,17 @@ async function ask(system: string,data: unknown) {
     user:JSON.stringify(data),json:true,maxTokens:900,temperature:0.1,purpose:"sales_funnel",singleAttempt:true});
   return parse(result.text);
 }
-type QualificationEvidence = {id:string;quote:string;url:string;text:string|null;own_run:boolean;company_domain:string|null;company_types?:string[]|null};
+type QualificationEvidence = {id:string;document_id?:string|null;quote:string;url:string;text:string|null;own_run:boolean;company_domain:string|null;company_types?:string[]|null};
 type BuyerQualification = {approved:boolean;reason:string;basis?:'demo_evidence_fallback'};
 /** Full source pages stay server-side. Repeated page text must never inflate an AI request. */
 export const QUALIFICATION_DATA_BYTES = 10_000;
-function qualificationData(o:Opportunity,quotes:QualificationEvidence[]) {
+function qualificationData(o:Opportunity,quotes:QualificationEvidence[],workProof:Set<string>) {
   const data={company:o.name.slice(0,240),product:o.product_name.slice(0,200),keyword:o.keyword.slice(0,200),reason:o.buying_reason.slice(0,800),compatibleActivities:buyingActivities(o.product_id),productEvidenceIds:[] as string[],productEvidenceKinds:{} as Record<string,'explicit'|'application'>,evidence:[] as {id:string;quote:string;url:string}[]};
-  const priority=(q:QualificationEvidence)=>Number(buyerPageCandidate(q.quote,o.product_id))*2+Number(namesCompany(q.quote,companyNames(o.name,q.quote)));
+  const priority=(q:QualificationEvidence)=>Number(workProof.has(q.id)||buyerPageCandidate(q.quote,o.product_id))*2+Number(namesCompany(q.quote,companyNames(o.name,q.quote)));
   const seen=new Set<string>();
   for(const q of [...quotes].sort((a,b)=>priority(b)-priority(a)||a.quote.length-b.quote.length||a.id.localeCompare(b.id))) {
     const key=q.url+'\n'+q.quote;if(seen.has(key)||data.evidence.length>=12)continue;
-    const kind=buyerPageCandidate(q.quote,o.product_id)?materialEvidenceKind(q.quote,o.product_id):'none';
+    const kind=buyerPageCandidate(q.quote,o.product_id)?materialEvidenceKind(q.quote,o.product_id):workProof.has(q.id)?'application':'none';
     const next={...data,evidence:[...data.evidence,{id:q.id,quote:q.quote,url:q.url}],productEvidenceIds:kind!=='none'?[...data.productEvidenceIds,q.id]:data.productEvidenceIds,productEvidenceKinds:kind!=='none'?{...data.productEvidenceKinds,[q.id]:kind}:data.productEvidenceKinds};
     if(Buffer.byteLength(JSON.stringify(next),'utf8')>QUALIFICATION_DATA_BYTES)continue;
     data.evidence=next.evidence;data.productEvidenceIds=next.productEvidenceIds;data.productEvidenceKinds=next.productEvidenceKinds;seen.add(key);
@@ -55,14 +56,14 @@ function unavailableAI(error:unknown):boolean {
 }
 /** Only a real, own-search, literal contractor/application quote can replace unavailable AI.
  * This is NOT contact validation or permission to send to a buyer. Real-buyer mode never uses it. */
-function demoEvidenceFallback(o:Opportunity,quotes:QualificationEvidence[],enabled:boolean,reason:string):BuyerQualification|null {
+function demoEvidenceFallback(o:Opportunity,quotes:QualificationEvidence[],enabled:boolean,reason:string,workProof=new Set<string>()):BuyerQualification|null {
   if(!enabled||!prospectDemoEnabled()||getLLM('draft').name!=='groq'||o.is_sample||o.qualification==='rejected')return null;
   const blockedRoles=new Set(['owner','project_owner','developer','consultant','manufacturer','supplier','distributor']);
   const proof=quotes.find(q=>{
     const names=companyNames(o.name,q.quote);
     return q.own_run && q.text && originalQuote(q.text,q.quote)
       && namesCompany(q.quote,names) && !otherWorkSubject(q.quote,names)
-      && buyerPageCandidate(q.quote,o.product_id)
+      && (buyerPageCandidate(q.quote,o.product_id)||workProof.has(q.id))
       && /\b(?:epc|construct\w*|install\w*|laying|fabricat\w*|weld\w*|erect\w*|drilling|commission\w*)\b/i.test(q.quote)
       && !/\b(?:open tender|invites? bids|seeking bidders|request for proposals|expression of interest)\b/i.test(q.quote)
       && !(q.company_types?.length && q.company_types.every(role=>blockedRoles.has(role)));
@@ -70,25 +71,26 @@ function demoEvidenceFallback(o:Opportunity,quotes:QualificationEvidence[],enabl
   return proof?{approved:true,basis:'demo_evidence_fallback',reason:`Demo-only verified-evidence fallback (${reason}). Original quote ${proof.id} attributes compatible ${o.product_name} work to ${o.name}. Buyer email/contact is not validated; delivery remains approved-inbox-only.`}:null;
 }
 export async function qualifyBuyer(o: Opportunity,options:{demoFallback?:boolean}={}): Promise<BuyerQualification> {
-  const quotes=(await getDb().query<QualificationEvidence>(`select e.id,e.quote,e.url,d.text,
+  const quotes=(await getDb().query<QualificationEvidence>(`select e.id,e.document_id,e.quote,e.url,d.text,
     (select c.domain from companies c join search_opportunities o on o.company_id=c.id where o.id::text=$3) as company_domain,
     (select c.types from companies c join search_opportunities o on o.company_id=c.id where o.id::text=$3) as company_types,
     exists(select 1 from run_documents rd where rd.document_id=e.document_id and rd.run_id=$2) as own_run
     from evidence e left join source_documents d on d.id=e.document_id
     where e.id=any($1::uuid[]) and e.quote_verified=true`,[o.evidence_ids,o.run_id??null,o.id])).rows;
   if (!quotes.length || o.is_sample) return {approved:false,reason:"No verified real-source evidence for this product opportunity."};
-  const productEvidenceIds=quotes.filter(q=>buyerPageCandidate(q.quote,o.product_id)).map(q=>q.id);
+  const workProof=o.run_id?await workProofEvidence(getDb(),o,quotes):new Set<string>();
+  const productEvidenceIds=quotes.filter(q=>buyerPageCandidate(q.quote,o.product_id)||workProof.has(q.id)).map(q=>q.id);
   if(!productEvidenceIds.length)return {approved:false,reason:"The original product evidence does not establish buying-compatible work for the exact searched product. No email sent."};
   const schema=z.object({approved:z.boolean(),confidence:z.number().min(0).max(1).catch(0),reason:z.string().min(1).max(1500),
     companyEvidenceId:z.string().nullish(),productEvidenceId:z.string().nullish(),companyQuote:z.string().optional(),productQuote:z.string().optional()}).strict();
-  const data=qualificationData(o,quotes);
-  if(!data.productEvidenceIds.length)return demoEvidenceFallback(o,quotes,Boolean(options.demoFallback),'evidence exceeds bounded AI payload')??{approved:false,reason:'No product evidence fits the bounded qualification request. Review the saved evidence; no email sent.'};
+  const data=qualificationData(o,quotes,workProof);
+  if(!data.productEvidenceIds.length)return demoEvidenceFallback(o,quotes,Boolean(options.demoFallback),'evidence exceeds bounded AI payload',workProof)??{approved:false,reason:'No product evidence fits the bounded qualification request. Review the saved evidence; no email sent.'};
   let decision:unknown;
   try {decision=await ask(`Decide whether this company is a potential BUYER of the exact searched product. Awarded/ongoing relevant work OR documented company services demonstrating compatible installation/construction/procurement can qualify. An award is not mandatory for company-level prospects. Exclude project owners, open bids, supplier-only sellers and competitors. A potential need is not a confirmed order.
     Select the supplied evidence IDs connecting THIS company to buying-compatible work and to a plausible use of THIS exact product (material/type matters). The application will cite and validate the ORIGINAL stored quotes itself; do not rewrite or return quote text. Do not borrow a different company's scope. Do not require a current purchase order, but do require concrete product-application evidence.
     productEvidenceId MUST be one of productEvidenceIds: other supplied quotes may establish identity or location but not product-consuming work. productEvidenceKinds distinguishes explicit material wording from a compatible application using the existing material rules; compatibleActivities supplies this product's consuming-work context. An application is sufficient for a POTENTIAL buyer. Do not require the literal product name, a purchase order, an explicit procurement sentence, quantity, grade or specifications when a quoted, company-attributed consuming application is established. For example, an EPC contractor constructing a physical oil/gas pipeline can be a potential line-pipe buyer even when the source says "gas pipeline EPC" rather than "line pipe". Do not apply that inference to HDPE/PVC/ductile-iron work or infer a particular pipe grade. Similarly, electrical cable installation supports potential power/control cable demand, not telecom cable or a particular specification. State inferred demand as potential, not confirmed. Still reject owners, supplier-only sellers, unrelated materials and borrowed scope. If evidence is insufficient, approved=false. Return only {approved,confidence,reason,companyEvidenceId,productEvidenceId}.`,data);}
   catch(error){
-    const fallback=unavailableAI(error)?demoEvidenceFallback(o,quotes,Boolean(options.demoFallback),error instanceof LLMHttpError?`AI HTTP ${error.status}`:'AI temporarily unavailable'):null;
+    const fallback=unavailableAI(error)?demoEvidenceFallback(o,quotes,Boolean(options.demoFallback),error instanceof LLMHttpError?`AI HTTP ${error.status}`:'AI temporarily unavailable',workProof):null;
     if(fallback)return fallback;
     throw error;
   }
@@ -122,7 +124,7 @@ export async function qualifyBuyer(o: Opportunity,options:{demoFallback?:boolean
   if(!namesCompany(companyQuote,names) || otherWorkSubject(productQuote,names)
     || !namesCompany(product.quote,names) && !company.quote.includes(productQuote) && !ownSite)
     return {approved:false,reason:"The cited product activity was not attributed to this company. No email sent."};
-  if(!buyerPageCandidate(product.quote,o.product_id))return {approved:false,reason:"The original product evidence does not establish buying-compatible work for the exact searched product. No email sent."};
+  if(!buyerPageCandidate(product.quote,o.product_id)&&!workProof.has(product.id))return {approved:false,reason:"The original product evidence does not establish buying-compatible work for the exact searched product. No email sent."};
   return {approved:true,reason:answer.reason};
 }
 export async function initialEmail(o: Opportunity,contact: {name:string;title:string|null}): Promise<{subject:string;body:string}> {

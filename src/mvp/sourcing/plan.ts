@@ -6,7 +6,7 @@ import { hasSpec, parseMaterialSpec, specUses } from '@/mvp/discovery/spec';
 import type { ResearchMode, PlannedBuyerQuery } from '@/mvp/discovery/plan';
 import { RESEARCH_SOURCES } from '@/mvp/research/registry';
 import { TED_COUNTRIES } from '@/mvp/pipeline/sources/ted';
-import { usesFor, type SearchBrief } from '@/mvp/discovery/brief';
+import { usesFor, workQueryWords, type SearchBrief } from '@/mvp/discovery/brief';
 
 export type SourcingLane = 'trigger' | 'roundup' | 'capability';
 export interface SourceTask {
@@ -55,22 +55,26 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
     const add=(lane:SourcingLane,source:SourceTask['source'],n:number,extra:Partial<SourceTask>)=>{
       if(input.lanes&&!input.lanes.includes(lane))return;
       const round=rounds[lane]=(rounds[lane]??-1)+1;
-      tasks.push({id:`hybrid-v2:${input.productId}:${code}:${lane}:${source}:${n}`,lane,source,market:code,priority:BASE_PRIORITY[lane],round,order,...extra});
+      const priority=input.brief&&source==='tavily'?1100-n*60:BASE_PRIORITY[lane];
+      // Work-based requests share the first paid-query tier across the lanes.
+      // Otherwise Quick's entire allowance was spent on trigger news before a
+      // single contractor-list or company search could run.
+      tasks.push({id:`hybrid-v2:${input.productId}:${code}:${lane}:${source}:${n}`,lane,source,market:code,priority,round,order,...extra});
     };
     const activity=activities[0];
     if(input.brief){
       // docs/mvp/20: this country's own uses (they differ between countries), searched by their headline words.
       const brief=input.brief,work=usesFor(brief,code,4);
       if(!work.length)return;
-      const words=(n:number)=>work[n].newsWords.slice(0,2).join(' ');
+      const words=(n:number)=>workQueryWords(work[n]).slice(0,2).join(' ');
       // ── trigger: awards for the work that uses the item, in English, the country's language, GDELT and tenders ──
       work.forEach((_,n)=>add('trigger','bing-query',n,{query:`${words(n)} contract awarded ${name}`}));
       add('trigger','tavily',0,{query:`${words(0)} EPC contract awarded ${name}`,topic:'news',days:540});
       if(work[1])add('trigger','tavily',1,{query:`${words(1)} contract awarded ${name}`,topic:'news',days:540});
       const local=work.find(u=>u.localWords[code]?.length);
-      add('trigger','local-news',0,{query:`${words(0)} contract ${name}`,material:work[0].newsWords[0],work:work[0].name,
+      add('trigger','local-news',0,{query:`${words(0)} contract ${name}`,material:workQueryWords(work[0])[0],work:work[0].name,
         ...(local?{localQuery:`${local.localWords[code].slice(0,3).join(' ')} ${brief.places[code]?.[0]??name}`,localWords:local.localWords[code]}:{})});
-      add('trigger','gdelt-country',0,{words:work.flatMap(u=>u.newsWords).slice(0,4)});
+      add('trigger','gdelt-country',0,{words:work.flatMap(workQueryWords).slice(0,4)});
       if(TED_COUNTRIES[code])add('trigger','ted',0,{});
       // Rule 7: steadily bought items come from plants being maintained: the owners' maintenance contracts.
       if(brief.buying!=='project'){

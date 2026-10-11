@@ -37,7 +37,7 @@ import { extendResearchIfShort,retryAfterRateLimit } from './extend';
 import { REPEAT_STORY_PRIORITY,sameStory } from '@/mvp/sourcing/story';
 import { LLMHttpError,QuotaExceededError } from '@/mvp/llm/types';
 import { DAILY_LIMIT,retryAfterMs } from '@/mvp/llm/groq';
-import { getLLM,type LLMProvider } from '@/mvp/llm';
+import { type LLMProvider } from '@/mvp/llm';
 /** Longest a step waits for Groq's daily allowance before the search stops (seconds). */
 const DAILY_WAIT_MAX_S=60*60;
 import { tedSource } from '@/mvp/pipeline/sources/ted';
@@ -45,6 +45,7 @@ import { extractRoundup,verifyRoundup,seedRoundup,lookupRoundupWebsite } from '@
 import { rateCandidates } from './shortlist';
 import { planChainSearches } from './chain';
 import { saveLikelyBuyers } from './likely';
+import { articleResearchReason,articleAnalysisText } from './relevance';
 import {SOURCING_REGISTRY,collectRegistry,registryPageTargets,registryReadWarning,registryRaw} from '@/mvp/sourcing/registry';
 
 export interface ResearchDeps {
@@ -171,13 +172,15 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
       const pageKind=classifyPage({url:grounded.url,title:grounded.title,text:stored.text,tables,registryId:raw.research?.registryId,markets:input.markets});
       grounded.research={...grounded.research,lane:grounded.research?.lane??'company',pageKind};
       const list=pageKind==='roundup'||pageKind==='directory';
+      const articleSkip=!raw.structured&&['article','tender_notice','filing'].includes(pageKind)
+        ?articleResearchReason({text:stored.text,title:grounded.title,publishedAt:grounded.publishedAt},input.productId!,input.brief):null;
       // docs/mvp/20: in a work-based search a page about the work that uses the item qualifies too (news names
       // the project, not the valve); the need check then decides who buys.
       const workPage=input.brief?.source==='ai'&&namesWork(stored.text,input.brief);
-      const candidate=pageKind!=='junk'&&!list&&(buyerPageCandidate(stored.text,input.productId!)||workPage)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
+      const candidate=pageKind!=='junk'&&!list&&!articleSkip&&(buyerPageCandidate(stored.text,input.productId!)||workPage)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
       const award=Boolean(raw.structured)||candidate&&['article','tender_notice','filing'].includes(pageKind);
-      let associated=award||list?null:await candidateForPage(db,job.run_id,grounded);
-      if(pageKind!=='junk'&&!list&&!award&&!associated){
+      let associated=award||list||articleSkip?null:await candidateForPage(db,job.run_id,grounded);
+      if(pageKind!=='junk'&&!list&&!award&&!articleSkip&&!associated){
         const seeded=await seedInvestigations(db,job.run_id,input,stored.id,grounded,stored.text,title,session.budget);
         if(seeded.seeds)await researchProgress(db,job.run_id,'info',`${seeded.seeds} company research seeds; ${seeded.queued} website investigations. Seeds are not qualified buyers.`);
         if(seeded.ownName)associated=await candidateForPage(db,job.run_id,grounded);
@@ -214,9 +217,10 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
       const next:Parameters<typeof completeJob>[3]=list?
         [{stage:'analyse',key:`roundup:${stored.id}`,payload:{kind:'analyse:roundup',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY[pageKind]}]:award?
         [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:repeat?REPEAT_STORY_PRIORITY:EXTRACTOR_PRIORITY[pageKind]}]:
-        candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:buyerResearchPriority(grounded,stored.text,input)}]:[];
+        candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:Math.max(EXTRACTOR_PRIORITY.company_site,buyerResearchPriority(grounded,stored.text,input))}]:[];
       await completeJob(db,job,{documentId:stored.id,candidate,award,pageKind,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},next);
       await markBudget(db,job.run_id,'read',job.key,'completed');
+      if(articleSkip)await researchProgress(db,job.run_id,'info',`No AI spent on this article: ${articleSkip}`);
       await researchProgress(db,job.run_id,'read',`Original page saved${candidate?' for company/material analysis':''}.`);
     }else if(job.stage==='analyse'){
       if(job.payload.kind==='analyse:brief'){
@@ -295,12 +299,32 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         const doc=(await db.query<{text:string;url:string;published_at:string|null}>('select text,url,published_at from source_documents where id=$1',[id])).rows[0];
         if(!doc?.text||doc.url!==raw.url)throw new Error('Saved award original is unavailable.');
         // A stored response is a recovery checkpoint: resolution can be replayed without another paid call.
-        const previous=(await db.query<{result:{extracted?:Awaited<ReturnType<typeof extractDocument>>}|null}>('select result from research_jobs where id=$1',[job.id])).rows[0]?.result;
+        const previous=(await db.query<{result:{extracted?:Awaited<ReturnType<typeof extractDocument>>;needAnswer?:string}|null}>('select result from research_jobs where id=$1',[job.id])).rows[0]?.result;
         const providers=budgetedAwardProviders(db,job.run_id,id,session.budget);
+        // Decide whether anyone buys THIS material before paying for project,
+        // scope and comparison extraction. Keep the answer as a recovery checkpoint.
+        const workNeed=input.brief?.source==='ai'?await checkNeed(db,job.run_id,id,
+          {text:doc.text,url:doc.url,title:raw.title??null,publishedAt:doc.published_at},input.brief,input.markets,
+          deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b'),previous?.needAnswer).catch(async error=>{
+            await researchProgress(db,job.run_id,'info',`Need check unavailable: ${error instanceof Error?error.message.slice(0,120):'error'}.`);
+            return {result:null,answer:null};}):null;
+        if(workNeed?.answer)await db.query("update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2",[job.id,job.lease_token,workNeed.answer]);
+        if(!await db.tx(tx=>owned(tx,job)))return {processed:true,stale:true};
+        if(workNeed?.result){
+          const accepted=workNeed.result.companies.filter(c=>c.verdict==='lead');
+          for(const c of accepted)await db.tx(tx=>registerCandidate(tx,job.run_id,c.name,null,id,c.quote));
+          const saved=await saveLikelyBuyers(db,job.run_id,input);
+          if(saved.saved)await researchProgress(db,job.run_id,'check',`Saved ${saved.saved} source-backed potential buyers before project extraction. Contacts and exact specifications remain unconfirmed.`);
+          if(!workNeed.result.companies.some(c=>['lead','owner'].includes(c.verdict))){
+            await completeJob(db,job,{needAnswer:workNeed.answer,skipped:'No relevant buying work; project/contact passes not requested.'});
+            await researchProgress(db,job.run_id,'check',`${workNeed.result.project??'Article'}: no buyer of ${input.brief!.item}; skipped further AI extraction.`);
+            await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};
+          }
+        }
         const extracted=previous?.extracted??await (deps.extractAward??extractDocument)(
-          {text:doc.text,url:doc.url,publishedAt:doc.published_at,structured:raw.structured},
-          {db,runId:job.run_id,provider:providers.provider,singleAttempt:true,onNote:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)});
-        await db.query('update research_jobs set result=$3::jsonb where id=$1 and lease_token=$2',[job.id,job.lease_token,JSON.stringify({extracted})]);
+          {text:raw.structured?doc.text:articleAnalysisText(doc.text),url:doc.url,publishedAt:doc.published_at,structured:raw.structured},
+          {db,runId:job.run_id,provider:providers.provider,singleAttempt:true,includePeople:false,onNote:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)});
+        await db.query("update research_jobs set result=coalesce(result,'{}'::jsonb)||$3::jsonb where id=$1 and lease_token=$2",[job.id,job.lease_token,JSON.stringify({extracted})]);
         const resolved=await db.tx(async tx=>{
           if(!await owned(tx,job))return false;
           await resolveDocument(tx,{documentId:id,url:doc.url,tier:raw.tier,publisherKey:raw.publisherKey??publisherKeyFor(doc.url),
@@ -314,13 +338,17 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
           // docs/mvp/20: the need check decides. Only companies doing work that needs the item, in his countries,
           // recently, with a verified sentence join the shortlist; the answer is kept so a replay costs nothing.
           const saved=(previous as {needAnswer?:string}|undefined)?.needAnswer??null;
-          const need=await checkNeed(db,job.run_id,id,{text:doc.text,url:doc.url,title:raw.title??null,publishedAt:doc.published_at},input.brief,input.markets,
+          const need=workNeed??await checkNeed(db,job.run_id,id,{text:doc.text,url:doc.url,title:raw.title??null,publishedAt:doc.published_at},input.brief,input.markets,
             deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b'),saved).catch(async error=>{
               await researchProgress(db,job.run_id,'info',`Need check skipped for one article: ${error instanceof Error?error.message.slice(0,120):'error'}.`);
               return {result:null,answer:null};});
           if(need.answer)await db.query(`update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2`,[job.id,job.lease_token,need.answer]);
           const accepted=need.result?.companies.filter(c=>c.verdict==='lead')??[];
           for(const c of accepted)await db.tx(tx=>registerCandidate(tx,job.run_id,c.name,null,id,c.quote));
+          // Save source-backed work now, not only when every queued article has
+          // drained. A user pause must retain these companies even without contacts.
+          const savedLeads=await saveLikelyBuyers(db,job.run_id,input);
+          if(savedLeads.saved)await researchProgress(db,job.run_id,'check',`Saved ${savedLeads.saved} source-backed potential buyers. Contact enrichment is separate; exact specifications remain unconfirmed.`);
           // Stage 6: follow the project to its subcontracts, packages and suppliers' orders (budgeted Tavily searches).
           const follow=need.result&&process.env.TAVILY_API_KEY?.trim()?await projectsToFollow(db,job.run_id,need.result):[];
           for(const {project,market} of follow)await db.tx(async tx=>{
@@ -501,19 +529,11 @@ export async function shortlistAwardWinners(db:Db,runId:string,documentId:string
   return added;
 }
 /**
- * The AI that rates a search's shortlist. Rating is cheap (about 2-3k tokens per 20 companies) and decides
- * which companies are checked, so once the search's own AI allowance is used up it continues on the day's
- * shared allowance (still recorded against the search) instead of leaving companies unrated.
+ * The AI that rates a search's shortlist. Ratings share the run's explicit
+ * spending ceiling; once it is exhausted, shortlist rules remain available.
  */
 export function ratingProvider(db:Db,runId:string,budget:ResearchBudget){
-  return (key:string):LLMProvider=>{
-    const budgeted=budgetedAwardProviders(db,runId,key,budget).provider('triage');
-    return {...budgeted,async complete(request){
-      try{return await budgeted.complete(request);}
-      catch(error){
-        if(!(error instanceof Error&&/budget exhausted/i.test(error.message)))throw error;
-        return getLLM('triage',db).complete({...request,runId,singleAttempt:true});
-      }
-    }};
-  };
+  // Ratings must not silently escape the shared per-search spending ceiling.
+  // rateCandidates already falls back to rules when this budget is exhausted.
+  return (key:string):LLMProvider=>budgetedAwardProviders(db,runId,key,budget).provider('triage');
 }

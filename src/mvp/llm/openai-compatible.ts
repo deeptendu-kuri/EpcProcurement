@@ -65,7 +65,9 @@ export async function chatCompletion(options: {
           continue;
         }
       }
-      throw new LLMHttpError(provider, response.status, `${provider} ${response.status}: ${detail ?? response.statusText}`);
+      const retry= response.headers?.get?.("retry-after");
+      const wait= parseResetMs(retry) ?? (retry && Number.isFinite(Date.parse(retry)) ? Math.max(0,Date.parse(retry)-Date.now()) : undefined);
+      throw new LLMHttpError(provider, response.status, `${provider} ${response.status}: ${detail ?? response.statusText}`,wait ?? undefined);
     }
 
     const text = payload.choices?.[0]?.message?.content ?? "";

@@ -147,14 +147,16 @@ describe("persistent demo research-to-meeting funnel",()=>{
     expect(mocks.send.mock.calls.at(-1)![0].body).toContain('previous time is no longer available');
     await processFunnelTick();expect(mocks.book).toHaveBeenCalledTimes(1);
   });
-  it('queues one explicitly reviewed partial-search prospect without changing research or validating a contact',async()=>{
+  it.each([['partial','done'],['paused','running']])('queues one reviewed %s prospect without changing research or validating a contact',async(state,status)=>{
     vi.stubEnv('MVP_PROSPECT_DEMO_OUTREACH','on');vi.stubEnv('MVP_FUNNEL_WORKER','on');
     const s=await seed({old:true,approved:true,validated:false});await attachSource(s);
-    await db.query("insert into research_sessions(run_id,state,budget) values($1,'partial','{}')",[s.run]);
+    await db.query("insert into research_sessions(run_id,state,budget) values($1,$2,'{}')",[s.run,state]);
+    await db.query("update runs set status=$2 where id=$1",[s.run,status]);
     await setFunnelEnabled(true);expect(await enrollCompletedSearches()).toBe(0);
     expect(await reviewedProspectStatus(s.o)).toMatchObject({canStart:true,researchPaused:true});
     const [a,b]=await Promise.all([startReviewedProspectDemo(s.o),startReviewedProspectDemo(s.o)]);expect(a.id).toBe(b.id);
-    expect((await db.query('select state from research_sessions where run_id=$1',[s.run])).rows[0].state).toBe('partial');
+    expect((await db.query('select state from research_sessions where run_id=$1',[s.run])).rows[0].state).toBe(state);
+    expect((await db.query('select status from runs where id=$1',[s.run])).rows[0].status).toBe(status);
     expect((await db.query('select id from funnel_threads')).rows).toHaveLength(1);expect(mocks.send).not.toHaveBeenCalled();
     await processFunnelTick();expect(mocks.send).toHaveBeenCalledTimes(1);expect(mocks.fit).not.toHaveBeenCalled();expect(mocks.contact).not.toHaveBeenCalled();
     expect(await thread(s.o)).toMatchObject({mode:'prospect_demo',recipient:'deeptendukuri@gmail.com',person_id:null,state:'active'});

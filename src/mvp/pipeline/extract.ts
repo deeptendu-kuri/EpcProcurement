@@ -248,7 +248,7 @@ interface PassResults {
   extractedBy: string;
 }
 
-async function runModels(text: string, url: string, db: Queryable | undefined, runId: string | undefined, onNote?: (msg: string) => Promise<void>, forceRules = false, provider?: ExtractionOptions['provider'], singleAttempt = false): Promise<PassResults> {
+async function runModels(text: string, url: string, db: Queryable | undefined, runId: string | undefined, onNote?: (msg: string) => Promise<void>, forceRules = false, provider?: ExtractionOptions['provider'], singleAttempt = false, includePeople = true): Promise<PassResults> {
   ensureMockExtractor();
   const pickProvider = provider ?? ((role: LLMRole, model?: string) => getLLM(role, db, model));
   const llmA = pickProvider("extract_a");
@@ -256,7 +256,7 @@ async function runModels(text: string, url: string, db: Queryable | undefined, r
   const rulesMode = forceRules || llmA.name === "mock";
   const chunks = rulesMode ? relevanceChunks(text) : relevanceChunks(text, LIVE_CHUNK_CHARS, 1);
   const wantP2 = SCOPE_HINT.test(text);
-  const wantP3 = PERSON_HINT.test(text);
+  const wantP3 = includePeople && PERSON_HINT.test(text);
 
   // Model A on Groq uses one model per pass so the passes run in parallel on separate rate limits.
   const passLLM = (pass: "P1" | "P2" | "P3"): LLMProvider => (llmA.name === "groq" ? pickProvider("extract_a", EXTRACT_PASS_MODELS[pass]) : llmA);
@@ -287,7 +287,8 @@ async function runModels(text: string, url: string, db: Queryable | undefined, r
     return { a: await runAll(() => llmA), b: null, mode: "rule", extractedBy: "rule:mock-rules" };
   }
 
-  const useB = llmB.name !== "mock" && llmB.name !== llmA.name;
+  const useB = llmB.name !== "mock" && llmB.name !== llmA.name && llmB.available?.()!==false;
+  if(llmB.available?.()===false)await onNote?.("Comparison provider circuit open; no comparison call made. Facts stay single.");
   const [aResult, bResult] = await Promise.allSettled([runAll(passLLM), useB ? runAll(() => llmB) : Promise.resolve(null)]);
   if (aResult.status === "rejected") {
     // Quota exhausted or provider down: fall back to the rules extractor rather than stall the run.
@@ -825,6 +826,8 @@ export interface ExtractionOptions {
   /** Durable callers wrap every actual provider pass in the shared run budget. */
   provider?: (role: LLMRole, model?: string) => LLMProvider;
   singleAttempt?: boolean;
+  /** Buyer-first research leaves paid people extraction to contact enrichment. */
+  includePeople?: boolean;
 }
 
 export async function extractDocument(
@@ -835,7 +838,7 @@ export async function extractDocument(
     const s = doc.structured;
     return checkAndAgree(doc.text, { a: { p1: s.p1, p2: s.p2, p3: s.p3 ?? EMPTY_P3 }, b: null, mode: "rule", extractedBy: s.extractedBy });
   }
-  const results = await runModels(doc.text, doc.url, options.db, options.runId, options.onNote, options.rulesOnly === true, options.provider, options.singleAttempt);
+  const results = await runModels(doc.text, doc.url, options.db, options.runId, options.onNote, options.rulesOnly === true, options.provider, options.singleAttempt, options.includePeople);
   // Live models: facts the rules extractor also finds count as two-extractor agreement (`both`);
   // what only the rules extractor finds is added as `rule` (rules first, 06 §1).
   const published = doc.publishedAt ?? null;

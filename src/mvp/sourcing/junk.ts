@@ -10,6 +10,7 @@ export function junkReason(url:string,title:string|null,markets:readonly string[
   if(domains.blocked.some(d=>matches(host,d)))return /ibisworld|mordor|spherical/.test(host)?'market report':'excluded source';
   if(domains.usOnly.some(d=>matches(host,d))&&!markets.includes('US'))return 'outside source coverage';
   if(TITLE.test(title??''))return 'market report / jobs';
+  if(/\/daily-prices\/|\/(?:privacy|terms-and-conditions|cookie-policy)(?:\/|$)/i.test(parsed.pathname))return 'price feed / site policy';
   // No Google/Bing/Yahoo result HTML, even when a collector returns a redirect.
   if(/(?:^|\.)(?:google\.[a-z.]+|bing\.com|search\.yahoo\.com)$/.test(host)&&/\/(?:search|news\/search)/.test(parsed.pathname))return 'search-result page';
   return null;

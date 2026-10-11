@@ -5,7 +5,7 @@ import { getCatalogueItem } from "@/mvp/config/buyers-config";
 import type { Db } from "@/mvp/db";
 import type { RunInput } from "@/mvp/types";
 import type { RawDoc } from "@/mvp/pipeline/contracts";
-import { materialEvidenceKind } from "./plan";
+import { materialEvidenceKind, materialOutputOnly } from "./plan";
 import { attributedCountry,attributedScope,companyNames,namesCompany,originalQuote,otherWorkSubject } from "./evidence";
 import { buyerActivity, buyerPriority } from "./activity";
 import { companyContactsFromPage } from "@/mvp/enrichment/public-contacts";
@@ -80,6 +80,7 @@ export function buyerEvidence(b:DiscoveredBuyer,text:string,input:RunInput,bundl
   if(b.role==='owner'&&!ownerWork)return fail('An owner must operate, maintain or procure assets that use the material.');
   if(!BUYER_WORK.test(productQuote)&&!inputWork&&!ownerWork)return fail("No documented buying-compatible work.");
   if(b.role==='input_manufacturer'&&!inputWork)return fail('Material input is not evidenced.');
+  if(!inputWork&&materialOutputOnly(productQuote,input.productId))return fail('The company makes or sells the searched material; consuming work is not evidenced.');
   if((!inputWork&&((SALES_ONLY.test(companyQuote)&&b.role!=="fabricator")||SALES_ONLY.test(productQuote)))||PRE_AWARD.test(productQuote))return fail("Supplier-only sales or open tender, not buyer work.");
   if(materialEvidenceKind(productQuote,input.productId)==="none")return fail("Product/material application does not match the search.");
   if(b.country&&!countriesInQuote(b.countryQuote??'',names).includes(b.country))return fail("No geographic evidence; query hints and customer brands do not count.");

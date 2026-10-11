@@ -12,7 +12,8 @@ import type { LLMProvider } from "@/mvp/llm";
 import { briefKey, type SearchBrief } from "@/mvp/discovery/brief";
 import fixtures from "@/mvp/sourcing/fixtures/baseline-pages.json";
 import { createResearchRun, sessionFor } from "./store";
-import { processResearchTick, type ResearchDeps } from "./engine";
+import { processResearchTick, ratingProvider, type ResearchDeps } from "./engine";
+import {researchBudget} from '@/mvp/discovery/plan';
 
 const article = fixtures.documents.find((d) => d.url.includes("businessline"))!;
 const raw: RawDoc = { sourceKey: "saved-evaluation", sourceName: "thehindubusinessline.com", tier: "B", url: article.url, title: article.title, text: article.text, publishedAt: null, isSample: false };
@@ -42,6 +43,16 @@ async function run(query: string, b: SearchBrief, need: string, productId = "lin
 }
 
 describe("award winners in a work-based search", () => {
+  it('never bypasses the per-search AI ceiling to rate candidates',async()=>{
+    vi.stubEnv('GROQ_API_KEY','Example-test-key-never-sent');
+    const input:RunInput={query:'Line pipe',productId:'line-pipe',markets:['AE'],leadKinds:['supply_subcontract']};
+    const id=await createResearchRun(input,db);
+    const fetcher=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(JSON.stringify({choices:[{message:{content:'{}'}}]})));
+    try {
+      await expect(ratingProvider(db,id,{...researchBudget(input),maxAiPages:0})('Example rating').complete({system:'Example',user:'Example'})).rejects.toThrow('Shared research AI budget exhausted');
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {fetcher.mockRestore();}
+  });
   it("saves the contractor whose work needs the item, with its own sentence as the reason", async () => {
     const id = await run("Line pipe API 5L", brief("Line pipe", [
       { name: "gas pipeline construction", newsWords: ["gas pipeline"], why: "A gas pipeline is built from line pipe.", countries: ["AE"], localWords: {} },
@@ -70,11 +81,11 @@ describe("award winners in a work-based search", () => {
       { name: "NGL fractionation plant", newsWords: ["NGL", "gas"], why: "Ethane recovery runs below −90 °C.", countries: ["AE"], localWords: {} }]),
       verdict({ use: null, needsItem: "no", needWhy: "A gas transmission pipeline runs at ambient temperature; no cryogenic service." }), "gate-globe-check");
     const checks = (await db.query<{ verdict: string; reason: string }>("select verdict, reason from need_checks where run_id=$1", [id])).rows;
-    expect(checks[0].verdict).toBe("rejected");
-    expect(checks[0].reason).toMatch(/the work is not one of the uses/);
+    // Ambient gas-pipeline news is rejected BEFORE a cryogenic need-check call.
+    expect(checks).toHaveLength(0);
     expect((await db.query("select 1 from search_opportunities where run_id=$1", [id])).rows).toHaveLength(0);
     expect((await db.query("select 1 from research_candidates where run_id=$1 and company ilike 'kalpataru%'", [id])).rows).toHaveLength(0);
     const said = (await db.query<{ message: string }>("select message from run_events where run_id=$1", [id])).rows.map((r) => r.message).join("\n");
-    expect(said).toMatch(/no buyer of Cryogenic valves/);
+    expect(said).toMatch(/No AI spent on this article/);
   }, 60_000);
 });

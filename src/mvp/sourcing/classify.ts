@@ -2,7 +2,9 @@ import { junkReason } from './junk';
 import {newsPublisher} from './entities';
 export type PageKind='article'|'tender_notice'|'filing'|'company_site'|'directory'|'roundup'|'junk';
 export interface ClassifyPage {url:string;title:string|null;text:string;registryId?:string;ogType?:string;tables?:string[][][];markets?:string[]}
-export const EXTRACTOR_PRIORITY:Record<PageKind,number>={tender_notice:1900,filing:1900,article:1800,roundup:950,company_site:600,directory:500,junk:0};
+// Concrete company checks and contractor lists must not wait behind every news
+// article. Structured notices/filings still have the strongest trigger priority.
+export const EXTRACTOR_PRIORITY:Record<PageKind,number>={tender_notice:1300,filing:1300,article:900,roundup:1100,company_site:1200,directory:1100,junk:0};
 /** Routing only. Names and numbers here are hints, never evidence or saved entities. */
 export function classifyPage(page:ClassifyPage):PageKind {
   if(junkReason(page.url,page.title,page.markets))return 'junk';

@@ -4,6 +4,7 @@ import {createTestDb,setDbForTests,type Db} from "@/mvp/db";
 import {analyseReply,initialEmail,qualifyBuyer,QUALIFICATION_DATA_BYTES} from "./ai";
 import {LLMHttpError,QuotaExceededError} from "@/mvp/llm/types";
 import type {Opportunity} from "@/mvp/opportunities";
+import type {SearchBrief} from '@/mvp/discovery/brief';
 const complete=vi.hoisted(()=>vi.fn());let name="groq";
 vi.mock("@/mvp/llm",()=>({getLLM:()=>({name,complete})}));
 let db:Db;let evidenceId:string;
@@ -26,6 +27,24 @@ async function exampleOpportunity(text='Example EPC won the EPC contract for con
   return {o:{...opportunity,id,run_id:run,name:'Example EPC',product_id:'line-pipe',product_name:'Line pipe',keyword:'line pipe',buying_reason:text,evidence_ids:[evidence]} as Opportunity,doc,evidence,company,url};
 }
 describe("grounded Groq sales decisions",()=>{
+  it('uses the same literal work-check proof as discovery for demo qualification, never a guessed CRM reason',async()=>{
+    const text='Example EPC won the EPC contract for an LNG liquefaction plant in the UAE.';
+    const s=await exampleOpportunity(text);
+    const b:SearchBrief={version:1,item:'Cryogenic valves',source:'ai',productId:'gate-globe-check',mustHave:[],buying:'project',buyerRoles:[],notBuyers:[],owners:[],places:{AE:[]},
+      uses:[{name:'LNG liquefaction plant',newsWords:['LNG'],why:'Potential cryogenic service',countries:['AE'],localWords:{}}]};
+    const o={...s.o,product_id:'gate-globe-check',product_name:'Cryogenic valves',keyword:'Cryogenic valves'};
+    await db.query('update runs set adhoc_query=$2::jsonb where id=$1',[o.run_id,JSON.stringify({productId:o.product_id,brief:b})]);
+    await db.query("insert into research_sessions(run_id,budget) values($1,'{}')",[o.run_id]);
+    await db.query("insert into need_checks(run_id,document_id,company_name,role,quote,quote_verified,needs_item,verdict) values($1,$2,'Example EPC','epc',$3,true,'yes','lead')",[o.run_id,s.doc,text]);
+    complete.mockResolvedValue({text:JSON.stringify({approved:true,confidence:.8,reason:'Potential application inferred from the contractor’s own LNG work; specifications unconfirmed.',companyEvidenceId:s.evidence,productEvidenceId:s.evidence})});
+    expect((await qualifyBuyer(o)).approved).toBe(true);
+    expect(JSON.parse(complete.mock.calls.at(-1)![0].user).productEvidenceKinds[s.evidence]).toBe('application');
+    complete.mockClear();
+    await db.query("update need_checks set quote='Example invented scope' where run_id=$1",[o.run_id]);
+    expect((await qualifyBuyer(o)).approved).toBe(false);expect(complete).not.toHaveBeenCalled();
+    await db.query('update need_checks set quote=$2,quote_verified=false where run_id=$1',[o.run_id,text]);
+    expect((await qualifyBuyer(o)).approved).toBe(false);
+  });
   it('supplies material application context for pipeline EPC without requiring literal line-pipe demand',async()=>{
     const s=await exampleOpportunity('Example EPC secured an engineering, procurement and construction (EPC) gas pipeline project in the United Arab Emirates.');
     complete.mockResolvedValue({text:JSON.stringify({approved:true,confidence:.5,reason:'Potential line-pipe demand inferred from gas-pipeline EPC, not a confirmed order',companyEvidenceId:s.evidence,productEvidenceId:s.evidence})});

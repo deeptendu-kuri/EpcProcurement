@@ -16,7 +16,7 @@ export function ProspectConversation({opportunityId,testThreadId,onChange,calend
   useEffect(()=>{changed.current=onChange;},[onChange]);
   const endpoint=testThreadId?`/api/mvp/automation/test/${testThreadId}`:`/api/mvp/automation/conversation/${opportunityId}`;
   const load=useCallback(async()=>apiJson<Data>(endpoint),[endpoint]);
-  useEffect(()=>{let cancelled=false;const poll=async()=>{try{const result=await load();if(!cancelled){setData(result);setError(null);const next=JSON.stringify([result.threads.map(t=>[t.id,t.updated_at,t.state,t.summary]),result.messages.map(m=>[m.id,m.state])]);if(fingerprint.current!==next){fingerprint.current=next;changed.current?.();}}}catch{if(!cancelled)setError('Conversation could not refresh. Check the local server.');}};const first=setTimeout(()=>{void poll();},0);const timer=setInterval(()=>{void poll();},10_000);return()=>{cancelled=true;clearTimeout(first);clearInterval(timer);};},[load]);
+  useEffect(()=>{let cancelled=false;const poll=async()=>{try{const result=await load();if(!cancelled){setData(result);setError(null);const next=JSON.stringify([result.threads.map(t=>[t.id,t.updated_at,t.state,t.summary]),result.messages.map(m=>[m.id,m.state])]);if(fingerprint.current!==next){fingerprint.current=next;changed.current?.();}}}catch{if(!cancelled)setError('Conversation could not refresh. Check your connection and retry.');}};const first=setTimeout(()=>{void poll();},0);const timer=setInterval(()=>{void poll();},10_000);return()=>{cancelled=true;clearTimeout(first);clearInterval(timer);};},[load]);
   const act=async(action:'start_demo'|'confirm_fit'|'pause'|'resume'|'stop'|'retry')=>{
     if(!data)return;setBusy(true);setError(null);
     try {
@@ -39,14 +39,16 @@ export function ProspectConversation({opportunityId,testThreadId,onChange,calend
     {data&&!thread?<div className="mt-4 rounded-xl bg-[var(--subtle)] p-4">
       <h4 className="font-semibold">{eligibility?.automaticEligible?'Automatic buyer-fit check pending':'Automatic email status'}</h4>
       <p className="mt-2 text-sm">{eligibility?.automaticReason||'When a new search finishes, its best source-backed companies are checked automatically and the top qualifying ones (3 by default) start demo conversations at the approved inbox; you do not need to click Send.'}</p>
-      {eligibility?.researchPaused?<p className="mt-2 text-xs text-[var(--text-2)]">Research is paused; saved companies remain available. A partial search can still produce an eligible demo conversation without claiming complete coverage.</p>:null}
+      {eligibility?.researchPaused?<p className="mt-2 text-xs text-[var(--text-2)]">Research is paused; saved companies remain available. You can start one reviewed buyer’s demo below without resuming research. Automatic top-lead emails wait until you finish the search.</p>:null}
       {eligibility?.existingOpportunityId?<Link href={`/opportunities/${eligibility.existingOpportunityId}?tab=conversation`} className="btn btn-secondary mt-3">Open existing company conversation</Link>:null}
-      {!eligibility?.existingOpportunityId?<details className="mt-3 text-xs"><summary className="cursor-pointer text-[var(--text-2)]">Advanced: manually select a historical saved prospect</summary>
+      {!eligibility?.existingOpportunityId?<div className="mt-3 border-t border-[var(--line)] pt-3"><h4 className="text-sm font-semibold">Start this buyer’s demo email</h4>
       {eligibility?.reason?<p className="mt-2 text-[var(--text-2)]">{eligibility.reason}</p>:null}
       {eligibility?.reason?.startsWith('Confirm potential buyer fit')?<button disabled={busy} className="btn btn-secondary mt-3" onClick={()=>void act('confirm_fit')}>Confirm potential buyer fit</button>:null}
-      {s&&eligibility?<button disabled={busy||!eligibility.canStart||!s.enabled||!s.ready||!s.worker} className="btn btn-secondary mt-3" onClick={()=>void act('start_demo')}>{busy?'Starting…':'Start this prospect’s demo workflow'}</button>:null}
+      {s&&eligibility?<button disabled={busy||!eligibility.canStart||!s.enabled||!s.ready||!s.worker} className="btn btn-primary mt-3" onClick={()=>void act('start_demo')}>{busy?'Queueing demo email…':'Start demo email for this buyer'}</button>:null}
+      {s&&(!s.enabled||!s.ready||!s.worker)?<p role="status" className="mt-2 text-sm text-amber-800">Email setup or the background worker is not ready. Open Email &amp; Calendar setup above.</p>:null}
+      <p className="mt-2 text-xs text-[var(--text-2)]">Confirming buyer fit saves your review only; it does not send an email. Starting the demo queues it for the background worker.</p>
       {s?<p className="mt-2 text-xs text-[var(--text-2)]">Queues one introduction to {s.recipient}. After that, replies, bounded follow-ups and agreed meeting scheduling run automatically. No verification credits are used by this action.</p>:null}
-      </details>:null}
+      </div>:null}
     </div>:null}
     {thread?<div className="mt-4 rounded-xl border border-[var(--line)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-bold">{thread.paused?'Paused · ':''}{LABELS[thread.state]||thread.state}</h4><p className="mt-1 text-sm text-[var(--text-2)]">{thread.reason}</p></div>{!['stopped','meeting_booked'].includes(thread.state)?<div className="flex flex-wrap gap-2"><button disabled={busy} className="btn btn-secondary btn-sm" onClick={()=>void act(thread.paused?'resume':'pause')}>{thread.paused?'Resume conversation':'Pause conversation'}</button>{['review','needs_contact'].includes(thread.state)?<button disabled={busy||!s?.enabled} className="btn btn-secondary btn-sm" onClick={()=>void act('retry')}>Retry checked step</button>:null}<button disabled={busy} className="btn btn-secondary btn-sm" onClick={()=>void act('stop')}>Stop conversation</button></div>:null}</div>

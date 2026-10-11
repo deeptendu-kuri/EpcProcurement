@@ -2,7 +2,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, type Db } from "@/mvp/db";
 import { createGroqProvider } from "./groq";
-import { cloudflareUrl, createCloudflareProvider } from "./cloudflare";
+import { cloudflareUrl, createCloudflareProvider,resetCloudflareCircuitsForTests } from "./cloudflare";
 import { createMockProvider, setMockExtractor, setMockTextGenerator } from "./mock";
 import { getUsageSummary, usedToday, withQuota } from "./quota";
 import { getLLM, isDemoMode, providerFor } from "./index";
@@ -22,6 +22,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  resetCloudflareCircuitsForTests();
   for (const key of KEYS) delete process.env[key];
   await db.query("delete from llm_usage");
 });

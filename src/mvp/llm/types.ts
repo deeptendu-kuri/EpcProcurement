@@ -31,6 +31,8 @@ export type ProviderName = "groq" | "cloudflare" | "mock";
 export interface LLMProvider {
   name: ProviderName;
   model: string;
+  /** Optional circuit-breaker hint: false means skip optional comparison calls. */
+  available?(): boolean;
   complete(request: LLMRequest): Promise<LLMResponse>;
 }
 
@@ -40,6 +42,7 @@ export class LLMHttpError extends Error {
     readonly provider: ProviderName,
     readonly status: number,
     message: string,
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = "LLMHttpError";

@@ -46,9 +46,13 @@ export async function reviewedProspectStatus(opportunityId:string, db:Queryable=
     union all select 1 from outreach_drafts where opportunity_id=$3 and delivery_first_attempt_at is not null limit 1`,[row.company_id,row.product_id,opportunityId])).rows.length>0;
   const count=(await db.query<{count:number}>(`select count(*)::int as count from funnel_threads ft join search_opportunities o on o.id=ft.opportunity_id
     where o.run_id=$1 and (ft.state not in ('review','stopped') or exists(select 1 from funnel_messages m where m.thread_id=ft.id and m.kind='initial' and m.first_attempt_at is not null))`,[row.run_id])).rows[0].count;
+  // A paused durable run is intentionally still "running". Manual selection may
+  // use its saved proof without finishing/resuming it; automatic top-N still waits.
+  const manuallySettled=row.research_state==='paused'&&row.status==='running'
+    || row.status==='done'&&(!row.research_state||['done','partial'].includes(row.research_state));
   const reason=!prospectDemoEnabled()?"Approved-inbox prospect demo mode is not configured."
     :row.is_sample?"Sample leads cannot start a researched-prospect conversation."
-    :row.status!=='done'||row.research_state && !['done','partial'].includes(row.research_state)?"Wait until research finishes or pauses with saved results."
+    :!manuallySettled?"Wait until research finishes or pauses with saved results."
     :row.qualification!=='approved'?"Confirm potential buyer fit in this workspace before starting the demo."
     :!row.has_evidence?"This prospect needs verified original-source evidence from its own search."
     :existing?"This company and product already have a conversation. Open it instead of sending another introduction."
@@ -65,7 +69,7 @@ export async function reviewedProspectStatus(opportunityId:string, db:Queryable=
     :prior?'Separate outreach history exists; no duplicate introduction.'
     :count>=prospectsPerSearch()?`The top ${prospectsPerSearch()} ${prospectsPerSearch()===1?'lead':'leads'} of this search already have demo conversations. All other companies remain saved.`
     :null;
-  return {canStart:!reason,reason,researchState:row.research_state,researchPaused:row.research_state==='partial',
+  return {canStart:!reason,reason,researchState:row.research_state,researchPaused:['paused','partial'].includes(row.research_state??''),
     automaticEligible:prospectDemoEnabled()&&!automaticReason,automaticReason,
     existingOpportunityId:existing?.opportunity_id??null,threadId:existing?.id??null};
 }

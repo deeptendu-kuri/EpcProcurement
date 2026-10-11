@@ -3,7 +3,7 @@ import type { Db, Queryable } from '@/mvp/db';
 import type { RunInput } from '@/mvp/types';
 import type { RawDoc } from '@/mvp/pipeline/contracts';
 import type { Trigger } from '@/mvp/buyers/types';
-import { getLLM, type LLMProvider, type LLMRole } from '@/mvp/llm';
+import { getLLM, LLMHttpError, type LLMProvider, type LLMRole } from '@/mvp/llm';
 import { originalQuote } from '@/mvp/discovery/evidence';
 import { buyerPageCandidate } from '@/mvp/discovery/plan';
 import { reserveAnalysis, reserveBudget, markBudget, type ResearchBudget } from '@/mvp/research/store';
@@ -28,6 +28,7 @@ export function budgetedAwardProviders(db: Db, runId: string, documentId: string
       const llm = make(role, model);
       if (llm.name === 'mock') return llm; // deterministic fixtures cost no provider quota
       const wrapped:LLMProvider = { ...llm, async complete(request) {
+        if(llm.available?.()===false)throw new LLMHttpError(llm.name,429,'Comparison provider circuit open; no research budget reserved.');
         const key = `award:${documentId}:${role}:${llm.model}:${request.purpose ?? 'extract'}`;
         const tokens = Math.ceil((request.system.length + request.user.length) / 3) + (request.maxTokens ?? 1500);
         const reservation = await reserveAnalysis(db, runId, key, tokens, budget);

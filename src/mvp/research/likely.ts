@@ -18,10 +18,11 @@ import { listFoundCompanies } from './found';
 import type { BuyerType } from './shortlist';
 import { sameCompanyName } from './company-names';
 import { namesWork } from '@/mvp/discovery/brief';
+import { supportedWorkProof } from '@/mvp/discovery/work-proof';
 
 /** A need check's accepted company, with its source (docs/mvp/20). */
 interface NeedLead { company_name: string; role: string; quote: string; need_why: string | null; work_date: string | null; market: string | null; project: string | null;
-  document_id: string; url: string | null; tier: string | null; publisher_key: string | null }
+  document_id: string; text:string; package:string|null; url: string | null; tier: string | null; publisher_key: string | null }
 /** A need-proven lead's fit: its work needs the item, shown on a verified sentence. */
 const NEED_FIT = 75;
 
@@ -43,8 +44,9 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
   // docs/mvp/20: in a work-based search a company the need check accepted is a lead on that proof (its verified
   // sentence about work that needs the item), whatever its shortlist rating; the smoke test lost them all.
   const needs = input.brief?.source === 'ai' ? (await db.query<NeedLead>(
-    `select n.company_name,n.role,n.quote,n.need_why,n.work_date,n.market,n.project,n.document_id,d.url,d.tier,d.publisher_key
-     from need_checks n join source_documents d on d.id=n.document_id where n.run_id=$1 and n.verdict='lead' order by n.work_date desc nulls last`, [runId])).rows : [];
+    `select n.company_name,n.role,n.quote,n.need_why,n.work_date,n.market,n.project,n.document_id,n.package,d.text,d.url,d.tier,d.publisher_key
+     from need_checks n join source_documents d on d.id=n.document_id where n.run_id=$1 and n.verdict='lead' and n.quote_verified=true and n.needs_item='yes' order by n.work_date desc nulls last`, [runId])).rows
+      .filter(n=>supportedWorkProof({company:n.company_name,quote:n.quote,text:n.text,package:n.package},productId,input.brief!)) : [];
   const needFor = (name: string) => needs.find((n) => sameCompanyName(n.company_name, name)) ?? null;
   const work = input.brief?.source === 'ai';
   const picks = (await listFoundCompanies(db, runId))

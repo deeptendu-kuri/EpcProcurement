@@ -10,10 +10,11 @@
 import type { Queryable } from '@/mvp/db';
 import type { LLMProvider } from '@/mvp/llm';
 import { firstJsonObject } from '@/mvp/llm/groq';
-import { verifyQuote } from '@/mvp/pipeline/quote-check';
+import { originalQuote } from '@/mvp/discovery/evidence';
 import { detectCountry, detectMarkets } from '@/mvp/pipeline/filter';
 import { matchUse, type SearchBrief } from '@/mvp/discovery/brief';
 import { companyKey, initialsOf, sameCompanyName } from './company-names';
+import { articleAnalysisText } from './relevance';
 
 export type NeedRole = 'owner' | 'developer' | 'epc' | 'jv_partner' | 'subcontractor' | 'maintenance_contractor' | 'seller_of_item' | 'other_supplier' | 'consultant' | 'investor' | 'other';
 export type Verdict = 'lead' | 'owner' | 'rejected';
@@ -55,7 +56,7 @@ export function needPrompt(doc: { text: string; url: string; title: string | nul
 Item sold: ${brief.item}${brief.mustHave.length ? ` (must-have: ${brief.mustHave.join(', ')})` : ''}. Not buyers: ${brief.notBuyers.join('; ') || 'none listed'}.
 Page (${doc.publishedAt?.slice(0, 10) ?? 'undated'}) ${doc.url}
 Title: ${doc.title ?? ''}
-Text: ${doc.text.replace(/\s+/g, ' ').trim().slice(0, 4500)}
+Text: ${articleAnalysisText(doc.text).replace(/\s+/g, ' ').trim().slice(0, 4500)}
 Return {"project": project name or null, "country": country where the work is done or null, "date": "YYYY-MM" of the announcement or award if the text gives it, else null,
 "use": the matching use name from the list, or null if the work is none of them,
 "needsItem": judge as a procurement engineer from what the work IS; news never lists valves, pipes or gaskets, so do not require the text to name the item.
@@ -106,9 +107,10 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
     if (!name) return [];
     const role: NeedRole = ROLES.has(c?.role as NeedRole) ? (c.role as NeedRole) : 'other';
     const pkg = clip(c?.package, 200), quote = clip(c?.quote, 600), since = clip(c?.since, 10) || null;
-    // Rule 9: the engine's own quote check (97% match). The sentence must name the company, by its core name at
-    // least ("Tecnimont" for "Tecnimont S.p.A."), not necessarily the full legal form the AI gave.
-    const quoteVerified = verifyQuote(name, quote, doc.text).ok || (verifyQuote(quote, quote, doc.text).ok && namesCompany(quote, name));
+    // Literal source spans, tolerating typography/whitespace only. The sentence
+    // must name the company; a fuzzy paraphrase is never verified evidence.
+    const literal=originalQuote(doc.text,quote);
+    const quoteVerified = Boolean(literal&&namesCompany(literal,name));
     const date = workDate(quote, since, doc.publishedAt), age = monthsAgo(date, now);
     const sells = role === 'seller_of_item' || SELLER.test(`${name} ${pkg}`);
     const owns = role === 'owner' || role === 'developer';
@@ -127,7 +129,7 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
     ].filter((x): x is string => Boolean(x));
     // Owners and developers (rule 4) on qualifying work are kept as owners: they buy through their contractors.
     const verdict: Verdict = why.length ? 'rejected' : owns ? 'owner' : 'lead';
-    return [{ name, role, package: pkg, quote, quoteVerified, since: date, verdict, reason: why.join('; ') || (owns ? 'owner of work that needs the item' : 'does work that needs the item') }];
+    return [{ name, role, package: pkg, quote:literal??quote, quoteVerified, since: date, verdict, reason: why.join('; ') || (owns ? 'owner of work that needs the item' : 'does work that needs the item') }];
   });
   return { project, country, market, date: workDate('', null, clip(raw.date, 10) || doc.publishedAt), use, needsItem, needWhy, companies };
 }

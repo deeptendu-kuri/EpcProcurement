@@ -286,7 +286,7 @@ export async function enqueueRawDocs(db:Db,job:ResearchJob,docs:RawDoc[],maxPage
       // A duplicate must not use this query's fair share or appear as deferred.
       if(existing.has(raw.url))continue;
       if(admitted>=fairCap){deferred++;continue;}
-      const priority=raw.research?.sourcingLane==='trigger'?1600:raw.research?.sourcingLane==='roundup'?800:raw.research?.lane==='directory'?48:35;
+      const priority=raw.research?.sourcingLane==='trigger'?1000:raw.research?.sourcingLane==='roundup'?1050:raw.research?.sourcingLane==='capability'?1150:raw.research?.lane==='directory'?48:35;
       if(await queueRead(tx,job.run_id,raw,{maxPages},priority)){admitted++;existing.add(raw.url);}else deferred++;
     }
     await tx.query(`update research_jobs set state='done',result=$3::jsonb,lease_token=null,lease_until=null where id=$1 and lease_token=$2`,[job.id,job.lease_token,JSON.stringify({urls:clean.length,deferred,docs:clean,skippedCount:docs.length-clean.length})]);

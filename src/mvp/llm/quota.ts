@@ -108,6 +108,7 @@ export function withQuota(provider: LLMProvider, defaultPurpose: string, db?: Qu
   return {
     name: provider.name,
     model: provider.model,
+    available: provider.available,
     async complete(request: LLMRequest) {
       const budget = dailyBudget(provider.name);
       if (Number.isFinite(budget)) {

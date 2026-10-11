@@ -137,7 +137,20 @@ export function exactProductEvidence(text: string, productId: string): boolean {
 export function buyerPageCandidate(text: string, productId: string): boolean {
   return exactProductEvidence(text,productId)
     && WORK.test(text)
+    && !materialOutputOnly(text,productId)
     && !/\b(?:market report|market size|cagr|job vacancy)\b/i.test(text);
+}
+/** Making the material being sold is not consuming it. Equipment fabricators
+ * using/buying it as input or actually installing it still qualify. */
+export function materialOutputOnly(text:string,productId:string):boolean {
+  const sections=materialSections(text);
+  const consumes=/\b(?:using|uses|consum\w*|purchas\w*|procur\w*|raw materials?|material inputs?|install\w*|erect\w*|pipeline construction|piping construction)\b/i;
+  if(sections.some(section=>consumes.test(section)&&materialEvidenceKind(section,productId)!=='none'))return false;
+  return sections.some(section=>{
+    const output=section.match(/\b(?:manufactur\w*|produc\w*|pipe mills?|stockists?|distributors?)\b[^.;\n]{0,220}/ig)??[];
+    return output.some(clause=>materialEvidenceKind(clause.replace(/\bpipes\b/ig,'pipe'),productId)==='explicit')
+      && !consumes.test(section);
+  });
 }
 /** Reading order only, never an eligibility gate. Favour buying-work sources over generic news. */
 export function buyerResearchPriority(raw:RawDoc,text:string,input:RunInput):number {
