@@ -80,7 +80,11 @@ export async function extendResearchIfShort(db: Db, runId: string): Promise<bool
     grew('maxPages') ? "stage='read'" : '',
     grew('maxAiPages') && grew('maxAiTokens') ? "stage='analyse'" : '',
   ].filter(Boolean);
-  const runnable = lanes.length ? `${SKIPPED_FOR_LIMIT} and ((${lanes.join(') or (')}))` : 'false';
+  // Deep searches may already be at every ceiling. No work can be expanded,
+  // and querying "where false" with a run-id parameter causes a bind error
+  // that leaves settled research active forever instead of starting outreach.
+  if (!lanes.length) return false;
+  const runnable = `${SKIPPED_FOR_LIMIT} and ((${lanes.join(') or (')}))`;
   const skipped = (await db.query<{ count: number }>(`select count(*)::int as count from research_jobs where ${runnable}`, [runId])).rows[0].count;
   const deferred = grew('maxPages') ? (await db.query<{ count: number }>(
     "select count(*)::int as count from research_jobs where run_id=$1 and stage='collect' and state='done' and coalesce((result->>'deferred')::int,0)>0", [runId])).rows[0].count : 0;

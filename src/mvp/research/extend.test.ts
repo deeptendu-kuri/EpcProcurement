@@ -76,6 +76,18 @@ describe('keep researching until the minimum buyers are saved',()=>{
     expect((await sessionFor(db,off))?.state).toBe('done');
   });
 
+  it('settles a deep search at its ceiling without an unbound run parameter or another charged round',async()=>{
+    const id=await settledRun();
+    const budget=researchBudget({...input,researchMode:'deep',markets:['IN','CA','AE'],targetCompanies:50});
+    await db.query('update research_sessions set budget=$2::jsonb where run_id=$1',[id,JSON.stringify(budget)]);
+    await expect(finishIdleResearch(db,id)).resolves.toBeUndefined();
+    expect((await sessionFor(db,id))?.state).toBe('done');
+    expect((await db.query<{status:string}>('select status from runs where id=$1',[id])).rows[0].status).toBe('done');
+    expect((await db.query("select id from research_jobs where run_id=$1 and state in ('queued','running')",[id])).rows).toHaveLength(0);
+    expect((await db.query('select key from research_budget_reservations where run_id=$1',[id])).rows).toHaveLength(0);
+    expect((await sessionFor(db,id))!.budget).toEqual(budget);
+  });
+
   it('keeps part of the daily AI allowance for email replies',async()=>{
     vi.stubEnv('GROQ_API_KEY','Example-test-only');vi.stubEnv('LLM_DAILY_TOKEN_BUDGET__GROQ','40000');
     const id=await settledRun();
