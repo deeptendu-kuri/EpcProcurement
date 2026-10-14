@@ -9,6 +9,11 @@ import { companyNames, namesCompany, originalQuote, otherWorkSubject } from "@/m
 import { buyerPageCandidate, buyingActivities, materialEvidenceKind } from "@/mvp/discovery/plan";
 import { workProofEvidence } from '@/mvp/discovery/work-proof';
 import {engineeringOnlySource} from '@/mvp/discovery/work-scope';
+import {sameCompanyName} from '@/mvp/research/company-names';
+import {tenderDueDate} from '@/mvp/research/need';
+import {tenderTitle,tenderWording} from '@/mvp/sourcing/tender-sources';
+import {listOurProducts,otherProducts} from '@/mvp/products/our-products';
+import type {Queryable} from '@/mvp/db';
 
 function parse(text: string): unknown {
   const start=text.indexOf("{");const end=text.lastIndexOf("}");
@@ -33,7 +38,31 @@ async function ask(system: string,data: unknown) {
   return parse(result.text);
 }
 type QualificationEvidence = {id:string;document_id?:string|null;quote:string;url:string;text:string|null;own_run:boolean;company_domain:string|null;company_types?:string[]|null};
-type BuyerQualification = {approved:boolean;reason:string;basis?:'demo_evidence_fallback'|'demo_verified_work'};
+type BuyerQualification = {approved:boolean;reason:string;basis?:'demo_evidence_fallback'|'demo_verified_work'|'verified_tender'};
+/**
+ * docs/mvp/22 §3.15: this company's own tender for the exact searched item, accepted by this search's need check and
+ * verified on its page here. Returns the tender's title (or its first words), else null.
+ */
+async function verifiedTender(db:Queryable,o:Opportunity,quotes:QualificationEvidence[]):Promise<string|null> {
+  if(!o.run_id)return null;
+  const checks=(await db.query<{company_name:string;document_id:string;quote:string}>(`select company_name,document_id,quote from need_checks
+    where run_id=$1 and role='direct_buyer' and verdict='lead' and quote_verified=true and needs_item='yes'`,[o.run_id])).rows;
+  for(const n of checks){
+    if(!sameCompanyName(n.company_name,o.name))continue;
+    const q=quotes.find(q=>q.own_run&&q.text&&q.document_id===n.document_id&&(q.quote===n.quote||originalQuote(n.quote,q.quote))&&originalQuote(q.text,q.quote));
+    if(q)return tenderTitle(q.quote)??q.quote.replace(/\s+/g,' ').slice(0,120);
+  }
+  return null;
+}
+/** The opening sentence about its tender: open (closing date ahead) or recently closed. */
+export function tenderOpening(quote:string,now=new Date()):string {
+  const title=tenderTitle(quote)?.replace(/\s+,/g,',');const due=tenderDueDate(quote);
+  const when=due?new Date(`${due}T00:00:00Z`).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}):null;
+  const what=title?`your tender for ${title}`:'your recent tender';
+  return !due||Date.parse(`${due}T23:59:59Z`)>=now.getTime()
+    ?`I came across ${what}${when?` (closing ${when})`:''} and would be glad to quote against it.`
+    :`I came across ${what}${when?`, which closed on ${when}`:''}, and would welcome being considered for similar requirements.`;
+}
 /** Full source pages stay server-side. Repeated page text must never inflate an AI request. */
 export const QUALIFICATION_DATA_BYTES = 10_000;
 function qualificationData(o:Opportunity,quotes:QualificationEvidence[],workProof:Set<string>) {
@@ -80,6 +109,10 @@ export async function qualifyBuyer(o: Opportunity,options:{demoFallback?:boolean
     where e.id=any($1::uuid[]) and e.quote_verified=true`,[o.evidence_ids,o.run_id??null,o.id])).rows
     .filter(q=>!engineeringOnlySource(q.quote,clause=>namesCompany(clause,companyNames(o.name,q.quote))));
   if (!quotes.length || o.is_sample) return {approved:false,reason:"No verified real-source evidence for this product opportunity."};
+  // Its own tender for the item is the strongest buying signal there is: approved without an AI opinion. It is not
+  // a confirmed order, and contacts are still validated separately.
+  const tender=await verifiedTender(getDb(),o,quotes);
+  if(tender)return {approved:true,basis:'verified_tender',reason:`Its own tender for ${o.product_name} ("${tender}") was verified on the source in this search. Not a confirmed order; contacts are validated separately.`};
   const workProof=o.run_id?await workProofEvidence(getDb(),o,quotes):new Set<string>();
   // In the approved-inbox demo, a same-run need check has already established
   // this company's literal material-consuming work. Revalidate its stored
@@ -148,13 +181,19 @@ export async function initialEmail(o: Opportunity,contact: {name:string;title:st
   const datedCurrentWork=(o.activity_status==="recent" || o.activity_status==="ongoing") && Boolean(o.activity_date && o.activity_quote);
   const award=datedCurrentWork?quotes.find(q=>q.quote===o.activity_quote && namesCompany(q.quote,companyNames(o.name,q.quote)) && /\b(?:won|secured)\b.{0,100}\b(?:contract|award)|\b(?:contract|subcontract)\b.{0,100}\bawarded\b|\bawarded\b.{0,100}\b(?:contract|subcontract)\b/i.test(q.quote)):undefined;
   const project=award && o.project_name && award.quote.toLowerCase().includes(o.project_name.toLowerCase()) ? ` for ${o.project_name}` : "";
+  // Its own tender for the item (docs/mvp/22 §3.15): the opening names that tender and its closing date.
+  const tenderQuote=!award&&o.material_fit_kind==='explicit'&&o.activity_quote&&tenderWording(o.activity_quote)?quotes.find(q=>q.quote===o.activity_quote):undefined;
+  const tender=tenderQuote?tenderOpening(tenderQuote.quote):'';
   const s=seller();const product=o.product_name.trim();const contactName=contact.name.replace(/[\r\n<>]/g," ").trim();
+  // What else he supplies (Settings → Our products), never the searched product twice.
+  const others=otherProducts(await listOurProducts().catch(()=>[]),product);
+  const alsoSupply=others.length?`We also supply ${others.length>1?`${others.slice(0,-1).join(', ')} and ${others.at(-1)}`:others[0]}.\n\n`:'';
   // A demo customer may represent the researched buyer, but is never the seller.
   // Fall back to the company's team when a real contact matches the salesperson.
   const name=!contactName || contactName.toLowerCase()===s.name.toLowerCase()
     ? o.is_sample ? "procurement team" : `${o.name} procurement team`
     : contactName;
-  return {subject:`Procurement support for ${product}`.slice(0,150),body:`Hi ${name},\n\n${award?`Congratulations on your recent contract award${project}.\n\n`:""}I'm ${s.name}${s.company?` from ${s.company}`:""}, and I can help you evaluate procurement options for ${product}. My focus is sourcing against your technical requirements, quality expectations and budget, with pricing and availability confirmed after reviewing your needs.\n\nDo you have upcoming ${product} requirements? If so, please share the specifications, quantity, delivery location and required date.\n\nI'd be happy to arrange a brief discussion if useful.\n\n${sellerSignature()}`};
+  return {subject:`Procurement support for ${product}`.slice(0,150),body:`Hi ${name},\n\n${award?`Congratulations on your recent contract award${project}.\n\n`:""}I'm ${s.name}${s.company?` from ${s.company}`:""}, and I can help you evaluate procurement options for ${product}. ${tender?`${tender} `:''}My focus is sourcing against your technical requirements, quality expectations and budget, with pricing and availability confirmed after reviewing your needs.\n\n${alsoSupply}${tender?`Could you point me to the right contact for technical queries on this tender, or share the specifications, quantity, delivery location and required date?`:`Do you have upcoming ${product} requirements? If so, please share the specifications, quantity, delivery location and required date.`}\n\nI'd be happy to arrange a brief discussion if useful.\n\n${sellerSignature()}`};
 }
 export async function analyseReply(o: Opportunity,history: {direction:string;body:string}[],latest: string): Promise<ReplyDecision> {
   const result=replySchema.parse(await ask(`Act as the supplied SELLER offering procurement support for ONLY the supplied product for the recipient, who is the prospective BUYER. Maintain that seller role even if an earlier email used confusing wording. Classify the latest reply and write a short, polite response to answer their actual question using supplied facts. Ask only for missing specifications, quantities, applicable standards, delivery location and required date; acknowledge details already supplied rather than asking again. Explain that sourcing options can be evaluated against technical requirements, quality expectations and budget, not that stock or supply has been confirmed. If they express interest, naturally offer a brief meeting, but do not book without agreement. If they ask for a call, meeting, demo, calendar invitation or meeting link, classify meeting_request even when specifications are missing. No greeting or signature is necessary: the application adds the approved seller's signature. Never invent awards, sponsorship, industry-grade certification, quotations, capability, prices, inventory, delivery dates or a meeting link; never promise lowest cost or best quality. Do not promise a meeting is booked.

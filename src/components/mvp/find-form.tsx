@@ -29,6 +29,8 @@ export interface FindFormProps {
   initialInput?: RunInput | null;
   /** Free AI tokens left over the last 24 hours across the search models; null = no daily limit. */
   aiLeft?: number | null;
+  /** A product to start with (/find?q=…, from the Dashboard's product shortcuts). */
+  initialQuery?: string;
 }
 
 /**
@@ -45,11 +47,11 @@ type SizeKey = keyof typeof SIZES;
 const sizeOf = (mode: "preview" | "batch" | "deep" | undefined): SizeKey => mode === "deep" ? "deep" : mode === "batch" ? "standard" : "quick";
 
 /** Find (09 §4.1, 13 §7): what you offer + markets + lead type → Search now (queued) → live progress; Save this search. */
-export function FindForm({ markets, initialRunId = null, initialTicketId = null, initialInput = null, aiLeft = null }: FindFormProps) {
+export function FindForm({ markets, initialRunId = null, initialTicketId = null, initialInput = null, aiLeft = null, initialQuery = "" }: FindFormProps) {
   const router = useRouter();
   const toast = useToast();
   const [, startTransition] = useTransition();
-  const [query, setQuery] = useState(initialInput?.query ?? "");
+  const [query, setQuery] = useState(initialInput?.query ?? initialQuery);
   const [selected, setSelected] = useState<string[]>(initialInput?.markets ?? markets.map((market) => market.code));
   const [contactRole, setContactRole] = useState(initialInput?.contactRole ?? "buyer");
   const [includeResellers, setIncludeResellers] = useState(initialInput?.includeResellers !== false);

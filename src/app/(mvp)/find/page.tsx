@@ -25,6 +25,8 @@ export default async function FindPage({ searchParams }: FindPageProps) {
   const ticketParam = typeof params.ticket === "string" ? params.ticket.slice(0, 200) : null;
   // "Run again" from the Dashboard: the form starts with that search's material and countries.
   const againParam = typeof params.again === "string" && isUuid(params.again) ? params.again : null;
+  // A product shortcut (Dashboard → Your products): the form starts with that product; anything can still be typed.
+  const queryParam = typeof params.q === "string" ? params.q.trim().slice(0, 200) : "";
 
   // docs/mvp/22: any product can be searched; no product list is needed first.
   if (runParam) {
@@ -44,6 +46,7 @@ export default async function FindPage({ searchParams }: FindPageProps) {
         initialRunId={runParam}
         initialTicketId={ticketParam}
         initialInput={selectedRun?.adhoc_query ?? null}
+        initialQuery={queryParam}
         aiLeft={ai?.groq ? ai.left : null}
       />
       <details className="card p-4"><summary className="cursor-pointer text-sm font-semibold">Scheduled searches ({saved.length})</summary><div className="mt-4"><SavedSearchesList searches={saved} /></div></details>

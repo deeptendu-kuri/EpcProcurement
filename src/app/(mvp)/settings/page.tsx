@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { CheckCircle2, Info, XCircle } from "lucide-react";
 import { getCatalogue, getStrengths } from "@/mvp/config/buyers-config";
+import { listOurProducts } from "@/mvp/products/our-products";
+import { OurProductsEditor } from "@/components/mvp/settings/our-products";
 import { getClientProfile } from "@/mvp/config/profile";
 import { marketName } from "@/mvp/config/markets";
 import { disciplineLabel, formatDate, formatMoney } from "@/components/mvp/labels";
@@ -41,6 +43,7 @@ function List({ items, empty = "None" }: { items: string[]; empty?: string }) {
 }
 
 const TABS = [
+  { id: "products", label: "Our products" },
   { id: "automation", label: "Email & Calendar setup" },
   { id: "profile", label: "Company profile" },
   { id: "catalogue", label: "Catalogue" },
@@ -154,11 +157,11 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       <PageHeader
         title="Settings"
         subtitle="Your company profile, what you sell and why buyers should choose you."
-        actions={
+        actions={tab === "products" ? undefined : (
           <span className="chip">
             <Info size={13} aria-hidden /> Read-only for now
           </span>
-        }
+        )}
       >
         <nav aria-label="Settings sections" className="segmented-control self-start">
           {TABS.map((item) => (
@@ -169,7 +172,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         </nav>
       </PageHeader>
 
-      {tab === 'automation' ? <AutomationSettings initial={await funnelStatus()} calendarResult={typeof params.calendar==='string'?params.calendar:undefined}/> : tab === "catalogue" ? <CatalogueTab /> : tab === "strengths" ? <StrengthsTab /> : <ProfileTab profile={profile} />}
+      {tab === "products" ? <OurProductsEditor initial={await listOurProducts().catch(() => [])} /> : tab === 'automation' ? <AutomationSettings initial={await funnelStatus()} calendarResult={typeof params.calendar==='string'?params.calendar:undefined}/> : tab === "catalogue" ? <CatalogueTab /> : tab === "strengths" ? <StrengthsTab /> : <ProfileTab profile={profile} />}
     </div>
   );
 }
@@ -178,7 +181,7 @@ function ProfileTab({ profile }: { profile: ReturnType<typeof getClientProfile> 
   const identity=seller();
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Current email agent identity"><p className="font-semibold">{identity.name} · {identity.email}</p><p className="mt-2">{identity.description}</p><p className="mt-2">The agent uses the exact searched product and lead evidence. It does not use the example certifications or registrations below as seller claims.</p><Link href="/outreach" className="btn btn-primary mt-3">Open email automation setup</Link></Card>
+      <Card title="Current email agent identity"><p className="font-semibold">{identity.name} · {identity.email}</p><p className="mt-2">{identity.description}</p><p className="mt-2">The agent uses the exact searched product and lead evidence, and names your other products (Our products) as what else you supply. It does not use the example certifications or registrations below as seller claims.</p><Link href="/outreach" className="btn btn-primary mt-3">Open email automation setup</Link></Card>
       <details className="card p-4"><summary className="cursor-pointer font-semibold">Advanced: existing example discovery/scoring profile</summary><div className="mt-4 flex flex-col gap-4">
       {profile.is_example ? (
         <p role="note" className="rounded-lg border border-[#fedf89] bg-[#fffaeb] px-3 py-2 text-sm font-semibold text-[#b54708]">

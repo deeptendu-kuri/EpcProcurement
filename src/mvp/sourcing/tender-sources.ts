@@ -50,10 +50,16 @@ export const LOCAL_TENDER_WORDS: Record<string, string> = {
 };
 
 /**
- * Is this page an open tender, RFQ, bid invitation or purchase notice? (English and Arabic wording.) A tender is
- * demand only when it also names the item; the caller checks that separately.
+ * Is this page an open tender, RFQ, bid invitation or purchase notice? (English, Arabic and the common tender words
+ * of French, Spanish, Portuguese, German, Italian, Dutch, Turkish, Indonesian/Malay, Polish, Russian, Chinese,
+ * Korean and Japanese.) A tender is demand only when it also names the item; the caller checks that separately.
  */
-export const TENDER_WORDING = /\b(?:tenders?|e-?tender(?:s|ing)?|rfq|rfp|request for (?:quotations?|proposals?)|invitation (?:to|for) (?:bids?|tenders?)|bids? (?:are )?invited|bid (?:no|number|due date|submission|opening)|notice inviting tenders?|nit no|expression of interest|procurement notice|tender notice|tender no|closing date|bid closing|gem bid|reverse auction)\b|مناقصة|مناقصات|منافسة/i;
+export const TENDER_WORDING = /\b(?:tenders?|e-?tender(?:s|ing)?|rfq|rfp|request for (?:quotations?|proposals?)|invitation (?:to|for) (?:bids?|tenders?)|bids? (?:are )?invited|bid (?:no|number|due date|submission|opening)|notice inviting tenders?|nit no|expression of interest|procurement notice|tender notice|tender no|closing date|bid closing|gem bid|reverse auction|appels? d'offres?|avis d'appel|ausschreibung(?:en)?|vergabeverfahren|gara d'appalto|bando di gara|aanbesteding(?:en)?|ihale(?:si)?|pengadaan|lelang|przetarg)\b|\b(?:licitaci[oó]n|licita[cç][aã]o|licita[cç][oõ]es|concurso p[uú]blico|preg[aã]o)|مناقصة|مناقصات|منافسة|İhale|тендер|закупк|招标|采购|입찰|入札/i;
+/** The title of a tender listing ("tender for complete pressure vessel tag no: 217-v-001"), else null. */
+export function tenderTitle(text: string): string | null {
+  const title = text.replace(/\s+/g, ' ').match(/\btender\s+for\s+(.{5,220}?)(?=\s+(?:Agency\b|Due Date\b|Closing Date\b|Tender Value\b|Location\b)|$)/i)?.[1];
+  return title ? title.replace(/[\s,.;:–-]+$/, '').slice(0, 160) : null;
+}
 export function tenderWording(text: string): boolean {
   return TENDER_WORDING.test(text.slice(0, 6000));
 }

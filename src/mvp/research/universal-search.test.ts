@@ -14,9 +14,11 @@ import { consistentRating, consistentType } from "./shortlist";
 import { materialEvidenceKind, materialOutputOnly, tenderForItem } from "@/mvp/discovery/plan";
 import { registerSearchItemTerms } from "@/mvp/discovery/item";
 import { sourcePlan } from "@/mvp/sourcing/plan";
-import { tenderListPages } from "@/mvp/sourcing/tender-sources";
+import { tenderListPages, tenderWording } from "@/mvp/sourcing/tender-sources";
+import { listOurProducts } from "@/mvp/products/our-products";
 import { runInputSchema } from "@/app/api/mvp/_shared/schemas";
 import { judgeNeed, maskedIssuer, tenderDueDate } from "./need";
+import { inChosenCountry } from "./likely";
 import { tenderListingBlocks, workAnalysisText } from "./relevance";
 import { createResearchRun, sessionFor } from "./store";
 import { analysisBudget, processResearchTick, rateLimited, type ResearchDeps } from "./engine";
@@ -212,6 +214,12 @@ describe("tender list pages: one block per listing (live probe, 14 Oct)", () => 
     expect(["Generation GEM", "Defense GEM", "Uttar Pradesh Tenders", "Railways", "Corporations And Associations And Others"].map(maskedIssuer)).toEqual([true, true, true, true, true]);
     expect(["Indian Army", "Bharat Heavy Electricals Limited (BHEL)", "Engineers India Limited", "Uranium Corporation of India Limited", "Gujarat Metro Rail Corporation"].map(maskedIssuer)).toEqual([false, false, false, false, false]);
   });
+  it("recognises tenders in the common tender languages, never a word that merely contains 'tender'", () => {
+    expect(["Avis d'appel d'offres : fourniture de séparateurs", "Licitación pública para suministro de ventiladores", "Licitação para fornecimento de válvulas",
+      "Ausschreibung: Lieferung von Druckbehältern", "Gara d'appalto per scambiatori", "İhale ilanı: basınçlı kap", "Тендер на поставку", "招标公告 换热器"].map(tenderWording))
+      .toEqual([true, true, true, true, true, true, true, true]);
+    expect(tenderWording("The tenderness of the meat")).toBe(false);
+  });
   it("reads the due date printed on a listing, in the formats Indian and Gulf portals use", () => {
     expect(tenderDueDate("Agency / Dept : indian army Due Date : Oct 14, 2026 (Expire Today)")).toBe("2026-10-14");
     expect(tenderDueDate("Bid End Date: 23-10-2026 15:00")).toBe("2026-10-23");
@@ -256,6 +264,17 @@ describe("tender list pages: one block per listing (live probe, 14 Oct)", () => 
     expect(closed.companies[0]).toMatchObject({ verdict: "lead", reason: "issued a tender for the item (closed 2026-11-03)", since: "2026-11" });
     const impellers = judgeNeed(answer, { text: page, publishedAt: "2026-10-12" }, fansBrief({ item: "Fan impellers", synonyms: [], productId: "q:fan-impellers" }), ["IN"], new Date("2026-10-14T00:00:00Z"))!;
     expect(impellers.companies[1].verdict).toBe("lead");
+  });
+});
+
+describe("a likely buyer is placed in a chosen country (live run 7, 14 Oct)", () => {
+  it("needs its own line, its source title or its country website; a US contractor is not a Brazil buyer", () => {
+    const company = (quote: string, title: string | null, website: string | null) => ({ quote, source: { title }, website });
+    expect(inChosenCountry(company("Hanging H Companies works on oil and gas pipelines, uses ball valves", "Top pipeline contractors", "hanginghcompanies.com"), ["BR"])).toBe(false);
+    expect(inChosenCountry(company("Example Montagens builds gas pipelines in Brazil.", null, null), ["BR"])).toBe(true);
+    expect(inChosenCountry(company("Example Montagens builds gas pipelines.", "Pipeline contractors in Brazil", null), ["BR"])).toBe(true);
+    expect(inChosenCountry(company("Example Montagens builds gas pipelines.", null, "https://www.example.com.br"), ["BR"])).toBe(true);
+    expect(inChosenCountry(company("Example Ltd builds pipelines.", null, "example.co.uk"), ["GB"])).toBe(true);
   });
 });
 
@@ -307,6 +326,34 @@ describe("a typed-item search end to end (durable engine, no live requests)", ()
     expect(opp[0].buying_reason).toContain("Why it needs Centrifugal fans: Issues an open tender or RFQ for the item on the source.");
     const said = (await db.query<{ message: string }>("select message from run_events where run_id=$1", [id])).rows.map((r) => r.message).join("\n");
     expect(said).toContain("Open demand: NTPC Limited is buying Centrifugal fans");
+  }, 60_000);
+
+  it("searches a product he does not sell, in a country outside his list, and saves its local-language tender's buyer", async () => {
+    // His products (Settings) are shortcuts and email context only: ball valves are not among them, and Brazil is not a default country.
+    expect((await listOurProducts(db)).map((p) => p.name)).not.toContain("Ball valves");
+    const published = daysAgo(6);
+    const text = "Licitação nº 7004/2026 - Fornecimento de válvulas de esfera\nA Petróleo Brasileiro S.A. (Petrobras) abre licitação para fornecimento de válvulas de esfera para a Refinaria Duque de Caxias (REDUC), Rio de Janeiro, Brasil. Abertura das propostas em três semanas.";
+    const tender: RawDoc = { sourceKey: "tavily", sourceName: "Licitações Petrobras", tier: "B", url: "https://licitacoes.example/petrobras-valvulas-de-esfera",
+      title: "Licitação: fornecimento de válvulas de esfera - Petrobras", text, publishedAt: published, isSample: false };
+    const input: RunInput = { query: "Ball valves", productId: "q:ball-valves", markets: ["BR"], leadKinds: ["supply_subcontract"], researchMode: "batch" };
+    const brief = fansBrief({ item: "Ball valves", productId: "q:ball-valves", kind: "other", synonyms: ["ball valve"], tenderWords: ["supply of ball valves"], places: { BR: ["Brasil"] },
+      localItem: { BR: ["válvulas de esfera"] }, uses: [
+        { name: "oil refinery", newsWords: ["refinery"], why: "Refineries isolate process lines with ball valves.", countries: [], localWords: {} },
+        { name: "gas pipeline", newsWords: ["gas pipeline"], why: "Pipelines use ball valves.", countries: [], localWords: {} }] });
+    await db.query("insert into search_briefs(key,material,markets,brief,source) values($1,$2,$3,$4::jsonb,'ai')", [briefKey(input.query, ["BR"]), input.query, ["BR"], JSON.stringify(brief)]);
+    const id = await createResearchRun(input, db);
+    const needProvider: LLMProvider = { name: "groq", model: "test", async complete() { return { tokensIn: 1, tokensOut: 1, text: JSON.stringify({
+      project: null, country: "Brazil", date: published.slice(0, 7), use: null, needsItem: "yes", needWhy: "Petrobras tenders for ball valves.",
+      companies: [{ name: "Petróleo Brasileiro S.A. (Petrobras)", role: "direct_buyer", package: "Fornecimento de válvulas de esfera",
+        quote: "A Petróleo Brasileiro S.A. (Petrobras) abre licitação para fornecimento de válvulas de esfera para a Refinaria Duque de Caxias (REDUC), Rio de Janeiro, Brasil.", buysItem: "yes" }] }) }; } };
+    const deps: ResearchDeps = { collect: vi.fn(async () => [tender]), read: vi.fn(), discover: vi.fn(), save: saveBuyer, needProvider };
+    for (let tick = 0; tick < 150 && (await sessionFor(db, id))?.state === "active"; tick++) await processResearchTick(db, deps, id);
+
+    const checks = (await db.query<{ company_name: string; role: string; verdict: string; reason: string }>("select company_name, role, verdict, reason from need_checks where run_id=$1", [id])).rows;
+    expect(checks).toContainEqual(expect.objectContaining({ company_name: "Petróleo Brasileiro S.A. (Petrobras)", role: "direct_buyer", verdict: "lead" }));
+    const opp = (await db.query<{ product_name: string; trigger_kind: string | null; buying_reason: string }>("select product_name, trigger_kind, buying_reason from search_opportunities where run_id=$1", [id])).rows;
+    expect(opp).toEqual([expect.objectContaining({ product_name: "Ball valves", trigger_kind: "tender" })]);
+    expect(opp[0].buying_reason).toContain("abre licitação para fornecimento de válvulas de esfera");
   }, 60_000);
 
   it("reads and checks a tender page ahead of everything else, saving its issuer (live run, 14 Oct)", async () => {

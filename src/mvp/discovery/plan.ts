@@ -114,7 +114,7 @@ function searchItemEvidence(text:string,item:CatalogueItem):MaterialEvidenceKind
   const phrases=item.keywords.filter(k=>k.includes(" "));
   if(sections.some(s=>phrases.some(p=>s.words.includes(` ${p} `))))return "explicit";
   const singles=item.keywords.filter(k=>!k.includes(" ")&&k.length>=5&&!/\d/.test(k)&&!AMBIGUOUS_ITEM_WORDS.has(k));
-  return sections.some(s=>INDUSTRIAL_CONTEXT.test(s.raw)&&singles.some(w=>s.words.includes(` ${w} `)&&!s.words.includes(` whistle ${w} `)))?"explicit":"none";
+  return sections.some(s=>(INDUSTRIAL_CONTEXT.test(s.raw)||tenderWording(s.raw))&&singles.some(w=>s.words.includes(` ${w} `)&&!s.words.includes(` whistle ${w} `)))?"explicit":"none";
 }
 /** Classifies source wording; application is a supported inference, not an exact grade or RFQ. */
 export function materialEvidenceKind(text:string,productId:string):MaterialEvidenceKind {

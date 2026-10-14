@@ -5,7 +5,9 @@ export function engineeringOnlySource(quote:string,ownsClause:(clause:string)=>b
   const clauses=quote.split(/(?<=[.!?])\s+(?=[A-Z])|\s+(?:while|whereas|but)\s+|;\s*/);
   const own=clauses.filter(ownsClause);
   const scope=own.length?own:clauses.length===1?clauses:[];
-  const design=/\b(?:FEED|pre[- ]?FEED|front[- ]end engineering|detailed engineering|basic engineering|design contract|engineering services|consultancy)\b/i;
+  // Claims audit, 14 Oct: "engineering and project execution services" (KBR, Marjan) and "on-site supervision and
+  // commissioning" (XPLOIL) were saved as buyers; services on a plant buy no equipment.
+  const design=/\b(?:FEED|pre[- ]?FEED|front[- ]end engineering|detailed engineering|basic engineering|design contract|engineering(?: and [a-z ]{1,30}?)? services|engineering contract|consultancy|supervision|commissioning (?:services|support|assistance)|inspection services|third[- ]party inspection)\b/i;
   const physical=/\b(?:EPC|procurement|construct(?:ion|s|ing)?|install(?:ation|s|ing)?|fabricat(?:ion|es|ing)|maintenance)\b/i;
   return scope.some(clause=>design.test(clause)&&!physical.test(clause));
 }

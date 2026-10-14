@@ -45,7 +45,23 @@ const ROLE: Record<BuyerType, string | null> = {
 export const leadRoleFor = (type: BuyerType): string | null => ROLE[type];
 const squash = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInput, 'productId' | 'query' | 'contactRole' | 'brief'>): Promise<{ saved: number; listing: number }> {
+/** Country-code top-level domains that differ from the ISO code. */
+const TLD_COUNTRY: Record<string, string> = { uk: 'GB' };
+/**
+ * A likely buyer saved without a need check must be placed in a chosen country: by its own line, the title of the
+ * page that named it, or its website's country domain (live run 7, 14 Oct: a Texas pipeline contractor, rated from
+ * a US list, was saved in a Brazil search). Leads from a need check already passed the work-country check.
+ */
+export function inChosenCountry(c: { quote: string | null; source: { title: string | null } | null; website: string | null }, markets: readonly string[] | undefined): boolean {
+  if (!markets?.length) return true;
+  if ([...countriesInQuote(c.quote ?? ''), ...countriesInQuote(c.source?.title ?? '')].some((m) => markets.includes(m))) return true;
+  let tld = '';
+  try { tld = c.website ? new URL(/^https?:/i.test(c.website) ? c.website : `https://${c.website}`).hostname.split('.').pop() ?? '' : ''; } catch { tld = ''; }
+  const code = TLD_COUNTRY[tld.toLowerCase()] ?? tld.toUpperCase();
+  return code.length === 2 && markets.includes(code);
+}
+
+export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInput, 'productId' | 'query' | 'contactRole' | 'brief'> & { markets?: string[] }): Promise<{ saved: number; listing: number }> {
   const productId = input.productId;
   if (!productId || !getCatalogueItem(productId)) return { saved: 0, listing: 0 };
   const label = searchedProductLabel(productId, input.query ?? '');
@@ -67,7 +83,7 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
     // Source-checked own work decides admission. A second generic shortlist
     // rating cannot veto this evidence; recency changes ordering, not admission.
     .filter((c) => !c.opportunityId && (needFor(c.name)
-      || (c.relevant && (c.rating ?? 0) >= LIKELY_MIN && c.buyerType && ROLE[c.buyerType]
+      || (c.relevant && (c.rating ?? 0) >= LIKELY_MIN && c.buyerType && ROLE[c.buyerType] && inChosenCountry(c, input.markets)
       && !nonBuilders.some(n=>sameCompanyName(n.company_name,c.name))
       && (!work || Boolean(c.quote && namesWork(c.quote, input.brief!))))))
     .slice(0, LIKELY_MAX_PER_SEARCH);

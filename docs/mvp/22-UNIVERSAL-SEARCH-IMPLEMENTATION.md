@@ -244,6 +244,66 @@ Run 6 also saved "Defense GEM" and "Generation GEM". These are tendersniper's se
 ### 3.14 The item's kind
 The AI called "centrifugal fan" static equipment, and the fallback brief (when the AI brief fails) had no kind at all. `parseBrief` now classes fans, blowers, pumps, compressors, turbines, agitators, mixers and gearboxes as `rotating_equipment` whatever the AI says. `kindFromWords` also gives the fallback brief a kind: vessels, separators, exchangers, tanks, columns, reactors and drums are static equipment, and fans and blowers are rotating. The kind matters because it decides whether fabricators are competitors (§3.12): skid and package builders buy fans, while vessel fabricators make vessels.
 
+### 3.15 MVP completion: his products, tender emails, every language
+**His products (the client asked "where is the list of our products").**
+- Settings has a new, editable tab, **Our products**. It starts with his seven products: Pressure Vessels, Separators, Centrifugal Fans, Axial Fans, Blowers, Heat Exchangers, API 660 Heat Exchangers.
+- Storage is table `company_products` (migration `031_company_products.sql`). The API is `GET/POST /api/mvp/products` and `DELETE /api/mvp/products/[id]`.
+- The Dashboard shows a **Your products** card: one-click searches (`/find?q=<product>` fills in the form) and a **Manage** link to Settings.
+- The list is never read by the search. Any product can be searched in any of the 254 countries. A test searches "ball valves" in Brazil (not his product, not a default country) and saves the Petrobras tender buyer.
+- Emails name his *other* products ("We also supply …", at most five, never the searched one).
+
+**Tender leads get emails.**
+- Tender buyers are saved as company type "owner", which the demo approval path skipped, so they would never have been emailed.
+- `qualifyBuyer` now approves a company whose own tender for the searched item was accepted by this search's need check and is verified on its page (`basis: verified_tender`), without an AI opinion. This is not a confirmed order, and contacts are still validated separately.
+- The opening email names the tender and its closing date: "I came across your tender for complete pressure vessel tag no: 217-v-001 (closing 14 Oct 2026) and would be glad to quote against it." A closed tender says "which closed on …, and would welcome being considered for similar requirements."
+- The lead's reason adds: "bids go through its tender portal before the closing date."
+
+**Every language.**
+- `TENDER_WORDING` now covers French, Spanish, Portuguese, German, Italian, Dutch, Turkish, Indonesian/Malay, Polish, Russian, Chinese, Korean and Japanese tender words, as well as English and Arabic.
+- The item's local-language names from the brief (`localItem`) now count as naming the item (`itemTerms` in `research/engine.ts`).
+- In a tender, a one-word local name ("Druckbehälter") counts as naming the item.
+- The tender trigger accepts tender wording in any of these languages.
+
+**Live run 7** (14 Oct; "ball valves" in Brazil, which is not his product or a default country; "heat exchangers" in Saudi Arabia):
+- **Brazil:** "ball valves" matches the catalogue entry, so the catalogue path ran, with a Portuguese brief: "válvula esfera", "válvula de bola". Petrobras was correctly rejected: the article was about Strohm's composite-pipe contract, not ball valves.
+- **Brazil country leak, now fixed:** the one saved lead, Hanging H Companies, is a US pipeline contractor rated from a US list. Its line names no country. A likely buyer saved without a need check must now be placed in a chosen country by its own line, its source page's title or its website's country domain (`inChosenCountry` in `research/likely.ts`).
+- **Saudi Arabia:** one capability lead. Tender pages were found and checked: SPPC's battery-storage tender and BAPCO's spare-parts and Bahrain items were correctly rejected. This matches the Gulf limits in doc 21.
+- **Known AI limit:** the brief's Arabic name for heat exchanger was wrong ("مكافحة الحرارة"; the right one is "مبادل حراري"). A wrong local name adds no false leads by itself: a lead still needs a verified quote and the other checks. But it can miss local pages. Checking the AI's translations is left for the main build.
+
+### 3.16 Is each buyer a true claim? The claims golden set
+A lead is a claim: "this company buys this product, as this source shows". Every claim from the 14 Oct live runs was audited by hand: 64 claims from 14 runs. 53 have a readable source and form the claims golden set: 12 buyers, 8 potential buyers and 33 false claims. Three sources could not be re-read.
+
+**How it works.**
+- `src/mvp/research/eval/claims-golden.json` holds, for each claim:
+  - what the AI said (company, role, country, date);
+  - a source excerpt read with the app's reader (full-page mode, as the engine reads it);
+  - the brief its run used;
+  - the hand label.
+- `claims.test.ts` replays every claim through the current rules (`judgeNeed`) on every test run.
+  - It fails if a false claim becomes a lead, or if a real buyer is missed that is not on the known list.
+  - The score goes to `tmp/eval-claims-rules.json`.
+- `EVAL_LIVE=1` asks the live AI about each source again and scores its answers too (about 4k Groq tokens a claim, roughly a day of the free allowance).
+
+**What the audit found, and fixed.** These false claims passed because the rules trusted the AI:
+
+| Claim | Why it was false | Rule now |
+|---|---|---|
+| XPLOIL (heat exchangers, Saudi Arabia) | On-site supervision and commissioning: a service | `engineeringOnlySource`: supervision, commissioning, inspection and "engineering … services" are not buying |
+| KBR (Aramco Marjan) | Engineering-services contract | Same |
+| EIL (pressure vessels, India) | Fertilizer complex in Nigeria ("contract from Nigerian group") | Countries are also read from adjective forms (Nigerian, Brazilian, Omani…). A headline placing the work only abroad outweighs the AI's country unless the company's sentence names a chosen country |
+| BHEL machining, GSECL inspection, NTPC and ONGC "custom bid for services" | Service tenders, caught only by the AI's answer | `PART_OR_SERVICE` also covers machining, inspection, examination, certification, calibration, radiography, NDT, hire and "custom bid for services" |
+| AlNafie (pressure vessels, Saudi Arabia) | Steel fabrication subcontractor: makes, not buys | Need check: for fabricated equipment, a fabrication subcontractor is a competitor |
+| Hanging H (ball valves, Brazil) | US company | `inChosenCountry` (§3.15) |
+| "Defense GEM", "Generation GEM" | Portal labels | `maskedIssuer` (§3.13) |
+
+**Score with the current rules: 18 leads, all true claims (precision 1.0). 18 of 20 real buyers found (recall 0.9).**
+
+**Known misses (recall work for the main build):**
+- HPCL "tender for the supply of six specialised refinery reactors": a reactor is a pressure vessel, but the words differ. This needs the item's sub-types.
+- MES "Supply and fitment of pressure vessel": the agency name is on a separate line of the notice.
+
+Every new live run should add its claims to this set. A false lead found by the client becomes a labelled row and a failing test first, then a fix.
+
 ## 4. What is NOT in scope
 - Editable "Our products" and company profile in Settings (separate change; used for email context, not for search).
 - Paid project databases or trade data (MEED, Volza).
@@ -278,7 +338,7 @@ Whole suite: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`.
 
 Tests written:
 - `src/mvp/discovery/item.test.ts` (19 tests);
-- `src/mvp/research/universal-search.test.ts` (25 tests: the end-to-end run from tender to direct buyer, a tender18-style list page, due dates, parts and repairs, fabricators);
+- `src/mvp/research/universal-search.test.ts` (28 tests: the end-to-end run from tender to direct buyer, a tender18-style list page, due dates, parts and repairs, fabricators);
 - updated: `find-form.test.tsx`, `work-search.test.ts`, `brief.test.ts`, `buyer-first-replay.test.ts`.
 
 Known failure not caused by this change: `src/mvp/automation/engine.test.ts` › "limits chasing to two working-hour follow-ups…" fails the same way on `main` (5df6b51). It belongs to the email follow-up workflow, outside this change.
@@ -293,7 +353,7 @@ Live (local, real providers, small budget): Quick searches for "pressure vessel"
 1. Checkpoint commit: these docs.
 2. Implementation on `feat/universal-search`, with no commits until every check passes, then one commit.
 3. The user tests locally and on a Render preview. Merge to `main` (deploys) only on approval.
-4. No database migration is needed:
+4. Database: one migration, `031_company_products.sql` (a new table, seeded with his seven products). It needs approval before it runs on the cloud database. Otherwise no migration is needed:
    - `product_id` columns are text, and `q:` ids fit;
    - `need_checks.role` is free text;
    - trigger kind `tender` and buyer type `owner` are already allowed.

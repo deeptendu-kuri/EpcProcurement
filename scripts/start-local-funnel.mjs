@@ -22,7 +22,8 @@ export function localFunnelEnv(input, root) {
 }
 
 export function researchDemoEnv(env,{demo=false}={}) {
-  return {...env,MVP_NEXT_DIST_DIR:'.next-discovery',MVP_FUNNEL_WORKER:demo?'on':'off',MVP_RESEARCH_NEWS:'off',
+  // docs/mvp/22: the universal search (any typed product, open tenders first) is what the demo shows.
+  return {...env,MVP_NEXT_DIST_DIR:'.next-discovery',MVP_FUNNEL_WORKER:demo?'on':'off',MVP_RESEARCH_NEWS:'off',MVP_WORK_SEARCH:'on',
     ...(demo?{MVP_PROSPECT_DEMO_OUTREACH:'on',MVP_DEMO_PROSPECTS_PER_SEARCH:'3'}:{}),
     MVP_MAX_SEARCH_QUERIES:'6',MVP_MAX_RESEARCH_PAGES:'60',MVP_MAX_AI_DOCS:'12',MVP_MAX_RESEARCH_AI_TOKENS:'30000'};
 }

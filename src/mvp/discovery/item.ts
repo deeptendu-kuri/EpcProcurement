@@ -64,7 +64,7 @@ export function itemPhrases(text: string): string[] {
 const registered = new Map<string, string[]>();
 export function registerSearchItemTerms(id: string | null | undefined, terms: readonly string[] | undefined): void {
   if (!isSearchItemId(id) || !terms?.length) return;
-  const clean = [...new Set(terms.map((t) => itemWordsOf(t)).filter((t) => t.length >= 4))].slice(0, 12);
+  const clean = [...new Set(terms.map((t) => itemWordsOf(t)).filter((t) => t.length >= 4))].slice(0, 24);
   if (clean.length) registered.set(id, clean);
 }
 export function registeredSearchItemTerms(id: string): string[] {

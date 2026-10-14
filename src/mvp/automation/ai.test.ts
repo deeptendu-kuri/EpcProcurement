@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {afterAll,afterEach,beforeAll,beforeEach,describe,it,expect,vi} from "vitest";
 import {createTestDb,setDbForTests,type Db} from "@/mvp/db";
-import {analyseReply,initialEmail,qualifyBuyer,QUALIFICATION_DATA_BYTES} from "./ai";
+import {analyseReply,initialEmail,qualifyBuyer,QUALIFICATION_DATA_BYTES,tenderOpening} from "./ai";
 import {LLMHttpError,QuotaExceededError} from "@/mvp/llm/types";
 import type {Opportunity} from "@/mvp/opportunities";
 import type {SearchBrief} from '@/mvp/discovery/brief';
@@ -27,6 +27,32 @@ async function exampleOpportunity(text='Example EPC won the EPC contract for con
   return {o:{...opportunity,id,run_id:run,name:'Example EPC',product_id:'line-pipe',product_name:'Line pipe',keyword:'line pipe',buying_reason:text,evidence_ids:[evidence]} as Opportunity,doc,evidence,company,url};
 }
 describe("grounded Groq sales decisions",()=>{
+  it('approves its own verified tender for the item without an AI opinion, and the email names that tender (docs/mvp/22)',async()=>{
+    const text='T18 Ref No : 17656592 Location : kujang , odisha LIVE TENDER corrigendum tender for complete pressure vessel tag no: 217-v-001 Agency / Dept : indian oil corporation limited IOCL Due Date : Oct 14, 2099 (5 days left)';
+    const s=await exampleOpportunity(text);
+    const o={...s.o,name:'Indian Oil Corporation Limited',product_id:'q:pressure-vessels',product_name:'Pressure vessels',keyword:'pressure vessels'};
+    await db.query("insert into research_sessions(run_id,budget) values($1,'{}')",[o.run_id]);
+    await db.query("insert into need_checks(run_id,document_id,company_name,role,quote,quote_verified,needs_item,verdict) values($1,$2,'indian oil corporation limited','direct_buyer',$3,true,'yes','lead')",[o.run_id,s.doc,text]);
+    complete.mockRejectedValue(new Error('Example: no AI opinion is needed for a verified own tender'));
+    const fit=await qualifyBuyer(o);
+    expect(fit).toMatchObject({approved:true,basis:'verified_tender'});
+    expect(fit.reason).toContain('complete pressure vessel tag no: 217-v-001');
+    expect(complete).not.toHaveBeenCalled();
+    const mail=await initialEmail({...o,qualification:'approved',material_fit_kind:'explicit',activity_status:'recent',activity_date:'2099-10-01',activity_quote:text},{name:'Jane',title:null});
+    expect(mail.body).toContain('I came across your tender for complete pressure vessel tag no: 217-v-001 (closing 14 Oct 2099) and would be glad to quote against it.');
+    expect(mail.body).toContain('We also supply API 660 Heat Exchangers, Axial Fans, Blowers, Centrifugal Fans and Heat Exchangers.');
+    expect(mail.body).toContain('the right contact for technical queries on this tender');
+    expect(mail.body).not.toContain('Congratulations');
+    // Another company's tender on the same page is not this company's.
+    complete.mockResolvedValue({text:JSON.stringify({approved:false,confidence:.9,reason:'Example: not this company',companyEvidenceId:s.evidence,productEvidenceId:s.evidence})});
+    expect((await qualifyBuyer({...o,name:'Bharat Petroleum Corporation Limited'})).basis).toBeUndefined();
+  });
+  it('says a closed tender has closed',()=>{
+    const text='tender for centrifugal radial fan Agency / Dept : NPCIL Due Date : Oct 22, 2026';
+    expect(tenderOpening(text,new Date('2026-11-01T00:00:00Z'))).toBe('I came across your tender for centrifugal radial fan, which closed on 22 Oct 2026, and would welcome being considered for similar requirements.');
+    expect(tenderOpening('NTPC invites e-tender for supply of fans.',new Date('2026-11-01T00:00:00Z'))).toBe('I came across your tender for supply of fans and would be glad to quote against it.');
+    expect(tenderOpening('NTPC invites bids.',new Date('2026-11-01T00:00:00Z'))).toBe('I came across your recent tender and would be glad to quote against it.');
+  });
   it('blocks design-only source evidence before spending an AI qualification request (Example fixture)',async()=>{
     const s=await exampleOpportunity('Example EPC won a FEED design contract for a gas processing plant in the UAE.');
     expect((await qualifyBuyer({...s.o,product_id:'ss-duplex-pipe',product_name:'Stainless process pipe'})).approved).toBe(false);

@@ -15,7 +15,7 @@ import { rssSource } from '@/mvp/pipeline/sources/rss';
 import { cachedTavilyQuery,collectTavilyQuery } from '@/mvp/pipeline/sources/tavily';
 import { collectBingQuery,collectRssFeed,collectLocalNews,collectGdeltCountry} from './sources';
 import { plannedCollectJobs, type ResearchBudget, type ResearchJob } from './store';
-import { getSearchBrief, namesWork, type GroundFn } from '@/mvp/discovery/brief';
+import { getSearchBrief, namesWork, type GroundFn, type SearchBrief } from '@/mvp/discovery/brief';
 import { checkNeed,recheckRelatedNeeds, FOLLOW_SEARCHES_PER_COUNTRY, followKey, followUpQueries, projectsToFollow } from './need';
 import { autoPauseIfDue } from './control';
 import { clearBuyerCache } from '@/mvp/buyers/load';
@@ -102,7 +102,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
   const input=(await db.query<{adhoc_query:RunInput}>('select adhoc_query from runs where id=$1',[job.run_id])).rows[0].adhoc_query;
   if(!session)return {processed:false};
   // docs/mvp/22: a typed item's other names (from its brief) count as naming it in every step of this search.
-  registerSearchItemTerms(input.productId,[...(input.brief?.synonyms??[]),...(input.brief?.source==='ai'?[input.brief.item]:[])]);
+  registerSearchItemTerms(input.productId,itemTerms(input.brief));
   try{
     if(job.stage==='collect'){
       const ctx:SourceContext={db,runId:job.run_id,input,profile:getClientProfile(),terms:queryTerms(input.query),log:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)};
@@ -276,7 +276,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         const provider=deps.briefProvider??budgetedAwardProviders(db,job.run_id,'brief',session.budget).provider('extract_a','openai/gpt-oss-120b');
         const brief=await getSearchBrief(db,{material:input.query,markets:input.markets,productId:input.productId??null},provider,ground,job.run_id);
         const planned={...input,brief};
-        registerSearchItemTerms(input.productId,[...(brief.synonyms??[]),...(brief.source==='ai'?[brief.item]:[])]);
+        registerSearchItemTerms(input.productId,itemTerms(brief));
         const jobs=plannedCollectJobs(planned,session.budget);
         if(!await db.tx(async tx=>{
           if(!await owned(tx,job))return false;
@@ -551,6 +551,11 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
  * searches spent all 20 AI pages on news before any tender page was checked).
  */
 /** An AI provider's rate or quota limit (per minute or per day): handled by waiting and retrying, never as an answer. */
+/** The words that name a typed item in this search: the AI's name for it, its other names and its local-language names. */
+export function itemTerms(brief:SearchBrief|null|undefined):string[] {
+  if(!brief)return [];
+  return [...(brief.source==='ai'?[brief.item]:[]),...Object.values(brief.localItem??{}).flat(),...(brief.synonyms??[])];
+}
 export function rateLimited(error:unknown):boolean {
   return error instanceof QuotaExceededError||error instanceof LLMHttpError&&error.status===429||error instanceof Error&&/\b429\b|rate.?limit/i.test(error.message);
 }

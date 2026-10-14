@@ -1,10 +1,16 @@
 import {COUNTRIES} from '@/mvp/config/countries';
 import {hasTerm,MARKET_TERMS} from '@/mvp/pipeline/filter';
 import {productApplication} from './application';
+/** A country's common adjective forms: Nigerian, Brazilian, Canadian, Omani, Kuwaiti (never Niger for "Nigerian"). */
+function demonyms(name:string):string[] {
+  if(name.includes(' ')||name.length<4)return [];
+  const forms=[`${name}n`,`${name}an`,`${name.replace(/a$/,'')}ian`,`${name}i`];
+  return name==='Niger'?forms.filter(f=>f!=='Nigerian'):forms;
+}
 /** Real place words only. Client brands and the country in a company name are not location proof. */
 export function countriesInQuote(quote:string,names:readonly string[]=[]):string[] {
   let text=quote.toLowerCase();for(const name of names)text=text.replaceAll(name.toLowerCase(),' ');
-  return COUNTRIES.filter(country=>[country.name,...(MARKET_TERMS[country.code as keyof typeof MARKET_TERMS]??[])]
+  return COUNTRIES.filter(country=>[country.name,...demonyms(country.name),...(MARKET_TERMS[country.code as keyof typeof MARKET_TERMS]??[])]
     .filter(alias=>alias&&!/^(?:ongc|gail|aramco|adnoc|petronas|equinor|kongsberg)$/i.test(alias))
     .some(alias=>hasTerm(text,alias))).map(c=>c.code);
 }

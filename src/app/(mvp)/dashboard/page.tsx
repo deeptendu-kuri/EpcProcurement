@@ -12,6 +12,8 @@ import { LiveRefresh, SearchesTable, type SearchSummary } from "@/components/mvp
 import { countryName } from "@/components/mvp/search/buyer-labels";
 import { RatingBadge } from "@/components/mvp/search/results-table";
 import { compactTokens } from "@/mvp/research/usage";
+import { listOurProducts } from "@/mvp/products/our-products";
+import { YourProducts } from "@/components/mvp/dashboard/your-products";
 
 export const dynamic = "force-dynamic";
 type Icon = ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
@@ -87,7 +89,7 @@ function ActiveCard({ s }: { s: DashboardSearch }) {
  * meetings, and every search in a filterable table.
  */
 export default async function DashboardPage() {
-  const data = await dashboardData();
+  const [data, products] = await Promise.all([dashboardData(), listOurProducts().catch(() => [])]);
   const { actions, searches, pipeline } = data;
   const next = actions.nextMeeting;
   const latestLeads = data.latestSearchId ? `/crm?run=${data.latestSearchId}` : "/crm";
@@ -116,6 +118,8 @@ export default async function DashboardPage() {
       </div>
       {searches.length ? <Link href="/find" className="btn btn-primary h-10 px-5 text-[14px]"><Search size={16} aria-hidden />Find buyers</Link> : null}
     </header>
+
+    <YourProducts products={products} />
 
     {!searches.length ? <section className="card overflow-hidden" aria-label="Getting started" data-tour="overview-searches">
       <div className="max-w-3xl p-8 sm:p-12">

@@ -1,5 +1,6 @@
 /** Evidence-linked hybrid triggers. No collection, enrichment, recipient or worker side effects. */
 import type {Queryable} from '@/mvp/db';
+import { tenderWording } from './tender-sources';
 import type {Trigger} from '@/mvp/buyers/types';
 import {companyGroupKey} from '@/mvp/buyers/group';
 import {normalizeCompanyName,parseDate,parseMoney,MONEY_RE,companyKeys} from '@/mvp/pipeline/text';
@@ -98,7 +99,8 @@ function groundedTrigger(t:Omit<Trigger,'id'>,proofs:Proof[]):Omit<Trigger,'id'>
   const title=proofs.flatMap(p=>{const q=originalQuote(p.quote,t.title);return q?[q]:[];})[0];
   if(!title)return null;
   const event=/\b(?:awards?|awarded|wins?|won|secures?|secured|bags?|received|letter of award|winner|contract award|subcontract|tender|order)\b/i;
-  if(t.kind!=='capability'&&!event.test(title)&&!(t.kind==='award'&&wonConstructionContract(title)))return null;
+  // A tender is a tender in any language ("licitação", "appel d'offres", "مناقصة"): docs/mvp/22.
+  if(t.kind!=='capability'&&!event.test(title)&&!(t.kind==='award'&&wonConstructionContract(title))&&!(t.kind==='tender'&&tenderWording(title)))return null;
   const date=proofs.map(p=>quotedTriggerDate(t.date,p.quote)).find(d=>d.date)??{date:null,precision:'unknown' as const};
   const valueQuote=t.valueText?proofs.flatMap(p=>{const q=originalQuote(p.quote,t.valueText!);return q?[q]:[];})[0]:null;
   const money=valueQuote?[...valueQuote.matchAll(new RegExp(MONEY_RE.source,'gi'))].map(m=>parseMoney(m[0])).find(m=>m?.usd!==null&&t.valueUsd!==null&&valuesClose(m!.usd!,t.valueUsd,0.015)):null;
