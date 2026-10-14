@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CheckCircle2, Info, XCircle } from "lucide-react";
 import { getCatalogue, getStrengths } from "@/mvp/config/buyers-config";
 import { listOurProducts } from "@/mvp/products/our-products";
-import { OurProductsEditor } from "@/components/mvp/settings/our-products";
+import { CatalogueSettings } from "@/components/mvp/settings/catalogue-settings";
 import { getClientProfile } from "@/mvp/config/profile";
 import { marketName } from "@/mvp/config/markets";
 import { disciplineLabel, formatDate, formatMoney } from "@/components/mvp/labels";
@@ -43,10 +43,9 @@ function List({ items, empty = "None" }: { items: string[]; empty?: string }) {
 }
 
 const TABS = [
-  { id: "products", label: "Our products" },
+  { id: "catalogue", label: "Catalogue" },
   { id: "automation", label: "Email & Calendar setup" },
   { id: "profile", label: "Company profile" },
-  { id: "catalogue", label: "Catalogue" },
   { id: "strengths", label: "Strengths" },
 ] as const;
 type SettingsTab = (typeof TABS)[number]["id"];
@@ -60,7 +59,7 @@ function ExampleNote({ children }: { children: React.ReactNode }) {
 }
 
 /** Product catalogue (docs/mvp/14 §3): what "What we can sell them" matches against. */
-function CatalogueTab() {
+function ReferenceCatalogue() {
   let catalogue: ReturnType<typeof getCatalogue> | null = null;
   try {
     catalogue = getCatalogue();
@@ -72,7 +71,7 @@ function CatalogueTab() {
   return (
     <div className="flex flex-col gap-4">
       <p className="rounded-xl border border-[var(--line)] bg-[var(--subtle)] p-4 text-sm leading-relaxed">Search is not limited to this list: Find buyers searches any product you type (pressure vessels, heat exchangers, fans, blowers…). This list only adds extra knowledge (grades, standards, who buys) for the products in it.</p>
-      {catalogue.isExample ? <ExampleNote>Example — replace with your own. This is an example catalogue of pipes and construction materials; edit it to match what you really sell.</ExampleNote> : null}
+      {catalogue.isExample ? <ExampleNote>Example reference data. Manage what you actually sell in the product list above; this library does not limit your searches.</ExampleNote> : null}
       {categories.map((category) => (
         <Card key={category} title={category}>
           <div className="overflow-x-auto">
@@ -145,10 +144,10 @@ interface SettingsPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-/** Settings (read-only for now): the company profile, the product catalogue and your strengths. */
+/** Catalogue is editable; legacy ?tab=products links open the same saved product list. */
 export default async function SettingsPage({ searchParams }: SettingsPageProps) {
   const params = await searchParams;
-  const requested = typeof params.tab === "string" ? params.tab : "profile";
+  const requested = params.tab === "products" ? "catalogue" : typeof params.tab === "string" ? params.tab : "profile";
   const tab: SettingsTab = TABS.some((item) => item.id === requested) ? (requested as SettingsTab) : "profile";
   const profile = getClientProfile();
 
@@ -157,7 +156,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       <PageHeader
         title="Settings"
         subtitle="Your company profile, what you sell and why buyers should choose you."
-        actions={tab === "products" ? undefined : (
+        actions={tab === "catalogue" || tab === "automation" ? undefined : (
           <span className="chip">
             <Info size={13} aria-hidden /> Read-only for now
           </span>
@@ -172,7 +171,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         </nav>
       </PageHeader>
 
-      {tab === "products" ? <OurProductsEditor initial={await listOurProducts().catch(() => [])} /> : tab === 'automation' ? <AutomationSettings initial={await funnelStatus()} calendarResult={typeof params.calendar==='string'?params.calendar:undefined}/> : tab === "catalogue" ? <CatalogueTab /> : tab === "strengths" ? <StrengthsTab /> : <ProfileTab profile={profile} />}
+      {tab === 'automation' ? <AutomationSettings initial={await funnelStatus()} calendarResult={typeof params.calendar==='string'?params.calendar:undefined}/> : tab === "catalogue" ? <CatalogueSettings products={await listOurProducts()} reference={<ReferenceCatalogue />} /> : tab === "strengths" ? <StrengthsTab /> : <ProfileTab profile={profile} />}
     </div>
   );
 }

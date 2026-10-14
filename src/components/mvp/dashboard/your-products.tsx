@@ -8,7 +8,7 @@ export function YourProducts({ products }: { products: OurProduct[] }) {
     <section aria-labelledby="your-products" className="card flex flex-col gap-3 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="your-products" className="flex items-center gap-2 text-[17px] font-semibold"><Package size={17} aria-hidden />Your products</h2>
-        <Link href="/settings?tab=products" className="inline-flex items-center gap-1 text-[14px] font-medium text-[var(--accent)]"><Settings2 size={14} aria-hidden />Manage</Link>
+        <Link href="/settings?tab=catalogue" className="inline-flex items-center gap-1 text-[14px] font-medium text-[var(--accent)]"><Settings2 size={14} aria-hidden />Manage</Link>
       </div>
       {products.length ? (
         <ul className="flex flex-wrap gap-2">
@@ -20,7 +20,7 @@ export function YourProducts({ products }: { products: OurProduct[] }) {
             </li>
           ))}
         </ul>
-      ) : <p className="text-[14px] text-[var(--muted)]">Add the products you specialise in, in Settings.</p>}
+      ) : <p className="text-[14px] text-[var(--muted)]">Add the products you specialise in, in Settings → Catalogue.</p>}
       <p className="text-[12px] text-[var(--muted)]">Click one to search its buyers. You can search any other product too, from Find buyers.</p>
     </section>
   );
