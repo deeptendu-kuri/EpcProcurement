@@ -45,7 +45,9 @@ describe('buyer-first real-page regression replay (no live requests)',()=>{
   });
   it('spreads the initial paid-query allowance across contractor and project lanes',()=>{
     const tasks=sourcePlan({productId:'ss-duplex-pipe',keyword:b.item,markets:['IN','CA','AE'],mode:'preview',brief:b,includeResellers:false});
-    const paid=tasks.filter(t=>t.source==='tavily').slice(0,8);
+    // Open-tender searches have their own allowance (docs/mvp/22); the shared allowance is spread as before.
+    const paid=tasks.filter(t=>t.source==='tavily'&&!t.tender).slice(0,8);
+    expect(tasks.filter(t=>t.tender&&t.source==='tavily').map(t=>t.market)).toEqual(['IN','CA','AE','IN','CA','AE']);
     expect(new Set(paid.map(t=>t.market))).toEqual(new Set(['IN','CA','AE']));
     expect(paid.some(t=>t.lane==='capability')).toBe(true);
     expect(paid.some(t=>t.lane==='roundup')).toBe(true);

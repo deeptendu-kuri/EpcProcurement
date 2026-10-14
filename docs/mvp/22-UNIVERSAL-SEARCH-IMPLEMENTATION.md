@@ -146,6 +146,8 @@ If the AI brief fails for a typed item, the run still searches the **tender lane
 - `chain.ts`: the subcontractor search uses the brief's first use or the item name, never the literal "piping".
 - `config/product-label.ts`: a typed item shows the user's words.
 - `automation/engine.ts` (`startEmailTest`): accepts typed items.
+- `evidence/need-card.ts`: a direct buyer's card says "Buyer: its own tender or order for the item", shows the tender's own reason (not "a potential application of its work"), and lists checks such as "It names the item" and "Dated within the last 12 months".
+- `research/likely.ts`: a direct buyer's reason uses the same "Why it needs <item>:" form, so the Leads table shows the tender sentence and the reason as bullets.
 
 ### 3.9 Search screen
 - `find-form.tsx`:
@@ -155,6 +157,92 @@ If the AI brief fails for a typed item, the run still searches the **tender lane
 - `find/page.tsx`: no "No products yet" gate. Search does not depend on the company profile.
 - Run progress: the brief line shows "We understood: <item> (<kind>), also called … Searching tenders, current work and companies in …".
 - Settings → Catalogue: note that search is not limited to this list.
+
+### 3.10 Fixes from the first live run (14 Oct, "pressure vessels", UAE + Saudi Arabia)
+- **Makers and direct buyers must be kinds, never names.** The AI listed "Larsen & Toubro, Technip Energies, Hyundai Heavy Industries, Al Jaber…" as makers. Several of those are EPC contractors, which would have rejected real buyers.
+  - The prompt now asks for kinds.
+  - `parseBrief` keeps only entries that name a kind (`MAKER_KIND`: manufacturers, fabricators, suppliers, stockists…; `BUYER_KIND`: operators, utilities, authorities, plants…).
+- **Other names must be the same item.** "API 650 tank" (an atmospheric tank) was offered as a pressure-vessel synonym. Synonyms must now share a word with the item.
+- **A typed item's own fabricators and suppliers sell it.** A metal fabricator was saved as a pressure-vessel buyer.
+  - For typed items, `materialOutputOnly` now treats fabricate, supplier, vendor, exporter and maker as output.
+  - For catalogue materials, fabricating *with* them still consumes them.
+  - Tender and RFQ wording ("invites tender for supply of") always counts as buying, never as selling.
+- **Tender pages were found but never checked** (India runs: tendersniper "Centrifugal Fans eTenders in India", tenderdetail "Pressure Vessel Tenders", tenderjeeto…). A Quick search had spent its 20 AI pages on news before the tender pages were read, and an older reading rule pushed "open tender" pages to the back. Now:
+  - tender-lane pages are read first (`TENDER_READ_PRIORITY = 1340`, and +60 in the admission order when they name the item);
+  - tender checks get their own AI allowance on top of the search's: `TENDER_AI_PAGES_PER_COUNTRY = 3`, `TENDER_AI_TOKENS_PER_COUNTRY = 12,000` (`analysisBudget` in `research/engine.ts`).
+- **Tender results were deferred** (19 of 19 from one tender search): tender pages shared the discovery reading share. Each tender search now has its own share (`TENDER_READS_PER_SEARCH = 6`).
+- **AI rate limits silently dropped pages** (this existed before this branch). With Groq's free tier (8,000 tokens a minute), an award or tender page's buyer check that hit a 429 was recorded as "Need check unavailable" and never retried.
+  - It is now rethrown (`rateLimited` in `research/engine.ts`), so the step waits and retries like every other AI step.
+  - The retry clears that page's unfinished AI reservations first, so it is not refused as an uncertain paid call.
+- **Tenders without the buyer's name in the Gulf** are confirmed as a source limit (doc 21 §D1, §D3). Gulf searches find buyers mainly through award news. The tender lane matters most where tenders are public (India, Kuwait via copies, multilateral).
+
+### 3.11 Tender list pages (live probe, 14 Oct, tender18 keyword pages)
+The live runs found tender aggregator pages but saved no tender buyer. A probe on two real pages (tender18 "centrifugal fan tenders" and "twin lobe blower tenders") found the cause, and four fixes followed.
+
+- **The check read the menus, not the tenders.** On these pages each tender sits over several lines (reference, location, title, "Agency / Dept :", agency, "Due Date :", date) after about 100 lines of navigation. The check's text picker only looks for award paragraphs, so it fell back to the page top, and the AI found 0 companies.
+  - `tenderListingBlocks` (`research/relevance.ts`) now builds one block per listing whose title names the item. It takes the lines around the title, joined by spaces, and keeps a block only when it carries a buyer or date label.
+  - `workAnalysisText` puts these blocks first on a tender page. Because the quote check tolerates whitespace, each block is still a literal quote from the page.
+  - `namesItem(..., loose)` accepts a title that splits the item's words ("air cushion fan, type- centrifugal"), but only for spans of 900 characters or fewer.
+- **The AI accepted tenders for parts and repairs** (impeller, pulley, spares, overhaul) even though the prompt says not to.
+  - `partOrServiceTender` (`research/need.ts`) now rejects these in code: "buys services or spare parts, not the item".
+  - It does not apply when the searched item is that part, e.g. a search for "fan impellers".
+- **Listings had no date the check could use.** The AI often leaves the date empty on a list page, so every listing was rejected as undated.
+  - `tenderDueDate` reads the date printed on the listing, in these formats: "Due Date : Oct 23, 2026", "Bid End Date: 23-10-2026" (day first), "05 Nov 2026", ISO.
+  - An open tender (due date ahead) counts as this month's demand. The reason shows "(due 2026-11-03)", or "issued a tender for the item (closed …)" once the date has passed.
+- **Answers for list pages.** The output cap is 3,000 tokens when a page has 3 or more listing blocks. The parser also accepts the shape `{"tenders":[{…,"companies":[…]}]}`, which the AI sometimes returns for list pages.
+
+Probe result after the fixes (real page, real Groq model, run twice, same verdicts both times):
+
+| Listing | Verdict |
+|---|---|
+| UCIL, air cushion fan, type centrifugal (due 3 Nov) | lead |
+| BHEL, backward curved centrifugal fan (due 15 Oct) | lead |
+| Indian Army, centrifugal fan blower (due 14 Oct) | lead |
+| NPCIL Rawatbhata, centrifugal radial fan (due 22 Oct) | lead |
+| NPCIL, DIDW impeller for centrifugal fan | rejected: part |
+| GSECL, repairing and overhauling of centrifugal fans | rejected: service |
+| DPS, pulley for supply fan | rejected: part |
+| Balmer Lawrie, Yantra India, SCL, GMDA (×2), PHED: twin lobe blowers | lead |
+| MAHAGENCO, blower spares | rejected: part |
+
+### 3.12 Fabricators of a typed fabricated item
+In the Gulf "pressure vessels" run, a Saudi metal fabricator (AlNafie) was still saved twice: by the discovery path (role "fabricator") and by the rated-company path ("Steel fabricator", type end_user). Both paths came from the catalogue rule that a fabricator consumes plate and pipe.
+
+- `fabricatedItem(brief)` (`discovery/brief.ts`) is true for a typed item of kind `static_equipment` (vessels, separators, exchangers, tanks).
+- For such an item:
+  - a fabricator or workshop rated as end user or subcontractor is a competitor (`consistentType`, rating capped at 5);
+  - the discovery path refuses role `fabricator`.
+- EPC contractors are unaffected. So are catalogue materials (a fabricator still buys plate) and rotating equipment (skid and package builders buy fans and blowers).
+
+### 3.13 India's tender list page, read directly (live run 5, 14 Oct)
+In the live run for "centrifugal fans" in India, the tender searches found seven tender pages and every one was checked. None produced a buyer, and the AI judged each page correctly:
+- tendersniper hides the buying agency ("GEM Title: Centrifugal radial fan · Due Date: 22-Oct-2026");
+- the other pages were for scavenge blowers, a kitchen blower, axial fans and centrifuge machines.
+
+The source that names the agency (tender18) was not among the search results. So for India the plan now reads it directly:
+
+- **Source `tender-page`**:
+  - `tenderListPages(item, country)` in `sourcing/tender-sources.ts` gives `https://tender18.com/all-india-tenders/keyword-tenders/<singular-item>-tenders`, e.g. centrifugal-fan, pressure-vessel, api-660-heat-exchanger.
+  - The page is collected as a raw doc with no text, and the normal read step fetches it.
+  - It uses no search credit and is tagged `:tender:`, so it gets the tender reading share, the tender AI allowance and the read priority.
+  - It runs before the paid tender searches (`TENDER_PRIORITY + 20`).
+- **Allowed and safe.**
+  - tender18's robots.txt allows all crawlers, AI crawlers included.
+  - An unknown keyword shows general latest tenders; `tenderListingBlocks` keeps only listings whose title names the item, so those are ignored.
+  - Checked on 14 Oct for pressure-vessel, centrifugal-fan, axial-fan, blower, heat-exchanger, separator and api-660-heat-exchanger: every page answers with listings.
+- **Other countries:** no equivalent public page names the buyer (doc 21). Gulf searches keep the Tavily tender searches and award news.
+
+**Live run 6** (14 Oct, Quick, India, real providers, local database, email off):
+
+| Search | Direct buyers (open tenders, fit 95) | Other leads | Rejected tender listings |
+|---|---|---|---|
+| centrifugal fans | BHEL (backward curved centrifugal fan, due 15 Oct), Indian Army (centrifugal fan blower, due 14 Oct), UCIL (air cushion fan, type centrifugal, due 3 Nov), NPCIL Rawatbhata (centrifugal radial fan, due 22 Oct) | VA Tech WABAG (award) | NPCIL impeller, GSECL overhaul, DPS pulley (parts and services) |
+| pressure vessels | Engineers India Ltd ("pressure vessel – CS (up to 25 mm) for Bina Petchem and Refinery Expansion Project", due 19 Oct), IOCL Paradip/Kujang ("complete pressure vessel tag 217-V-001/002", due 14 Oct) | JNK India, Technip Energies (awards, run 5) | BHEL, GSECL, NTPC, ONGC (spares or services); BPCL, HPCL, CPCL, MRPL (a glossary page with no dated tender) |
+
+Run 6 also saved "Defense GEM" and "Generation GEM". These are tendersniper's sector and portal labels, which the site shows in place of the hidden buyer. `maskedIssuer` (`research/need.ts`) now rejects portal or sector labels and catch-alls as the buyer: "the listing does not name the buying organisation". Leads also show the listing on one line.
+
+### 3.14 The item's kind
+The AI called "centrifugal fan" static equipment, and the fallback brief (when the AI brief fails) had no kind at all. `parseBrief` now classes fans, blowers, pumps, compressors, turbines, agitators, mixers and gearboxes as `rotating_equipment` whatever the AI says. `kindFromWords` also gives the fallback brief a kind: vessels, separators, exchangers, tanks, columns, reactors and drums are static equipment, and fans and blowers are rotating. The kind matters because it decides whether fabricators are competitors (§3.12): skid and package builders buy fans, while vessel fabricators make vessels.
 
 ## 4. What is NOT in scope
 - Editable "Our products" and company profile in Settings (separate change; used for email context, not for search).
@@ -190,7 +278,7 @@ Whole suite: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`.
 
 Tests written:
 - `src/mvp/discovery/item.test.ts` (19 tests);
-- `src/mvp/research/universal-search.test.ts` (12 tests, including the end-to-end run from tender to direct buyer);
+- `src/mvp/research/universal-search.test.ts` (25 tests: the end-to-end run from tender to direct buyer, a tender18-style list page, due dates, parts and repairs, fabricators);
 - updated: `find-form.test.tsx`, `work-search.test.ts`, `brief.test.ts`, `buyer-first-replay.test.ts`.
 
 Known failure not caused by this change: `src/mvp/automation/engine.test.ts` › "limits chasing to two working-hour follow-ups…" fails the same way on `main` (5df6b51). It belongs to the email follow-up workflow, outside this change.

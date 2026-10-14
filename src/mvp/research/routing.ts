@@ -1,6 +1,6 @@
 import type { RawDoc } from '@/mvp/pipeline/contracts';
 import type { RunInput } from '@/mvp/types';
-import { buyerResearchPriority, materialEvidenceKind } from '@/mvp/discovery/plan';
+import { buyerResearchPriority, materialEvidenceKind, tenderForItem } from '@/mvp/discovery/plan';
 
 const SOCIAL=/(?:^|\.)(?:facebook\.com|instagram\.com|youtube\.com|tiktok\.com|pinterest\.com|linkedin\.com)$/i;
 /** Ordering/admission hints only. Never treat search previews as verified facts. */
@@ -10,7 +10,9 @@ export function discoveryReadPriority(raw:RawDoc,input:RunInput):number {
   if(SOCIAL.test(url.hostname))score-=80;
   if(/(?:^|\.)(?:jobeka\.com|foundit\.in|indeed\.com|glassdoor\.com|naukri\.com)$/i.test(url.hostname)||/\/(?:jobs?|careers)(?:[/-]|$)/i.test(url.pathname))score-=80;
   if(/\b(?:design consultancy|engineering consultancy|inspection services|testing laboratory|third.party inspection)\b/i.test(hint))score-=30;
-  if(/\b(?:invitation to bid|request for quotation|open tender|market report|market size|job vacancy)\b/i.test(hint))score-=60;
+  // A tender found by the tender lane is demand, not noise (docs/mvp/22); elsewhere tender pages stay last.
+  if(raw.research?.tender)score+=tenderForItem(hint,input.productId??'',input.brief)?60:20;
+  else if(/\b(?:invitation to bid|request for quotation|open tender|market report|market size|job vacancy)\b/i.test(hint))score-=60;
   if(/\b(?:how to|how can|guide to|challenges in|distribution partner identification)\b/i.test(raw.title??''))score-=50;
   if(/\b(?:epc|contractors?|contracting|installation|construction|fabrication|cable laying)\b/i.test(hint))score+=12;
   if(materialEvidenceKind(hint,input.productId??'')!=='none')score+=15;

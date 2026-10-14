@@ -68,6 +68,7 @@ function CatalogueTab() {
   const categories = [...new Set(catalogue.items.map((item) => item.category))];
   return (
     <div className="flex flex-col gap-4">
+      <p className="rounded-xl border border-[var(--line)] bg-[var(--subtle)] p-4 text-sm leading-relaxed">Search is not limited to this list: Find buyers searches any product you type (pressure vessels, heat exchangers, fans, blowers…). This list only adds extra knowledge (grades, standards, who buys) for the products in it.</p>
       {catalogue.isExample ? <ExampleNote>Example — replace with your own. This is an example catalogue of pipes and construction materials; edit it to match what you really sell.</ExampleNote> : null}
       {categories.map((category) => (
         <Card key={category} title={category}>

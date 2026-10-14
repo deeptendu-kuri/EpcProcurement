@@ -7,18 +7,22 @@ import { researchBudget } from '@/mvp/discovery/plan';
 import { sourcePlan,tavilyTask } from '@/mvp/sourcing/plan';
 import { tavilyCountry } from '@/mvp/config/country-meta';
 
-const responseSchema=z.object({results:z.array(z.object({url:z.url(),title:z.string(),content:z.string().nullable().optional().transform(v=>v?.slice(0,1200)),published_date:z.string().nullable().optional()})).max(100),usage:z.object({credits:z.number().nonnegative()}).optional()});
+const responseSchema=z.object({results:z.array(z.object({url:z.url(),title:z.string(),content:z.string().nullable().optional().transform(v=>v?.slice(0,1200)),published_date:z.string().nullable().optional(),
+  // Tender searches ask Tavily for the page text it read itself: tender portals often refuse our reader (docs/mvp/21 §D3).
+  raw_content:z.string().nullable().optional().transform(v=>v?.slice(0,RAW_CONTENT_MAX))})).max(100),usage:z.object({credits:z.number().nonnegative()}).optional()});
 // Tavily boosts results from a country for general searches (150+ countries; docs/mvp/19). Other
 // countries still work through the country name in the query; an unsupported name is never sent.
 // Social and job sites are never sources; LinkedIn is never searched or read (no LinkedIn scraping).
 const EXCLUDED_DOMAINS=['facebook.com','instagram.com','youtube.com','tiktok.com','pinterest.com','researchgate.net','indeed.com','glassdoor.com','linkedin.com'];
 function requestBody(query:PlannedBuyerQuery) {
-  return {query:query.query,search_depth:'basic',max_results:20,topic:query.topic??'general',include_answer:false,include_raw_content:false,
+  return {query:query.query,search_depth:'basic',max_results:20,topic:query.topic??'general',include_answer:false,include_raw_content:query.rawContent?'text':false,
     auto_parameters:false,include_published_date:true,include_usage:true,exclude_domains:EXCLUDED_DOMAINS,
     ...(query.topic!=='news'&&tavilyCountry(query.market)?{country:tavilyCountry(query.market)}:{}),
     ...(query.timeRange?{time_range:query.timeRange}:{}),...(query.topic==='news'?{days:query.days??365}:{}),...(query.includeDomains?.length?{include_domains:query.includeDomains}:{})};
 }
 type QueryContext=SourceContext & {db?:Db};
+/** Bounded so a 20-result tender search stays a small saved response. */
+const RAW_CONTENT_MAX=15000;
 function cacheKey(query:PlannedBuyerQuery) {
   const body=requestBody(query);
   return `hybrid-query-v1:${createHash("sha256").update(JSON.stringify({...body,query:body.query.toLowerCase().trim().replace(/\s+/g,' ')})).digest("hex")}`;
@@ -28,8 +32,10 @@ function documents(data:z.infer<typeof responseSchema>,query:PlannedBuyerQuery):
   for(const result of data.results){
     const url=new URL(result.url);
     if(url.protocol!=="https:"||docs.has(result.url))continue;
+    // The page as Tavily read it is the original text (not a snippet); without it the engine reads the page itself.
+    const page=query.rawContent&&result.raw_content&&result.raw_content.trim().length>=200?result.raw_content:null;
     docs.set(result.url,{sourceKey:"tavily",sourceName:url.hostname,tier:"C",url:result.url,title:result.title,
-      publishedAt:result.published_date??null,text:null,fallbackText:null,isSample:false,research:{lane:query.lane,sourcingLane:query.sourcingLane,...(result.content?{searchPreview:result.content}:{})}});
+      publishedAt:result.published_date??null,text:page,fallbackText:null,isSample:false,research:{lane:query.lane,sourcingLane:query.sourcingLane,...(query.tender?{tender:true}:{}),...(result.content?{searchPreview:result.content}:{})}});
   }
   return [...docs.values()];
 }

@@ -1,11 +1,14 @@
 import { z } from "zod";
 import { COUNTRY_CODES } from "@/mvp/config/countries";
 import { getCatalogue } from "@/mvp/config/buyers-config";
+import { isSearchItemId } from "@/mvp/discovery/item";
 
 /** Body of "Search now" and the search part of a saved search. */
 export const runInputSchema = z.object({
   query: z.string().trim().min(2, "Type what you offer.").max(200),
-  productId: z.string().refine(id => getCatalogue().items.some(item => item.id === id), "Select a product from your catalogue.").optional(),
+  // docs/mvp/22: any product can be searched. The server derives the item from the words; a client may still send a
+  // catalogue id or a typed item id ("q:pressure-vessel"), nothing else.
+  productId: z.string().refine(id => isSearchItemId(id) || getCatalogue().items.some(item => item.id === id), "Unknown product.").optional(),
   contactRole: z.enum(["buyer", "decision_maker", "technical_approver", "influencer", "approver", "vendor_registration"]).optional(),
   researchMode: z.enum(["preview", "batch", "deep"]).optional(),
   targetCompanies: z.number().int().min(1).max(100).optional(),

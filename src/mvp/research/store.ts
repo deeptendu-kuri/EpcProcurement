@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { getDb, type Db, type Queryable } from '@/mvp/db';
 import type { RunInput, RunCounters } from '@/mvp/types';
 import { researchBudget } from '@/mvp/discovery/plan';
-import type { RawDoc } from '@/mvp/pipeline/contracts';
+import { TENDER_READ_PRIORITY, TENDER_READS_PER_SEARCH } from '@/mvp/sourcing/tender-sources';
 import { resolveMaterial } from '@/mvp/discovery/material-catalogue';
+import { isSearchItemId } from '@/mvp/discovery/item';
+import type { RawDoc } from '@/mvp/pipeline/contracts';
 import { DISCOVERY_VERSION,discoverySchema } from '@/mvp/discovery';
 import { loadCompanyBundle } from '@/mvp/discovery/bundle';
 import { feedUrls } from '@/mvp/pipeline/sources/rss';
@@ -37,12 +39,15 @@ export function plannedCollectJobs(input:RunInput,budget:ResearchBudget):{stage:
     task.source==='registry'&&task.registryId!=='dewa-contractor-list'?{source:'registry',sourcingLane:task.lane,registryId:task.registryId,market:task.market}:
     task.source==='registry'?{source:'directory-seed',sourcingLane:task.lane,raw:{sourceKey:`directory:${task.registryId}`,sourceName:'Official contractor listing',tier:'A',url:task.url,title:null,publishedAt:null,text:null,isSample:false,research:{lane:'directory',sourcingLane:task.lane,registryId:task.registryId}}}:
     task.source==='tavily'?{source:'tavily',sourcingLane:task.lane,query:tavilyTask(task)}:
-    {source:task.source,sourcingLane:task.lane,market:task.market,query:task.query,...(task.material?{material:task.material,work:task.work}:{}),...(task.words?{words:task.words}:{}),
+    {source:task.source,sourcingLane:task.lane,market:task.market,query:task.query,...(task.source==='tender-page'?{url:task.url}:{}),...(task.material?{material:task.material,work:task.work}:{}),...(task.words?{words:task.words}:{}),
       ...(task.localQuery?{localQuery:task.localQuery,localWords:task.localWords}:{})}}));
 }
 export async function createResearchRun(input:RunInput,db:Db=getDb()):Promise<string> {
   if(!input.productId||input.offline)throw new Error('Durable research requires a live product search.');
-  const material=resolveMaterial(input.query,input.productId);if(material.status!=='resolved')throw new Error(material.question??'Clarify the material before research.');
+  // A typed item is its own words (docs/mvp/22); an explicit catalogue product must still match them.
+  if(!isSearchItemId(input.productId)){
+    const material=resolveMaterial(input.query,input.productId);if(material.status!=='resolved')throw new Error(material.question??'Clarify the material before research.');
+  }
   const budget=researchBudget(input);
   return db.tx(async tx=>{
     const run=(await tx.query<{id:string}>(`insert into runs(adhoc_query,status,counters) values($1::jsonb,'queued','{}') returning id`,[JSON.stringify(input)])).rows[0];
@@ -198,7 +203,7 @@ export async function researchProgress(db:Db,runId:string,stage:string,message:s
   // allowances; they count as web searches like the rest.
   const workRun=(await db.query<{markets:string[]|null;brief:boolean}>("select adhoc_query->'markets' as markets,(adhoc_query ? 'brief') as brief from runs where id=$1",[runId])).rows[0];
   const workExtra=workRun?.brief?(workRun.markets??[]).length*(1+FOLLOW_SEARCHES_PER_COUNTRY):0;
-  counters.researchUsage.search+=units('brief_search')+units('follow_search');
+  counters.researchUsage.search+=units('brief_search')+units('follow_search')+units('tender_search');
   if(session)counters.researchLimits={search:session.budget.searchQueries+workExtra,reads:session.budget.maxPages,aiCalls:session.budget.maxAiPages,estimatedAiTokens:session.budget.maxAiTokens};
   if(session)counters.researchLimits!.bingSearches=session.budget.bingQueries;
   // Extra rounds taken because fewer buyers than wanted were saved (see extend.ts).
@@ -283,7 +288,10 @@ export async function enqueueRawDocs(db:Db,job:ResearchJob,docs:RawDoc[],maxPage
     let deferred=0,admitted=0;
     const session=(await tx.query<ResearchSession>('select * from research_sessions where run_id=$1',[job.run_id])).rows[0];
     const availableQueries=(await tx.query<{count:number}>("select count(*)::int as count from research_jobs where run_id=$1 and stage='collect' and payload->>'source'='tavily' and state in ('queued','running','done')",[job.run_id])).rows[0].count;
-    const fairCap=job.payload.source==='tavily'?Math.max(1,Math.ceil(readLaneLimits(maxPages).discovery/Math.max(1,Math.min(session.budget.searchQueries,availableQueries)))):maxPages;
+    // docs/mvp/22: an open-tender search has its own reading share (live run, 14 Oct: 19 of 19 tender results were
+    // deferred behind the discovery share); tender pages that name the item come first.
+    const tenderSearch=job.key.includes(':tender:');
+    const fairCap=tenderSearch?TENDER_READS_PER_SEARCH:job.payload.source==='tavily'?Math.max(1,Math.ceil(readLaneLimits(maxPages).discovery/Math.max(1,Math.min(session.budget.searchQueries,availableQueries)))):maxPages;
     const input=(await tx.query<{adhoc_query:RunInput}>('select adhoc_query from runs where id=$1',[job.run_id])).rows[0].adhoc_query;
     const clean=docs.filter(raw=>!junkReason(raw.url,raw.title,input.markets));
     for(const raw of docs.filter(raw=>junkReason(raw.url,raw.title,input.markets)))await tx.query("insert into run_events(run_id,stage,message,counters) values($1,'info',$2,'{}')",[job.run_id,`skipped: ${junkReason(raw.url,raw.title,input.markets)}`]);
@@ -293,7 +301,7 @@ export async function enqueueRawDocs(db:Db,job:ResearchJob,docs:RawDoc[],maxPage
       // A duplicate must not use this query's fair share or appear as deferred.
       if(existing.has(raw.url))continue;
       if(admitted>=fairCap){deferred++;continue;}
-      const priority=raw.research?.sourcingLane==='trigger'?(input.brief?1250:1000):raw.research?.sourcingLane==='roundup'?1050:raw.research?.sourcingLane==='capability'?1150:raw.research?.lane==='directory'?48:35;
+      const priority=raw.research?.tender?TENDER_READ_PRIORITY:raw.research?.sourcingLane==='trigger'?(input.brief?1250:1000):raw.research?.sourcingLane==='roundup'?1050:raw.research?.sourcingLane==='capability'?1150:raw.research?.lane==='directory'?48:35;
       if(await queueRead(tx,job.run_id,raw,{maxPages},priority)){admitted++;existing.add(raw.url);}else deferred++;
     }
     await tx.query(`update research_jobs set state='done',result=$3::jsonb,lease_token=null,lease_until=null where id=$1 and lease_token=$2`,[job.id,job.lease_token,JSON.stringify({urls:clean.length,deferred,docs:clean,skippedCount:docs.length-clean.length})]);

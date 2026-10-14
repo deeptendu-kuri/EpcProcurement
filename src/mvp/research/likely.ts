@@ -34,6 +34,8 @@ interface NeedLead { company_name: string; role: string; quote: string; identity
 
 export const LIKELY_MIN = 45;
 export const LIKELY_MAX_PER_SEARCH = 60;
+/** A buyer with its own open tender or order for the item ranks above every inferred buyer (docs/mvp/22). */
+const DIRECT_FIT = 95;
 // Stockists and traders, and project owners (they buy through their EPC contractors), are secondary:
 // listed under Companies found, never saved as leads from a rating alone. A website check can still prove an owner.
 const ROLE: Record<BuyerType, string | null> = {
@@ -49,11 +51,12 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
   const label = searchedProductLabel(productId, input.query ?? '');
   // docs/mvp/20: in a work-based search a company the need check accepted is a lead on that proof (its verified
   // sentence about work that needs the item), whatever its shortlist rating; the smoke test lost them all.
-  const needs = input.brief?.uses.length ? (await db.query<NeedLead>(
+  const needs = input.brief ? (await db.query<NeedLead>(
     `select n.company_name,n.role,n.quote,c.identity_quote,n.need_why,n.use_name,n.work_date,n.market,n.project,n.document_id,n.package,d.text,d.url,d.tier,d.publisher_key
      from need_checks n join source_documents d on d.id=n.document_id left join research_candidates c on c.run_id=n.run_id and c.company=n.company_name and c.identity_document_id=n.document_id
      where n.run_id=$1 and n.verdict='lead' and n.quote_verified=true and n.needs_item='yes' order by n.work_date desc nulls last`, [runId])).rows
-      .filter(n=>supportedWorkProof({company:n.company_name,quote:n.quote,text:n.text,package:n.package,url:n.url??undefined,identityQuote:n.identity_quote??undefined},productId,input.brief!)) : [];
+      // A tender issuer's own tender is its proof (docs/mvp/22 §3.7); the work-sentence check is for contractors.
+      .filter(n=>n.role==='direct_buyer'||supportedWorkProof({company:n.company_name,quote:n.quote,text:n.text,package:n.package,url:n.url??undefined,identityQuote:n.identity_quote??undefined},productId,input.brief!)) : [];
   const needFor = (name: string) => needs.find((n) => sameCompanyName(n.company_name, name)) ?? null;
   const work = Boolean(input.brief?.uses.length);
   const nonBuilders=work?(await db.query<{company_name:string}>(
@@ -75,7 +78,8 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
   let saved = 0, listing = 0;
   for (const c of picks) {
     const need = needFor(c.name);
-    const role = need ? (need.role === 'subcontractor' || need.role === 'maintenance_contractor' ? 'subcontractor' : 'epc_contractor') : ROLE[c.buyerType!]!;
+    const direct = need?.role === 'direct_buyer';
+    const role = direct ? 'owner' : need ? (need.role === 'subcontractor' || need.role === 'maintenance_contractor' ? 'subcontractor' : 'epc_contractor') : ROLE[c.buyerType!]!;
     const doc = need ? { doc: need.document_id, text: null, url: need.url, tier: need.tier, publisher_key: need.publisher_key } : docs.get(c.id);
     // A list entry that itself describes work with the material is quoted evidence ("listing"); the need check's
     // sentence was verified against its source when it was judged.
@@ -89,7 +93,9 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
     if (c.guessed && !listed) continue;
     const verification = listed ? 'listing' : 'rating';
     // The same form as an award winner's reason, so Leads shows "Their work" and "Why" as bullets.
-    const reason = need ? potentialBuyingReason(need.quote,label,need.use_name)
+    // Same "Why it needs" form as other need leads, so Leads shows the tender sentence and why as bullets.
+    const reason = direct ? `${squash(need!.quote)} Why it needs ${label}: ${need!.need_why ?? 'Its own tender or purchase order names the item.'}`
+      : need ? potentialBuyingReason(need.quote,label,need.use_name)
       : `Likely ${label} buyer (${listed ? 'its listed work uses it' : 'rated from the source; not verified yet'}): ${c.ratingReason ?? c.ratingRole ?? 'see source'}`;
     const ok = await db.tx(async (tx) => {
       const company = await resolveBuyerCompany(tx, c.name, null, role === 'epc_contractor' ? 'main_epc' : role, c.website);
@@ -120,7 +126,7 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
           evidence.push(identityId);
         }
       }
-      const contract=Boolean(need&&wonConstructionContract(need.quote));
+      const contract=Boolean(need&&!direct&&wonConstructionContract(need.quote));
       const executing=Boolean(need&&/\b(?:being executed|under construction|construction continues|construction is ongoing)\b/i.test(need.quote));
       const application=need&&input.brief?stainlessApplicationProof({company:need.company_name,quote:need.quote,text:need.text,package:need.package},input.brief):null;
       if(application&&application.quote!==quote){
@@ -154,9 +160,16 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
         on conflict on constraint leads_candidate_uniq do update set updated_at=now() returning id`, [company.id, [productId], JSON.stringify([{ text: reason, evidenceIds: evidence }]), runId, role])).rows[0];
       const inserted = await tx.query(`insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,contact_role,buying_reason,evidence_ids,discovery_kind,fit_score,material_fit_kind,activity_status,verification,activity_date,activity_quote,discovery_version)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid[],'company',$10,$11,$12,$13,$14::date,$15,0) on conflict(run_id,company_id,product_id) do nothing returning id`,
-        [runId, lead.id, company.id, input.query ?? label, productId, label, input.contactRole ?? 'buyer', reason, evidence, need ? needPriorityScore(need.work_date,contract,Boolean(currentProof)||executing) : c.rating ?? LIKELY_MIN, !need&&c.match === 'named' ? 'explicit' : 'potential', currentProof||executing?'ongoing':contract&&need?.work_date?'recent':'capability_only',verification,dateProof?.date??null,contract||executing?quote:null]);
+        [runId, lead.id, company.id, input.query ?? label, productId, label, input.contactRole ?? 'buyer', reason, evidence,
+          direct ? DIRECT_FIT : need ? needPriorityScore(need.work_date,contract,Boolean(currentProof)||executing) : c.rating ?? LIKELY_MIN,
+          direct || !need&&c.match === 'named' ? 'explicit' : 'potential', direct?'recent':currentProof||executing?'ongoing':contract&&need?.work_date?'recent':'capability_only',verification,
+          direct?(need!.work_date?(need!.work_date.length===7?`${need!.work_date}-01`:need!.work_date.slice(0,10)):null):dateProof?.date??null,direct||contract||executing?quote:null]);
       if (inserted.rows.length && listed && quote)
-        await storeTrigger(tx, runId, company.id, productId, need && contract
+        await storeTrigger(tx, runId, company.id, productId, direct
+          // Its own tender or purchase order for the item: the strongest, dated demand signal.
+          ? { kind: 'tender', role: 'owner', title: squash(need!.quote), date: need!.work_date, datePrecision: need!.work_date ? (need!.work_date.length === 7 ? 'month' : 'day') : 'unknown',
+            valueUsd: null, valueText: null, country: need!.market, projectId: null, projectName: need!.project, ownerName: null, strength: 'confirmed', evidenceIds: evidence }
+          : need && contract
           // Its dated work on a project that needs the item (Recent work and the buying window come from this).
           ? { kind: 'award', role: role === 'subcontractor' ? 'subcontractor' : 'contractor', title: need.quote, date: need.work_date, datePrecision: need.work_date ? (need.work_date.length === 7 ? 'month' : 'day') : 'unknown',
             valueUsd: null, valueText: null, country: need.market, projectId: null, projectName: need.project, ownerName: null, strength: 'confirmed', evidenceIds: contractEvidence }

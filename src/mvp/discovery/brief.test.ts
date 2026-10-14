@@ -47,7 +47,7 @@ describe("search brief checks (docs/mvp/20 §4, rules from the 10 Oct proof runs
     expect(seed.length).toBeGreaterThan(0);
     const prompt = briefPrompt("Stud bolts", ["IN", "NO"], ["- 2026-08 ADNOC awards gas plant EPC: …"], seed);
     expect(prompt.user).toMatch(/never a part, assembly or component/);
-    expect(prompt.user).toMatch(/Never list work where a different material is standard/);
+    expect(prompt.user).toMatch(/Never list work where a different item is standard/);
     expect(prompt.user).toMatch(/"NO": \[2-4 words local news in Norway/);
     // India's news is English: no local words asked (the UAE counts as Arabic, so it would get them).
     expect(prompt.user).not.toMatch(/"IN": \[2-4 words local news/);

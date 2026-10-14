@@ -4,6 +4,7 @@
  * reviewed "who buys this" list per product. Built on the server and passed to the search form.
  */
 import { getCatalogue } from '@/mvp/config/buyers-config';
+import { searchItemId } from './item';
 import { INPUT_ALIASES, MATERIAL_ACTIVITIES } from './material';
 import { interpretMaterial, materialMismatch, normalizeWords, type MaterialEntry } from './interpret';
 
@@ -133,4 +134,28 @@ export function resolveMaterial(query: string, selectedProductId?: string): Mate
   return reading.choices.length
     ? ask('clarification', reading.family ? `${reading.family} has several types. Choose the one you sell.` : 'Choose the product type closest to what you sell.', reading.choices.map((c) => c.id))
     : ask('unsupported', 'This material is not in your product list yet. Choose the closest product type.', []);
+}
+
+/** Words that describe the form or service of a catalogue product without making it a different product. */
+const QUALIFIERS = new Set(['seamless', 'welded', 'erw', 'saw', 'lsaw', 'hsaw', 'galvanized', 'galvanised', 'black', 'coated', 'lined', 'hot', 'cold', 'rolled',
+  'forged', 'cast', 'carbon', 'alloy', 'stainless', 'steel', 'high', 'low', 'pressure', 'temperature', 'sour', 'service', 'grade', 'class', 'type', 'schedule',
+  'sch', 'inch', 'inches', 'size', 'sizes', 'astm', 'asme', 'api', 'ansi', 'iso', 'din', 'bs', 'en', 'awwa', 'mss', 'supply', 'supplier', 'suppliers', 'buyers',
+  'buyer', 'tender', 'tenders', 'and', 'for', 'with', 'the', 'of', 'in', 'new', 'industrial', 'pipes', 'pipe']);
+/**
+ * Universal search (docs/mvp/22 §3.1): which item a typed search is. A catalogue product only when the words are
+ * that product (exact term, its standard, or a strong match whose every meaningful word is its vocabulary);
+ * otherwise the typed words themselves ("pressure vessel" is never steel plates; "ball valve actuator" is not ball
+ * valves). Generic words ("valves", "steel pipe") are searched as typed too: no product type is ever imposed.
+ */
+export function resolveSearchItem(query: string): { productId: string; catalogue: boolean } {
+  const catalogue = materialCatalogue();
+  const reading = interpretMaterial(catalogue, query);
+  const entry = reading.best && !reading.family ? catalogue.find((e) => e.id === reading.best!.id) : undefined;
+  if (entry && (reading.confidence === 'exact' || reading.confidence === 'strong' || reading.best!.score >= 90)) {
+    const vocabulary = new Set([...entry.terms, normalizeWords(entry.name), ...entry.standards].flatMap((t) => t.split(' ')));
+    const unknown = normalizeWords(query).split(' ').filter((w) => w.length >= 2 && !/\d/.test(w) && !QUALIFIERS.has(w)
+      && !vocabulary.has(w) && !vocabulary.has(w.replace(/(?:es|s)$/, '')));
+    if (reading.confidence === 'exact' || !unknown.length) return { productId: entry.id, catalogue: true };
+  }
+  return { productId: searchItemId(query), catalogue: false };
 }

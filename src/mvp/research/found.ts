@@ -12,7 +12,7 @@ import { researchAiAllowance, type ExtendableBudget } from './extend';
 import { looksLikeSupplier, relevantFound } from '@/mvp/sourcing/names';
 import { getCatalogueItem } from '@/mvp/config/buyers-config';
 import { getLLM } from '@/mvp/llm';
-import { consistentRating, consistentReason, consistentType, rateCandidates, ruleRating, type BuyerType, type MatchStrength } from './shortlist';
+import { consistentRating, consistentReason, consistentType, rateCandidates, ruleRating, type BuyerType, type ConsistencyOptions, type MatchStrength } from './shortlist';
 
 export type FoundStatus = 'saved' | 'checking' | 'not_checked' | 'no_website' | 'no_match' | 'unreadable';
 export interface FoundCompany {
@@ -85,9 +85,9 @@ export async function listFoundCompanies(db: Queryable, runId: string): Promise<
   const savedBy = new Map(saved.map((s) => [key(s.name), s.id]));
   const savedFit = new Map(saved.map((s) => [s.id, Number(s.fit_score) || 0]));
   const savedHow = new Map(saved.map((s) => [s.id, s.verification]));
-  const runInput = (await db.query<{ product_id: string | null; resellers: boolean | null; markets: string[] | null }>("select adhoc_query->>'productId' as product_id,(adhoc_query->>'includeResellers')::boolean as resellers,adhoc_query->'markets' as markets from runs where id=$1", [runId])).rows[0];
+  const runInput = (await db.query<{ product_id: string | null; resellers: boolean | null; markets: string[] | null; brief: { productId?: string; kind?: string } | null }>("select adhoc_query->>'productId' as product_id,(adhoc_query->>'includeResellers')::boolean as resellers,adhoc_query->'markets' as markets,adhoc_query->'brief' as brief from runs where id=$1", [runId])).rows[0];
   const productId = runInput?.product_id ?? null;
-  const opts = { resellers: runInput?.resellers !== false, markets: runInput?.markets ?? [] };
+  const opts = { resellers: runInput?.resellers !== false, markets: runInput?.markets ?? [], brief: runInput?.brief as ConsistencyOptions['brief'] };
   const productName = productId ? getCatalogueItem(productId)?.shortName ?? productId : '';
   const seen: { key: string; initials: string }[] = [];
   const result: FoundCompany[] = [];

@@ -1,6 +1,7 @@
 import { getCatalogueItem } from './buyers-config';
 import { materialCatalogue } from '@/mvp/discovery/material-catalogue';
 import { interpretMaterial, normalizeWords } from '@/mvp/discovery/interpret';
+import { isSearchItemId, searchItemName } from '@/mvp/discovery/item';
 
 /**
  * Keep the user's wording when it names this product ("seamless A106", "GI pipe"); when the words are
@@ -8,6 +9,8 @@ import { interpretMaterial, normalizeWords } from '@/mvp/discovery/interpret';
  */
 export function searchedProductLabel(productId:string,keyword:string,fallback?:string):string {
   if(fallback&&keyword.trim().toLowerCase()===fallback.trim().toLowerCase())return fallback;
+  // docs/mvp/22: a typed item is exactly what he typed.
+  if(isSearchItemId(productId))return keyword.trim().replace(/[\r\n<>]/g,' ').slice(0,160)||fallback||searchItemName(productId);
   const catalogue=materialCatalogue();
   const entry=catalogue.find((e)=>e.id===productId);
   const words=normalizeWords(keyword);

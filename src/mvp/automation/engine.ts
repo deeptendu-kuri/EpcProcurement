@@ -1,5 +1,5 @@
 import { randomBytes,randomUUID } from "node:crypto";
-import { getCatalogue } from "@/mvp/config/buyers-config";
+import { getCatalogueItem } from "@/mvp/config/buyers-config";
 import { applicationSentence } from "@/mvp/discovery/application";
 import { getDb,type Queryable } from "@/mvp/db";
 import { getOpportunity,isVerified,updateOpportunity,type Opportunity } from "@/mvp/opportunities";
@@ -113,7 +113,7 @@ async function threadContext(t:FunnelThread):Promise<Opportunity|null> {
 /** One durable test per approved inbox. No company, lead or verified CRM record is created. */
 export async function startEmailTest(productId:string) {
   requireFunnelConfig();
-  const product=getCatalogue().items.find(p=>p.id===productId);if(!product)throw new Error("Choose a product from the existing catalogue.");
+  const product=getCatalogueItem(productId);if(!product)throw new Error("Choose a product to test with.");
   const db=getDb();return db.tx(async tx=>{
     const control=(await tx.query<{enabled:boolean}>("select enabled from funnel_control where id=1 for update")).rows[0];
     if(!control?.enabled)throw new Error("Enable the demo funnel first.");

@@ -8,6 +8,7 @@ import catalogueRaw from "./catalogue.json";
 import strengthsRaw from "./strengths.json";
 import needsRaw from "./needs-map.json";
 import knownRaw from "./known-companies.json";
+import { isSearchItemId, searchItemFromId } from "@/mvp/discovery/item";
 
 const ROLES = ["owner", "epc_contractor", "subcontractor", "manufacturer", "fabricator", "distributor"] as const;
 
@@ -90,8 +91,12 @@ export function getCatalogue(): Catalogue {
   return catalogue;
 }
 
-/** Catalogue item by id. */
+/**
+ * Catalogue item by id. A typed search item ("q:pressure-vessel", docs/mvp/22) is returned as an item built from
+ * its own words, so search steps work for any product; catalogue lists (getCatalogue) never include it.
+ */
 export function getCatalogueItem(id: string): CatalogueItem | undefined {
+  if (isSearchItemId(id)) return searchItemFromId(id);
   return getCatalogue().items.find((item) => item.id === id);
 }
 

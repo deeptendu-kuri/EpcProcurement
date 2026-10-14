@@ -5,7 +5,8 @@ import { serverlessRuntime,SERVERLESS_SETUP_MESSAGE } from "@/mvp/runtime";
 import { createResearchRun } from "@/mvp/research/store";
 import { startResearchWorker } from "@/mvp/research/worker";
 import { mvpEnv } from "@/mvp/config/env";
-import { resolveMaterial } from "@/mvp/discovery/material-catalogue";
+import { resolveMaterial, resolveSearchItem } from "@/mvp/discovery/material-catalogue";
+import { isSearchItemId } from "@/mvp/discovery/item";
 
 /** How long a POST waits for its job to start before answering "waiting in line". */
 const START_WAIT_MS = 4000;
@@ -32,7 +33,11 @@ export function ticketBody(ticket: Ticket): TicketBody {
 
 /** Put a job in the run queue (one run at a time) and answer 202 with its ticket. */
 export async function enqueueResponse(job: QueueJob): Promise<NextResponse> {
-  if(job.input.productId&&!job.sample&&!job.input.offline&&!mvpEnv.offline()){
+  // docs/mvp/22: no product type is imposed. A search without one is the item its words name (a catalogue product
+  // only when the words are exactly that product).
+  if(!job.input.productId&&!job.sample&&!job.input.offline&&!mvpEnv.offline())job={...job,input:{...job.input,productId:resolveSearchItem(job.input.query).productId}};
+  // An explicit catalogue product (an older client or a saved search) must still match the words.
+  if(job.input.productId&&!isSearchItemId(job.input.productId)&&!job.sample&&!job.input.offline&&!mvpEnv.offline()){
     const material=resolveMaterial(job.input.query,job.input.productId);
     if(material.status!=='resolved')return NextResponse.json({error:material.question,materialStatus:material.status,candidateIds:material.candidateIds},{status:422,headers:NO_STORE});
   }

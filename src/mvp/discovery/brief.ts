@@ -11,13 +11,14 @@ import type { Queryable } from '@/mvp/db';
 import type { LLMProvider } from '@/mvp/llm';
 import { firstJsonObject } from '@/mvp/llm/groq';
 import { getCatalogueItem, getNeedsMap } from '@/mvp/config/buyers-config';
+import { isSearchItemId } from '@/mvp/discovery/item';
 import { COUNTRIES } from '@/mvp/config/countries';
 import { countryLanguage } from '@/mvp/config/country-meta';
 import { MATERIAL_ACTIVITIES } from '@/mvp/discovery/material';
 import { whoBuys } from '@/mvp/discovery/material-catalogue';
 import { parseMaterialSpec, specUses } from '@/mvp/discovery/spec';
 
-export const BRIEF_VERSION = 2;
+export const BRIEF_VERSION = 3;
 /** A brief is reused for this long; work in a market changes slowly, but not never. */
 export const BRIEF_TTL_DAYS = 30;
 
@@ -34,6 +35,19 @@ export interface BriefUse {
   localWords: Record<string, string[]>;
 }
 export type Buying = 'project' | 'steady' | 'both';
+/** What kind of thing the item is (docs/mvp/22 §3.4): equipment is bought early and by package, materials in bulk. */
+export type ItemKind = 'material' | 'static_equipment' | 'rotating_equipment' | 'electrical' | 'instrumentation' | 'consumable' | 'service' | 'other';
+const ROTATING_ITEM = /\b(?:fans?|blowers?|pumps?|compressors?|turbines?|agitators?|mixers?|gearbox(?:es)?)\b/i;
+const STATIC_ITEM = /\b(?:vessels?|separators?|exchangers?|tanks?|columns?|reactors?|drums?|scrubbers?|coolers?|condensers?|heaters?|boilers?|silos?|hoppers?|knock-?out pots?)\b/i;
+/** The kind the item's own words show (fans are rotating, vessels are static), else null. */
+export function kindFromWords(words: string): ItemKind | null {
+  return ROTATING_ITEM.test(words) ? 'rotating_equipment' : STATIC_ITEM.test(words) ? 'static_equipment' : null;
+}
+const ITEM_KINDS = new Set<ItemKind>(['material', 'static_equipment', 'rotating_equipment', 'electrical', 'instrumentation', 'consumable', 'service', 'other']);
+/** A kind of maker or seller ("fan manufacturers"), never a company name. */
+const MAKER_KIND = /\b(?:manufactur\w*|makers?|fabricat\w*|suppliers?|stockists?|traders?|distribut\w*|vendors?|oems?|workshops?|mills?|producers?|dealers?|shops?|yards?|exporters?|importers?)\b/i;
+/** A kind of organisation ("refinery operators", "water utilities"), never a company name. */
+const BUYER_KIND = /\b(?:operators?|utilit\w*|authorit\w*|plants?|compan\w*|producers?|refiner\w*|municipal\w*|ministr\w*|developers?|contractors?|owners?|stations?|boards?|corporations?|agenc\w*|departments?|councils?|ports?|airports?|hospitals?|factor\w*|mills?|manufacturers?|industr\w*|governments?|bodies|institutions?|facilit\w*|packagers?|integrators?|builders?|firms?)\b/i;
 export interface SearchBrief {
   version: number;
   item: string;
@@ -49,6 +63,18 @@ export interface SearchBrief {
   source: 'ai' | 'catalogue';
   /** The catalogue item it was seeded from. */
   productId: string | null;
+  /** docs/mvp/22 (brief v3; absent in older briefs). */
+  kind?: ItemKind;
+  /** Other names of exactly this item used in tenders and specifications. */
+  synonyms?: string[];
+  /** How tender titles phrase buying it ("supply of centrifugal fans"). */
+  tenderWords?: string[];
+  /** Kinds of organisations that buy it directly through their own tenders or orders. */
+  directBuyers?: string[];
+  /** Kinds of companies that make, fabricate or sell it: competitors, never buyers. */
+  makers?: string[];
+  /** The item's own name in each non-English market's language (tender searches). */
+  localItem?: Record<string, string[]>;
 }
 
 const nameOf = (code: string) => COUNTRIES.find((c) => c.code === code)?.name ?? code;
@@ -102,19 +128,25 @@ function consumingUses(productId:string|null):BriefUse[] {
 export function briefPrompt(material: string, markets: string[], ground: string[], seed: string[]): { system: string; user: string } {
   const foreign = markets.filter((m) => countryLanguage(m) !== 'en');
   return {
-    system: 'You are a senior procurement and business-development expert for industrial materials. A supplier tells you what it sells; you explain which work consumes exactly that item (respecting any service condition or standard in its words) so its buyers can be found in project news. Reply with JSON only.',
+    system: 'You are a senior procurement and business-development expert for industrial products: materials, static and rotating equipment, electrical and instrumentation items, consumables. A supplier tells you what it sells; you explain how exactly that item is bought (respecting any service condition or standard in its words): its tender wording, who buys it directly, and which work consumes or installs it, so its open tenders and buyers can be found. Reply with JSON only.',
     user: `Item sold: "${material}". Markets: ${markets.map(nameOf).join(', ')}.
 ${ground.length ? `Recent news in these markets mentioning the item (rank the uses by what is actually being built or maintained there; ignore anything off-topic):\n${ground.slice(0, 12).join('\n')}\n` : ''}${seed.length ? `Facts from our catalogue about who buys the nearest product (use them; you may add uses, do not drop these):\n${seed.map((s) => `- ${s}`).join('\n')}\n` : ''}Return {"item": short name,
+"kind": one of material|static_equipment|rotating_equipment|electrical|instrumentation|consumable|service|other,
+"synonyms": [up to 6 other names of EXACTLY this item used in tenders, specifications and trade (e.g. "shell and tube heat exchanger" for an API 660 exchanger, "twin lobe blower" for a roots blower); never a broader, related or different item (an atmospheric storage tank is not a pressure vessel), never a single generic word],
+"tenderWords": [up to 4 phrases that tender and RFQ titles use when buying it, e.g. "supply of centrifugal fans"],
+"directBuyers": [up to 6 KINDS of organisations (never company names) that buy it directly through their own tenders or purchase orders, e.g. water utilities, refinery operators, power utilities, metro authorities],
+"makers": [up to 6 KINDS of companies (never company names) that make, fabricate, stock or sell it, e.g. "pressure vessel fabricators", "fan manufacturers": competitors, never buyers],
 "mustHave": [conditions implied by the item's own words, e.g. service temperature, pressure class, material grade or standard; never sizes, never generic standards of the wider product family],
 "buying": "project" if bought per construction project, "steady" if bought continuously for maintenance or fabrication, "both" if both,
-"uses": 3-6 kinds of WORK that need exactly this item, most spending first. A use is a kind of plant, project or service contract (e.g. "gas processing plant", "refinery revamp", "desalination plant", "offshore platform", "water and sewer network", "plant maintenance contract"), never a part, assembly or component. Never list work where a different material is standard for that job.
+"uses": 3-6 kinds of WORK that need exactly this item, most spending first. A use is a kind of plant, project, facility or service contract that consumes or installs the item (e.g. "gas processing plant", "refinery revamp", "wastewater treatment plant", "metro tunnel ventilation", "cement plant", "plant maintenance contract"), never a part, assembly or component. Never list work where a different item is standard for that job. Equipment is bought early (at tender, FEED or right after the EPC award) by the EPC contractor, a packager or the operator; materials are bought during construction and maintenance.
   [{"name": "short name of the work", "newsWords": [2-4 short English words that appear in news headlines about such work, never the item's own words], "why": "one line: why this work needs this item",
     "countries": [codes of the markets where this work is significant: ${markets.join(', ')}]${foreign.length ? `,
     "localWords": {${foreign.map((m) => `"${m}": [2-4 words local news in ${nameOf(m)} uses in headlines about this work, in its own language]`).join(', ')}}` : ''}}],
   Rank the uses per market: what this item is really bought for in each country (they can differ a lot between countries).
-"buyerRoles": [who procures it for that work], "notBuyers": [work or companies that look related but do not need this exact item],
+"buyerRoles": [who procures it for that work, e.g. EPC contractors (equipment package), piping or mechanical subcontractors, skid packagers, MEP contractors, operators replacing it], "notBuyers": [work or companies that look related but do not need this exact item],
 "owners": [up to 6 main project owners or plant operators in these markets whose work uses it],
-"places": {${markets.map((m) => `"${m}": [the country's name in its own language, then up to 10 main industrial cities, ports and hubs of ${nameOf(m)}]`).join(', ')}}}`,
+"places": {${markets.map((m) => `"${m}": [the country's name in its own language, then up to 10 main industrial cities, ports and hubs of ${nameOf(m)}]`).join(', ')}}${foreign.length ? `,
+"localItem": {${foreign.map((m) => `"${m}": [up to 3 names of this item as tenders in ${nameOf(m)} write it, in its own language]`).join(', ')}}` : ''}}`,
   };
 }
 
@@ -136,8 +168,22 @@ export function parseBrief(text: string, material: string, markets: string[], pr
   if (uses.length < 2) return null;
   const buying = raw.buying === 'project' || raw.buying === 'steady' ? raw.buying : 'both';
   const placesRaw = (raw.places && typeof raw.places === 'object' ? raw.places : {}) as Record<string, unknown>;
+  const localRaw = (raw.localItem && typeof raw.localItem === 'object' ? raw.localItem : {}) as Record<string, unknown>;
+  // Machines that move a fluid are rotating equipment whatever the AI said (live run, 14 Oct: "centrifugal fan
+  // (static equipment)"); the kind decides whether fabricators are competitors (fabricatedItem).
+  const aiKind = ITEM_KINDS.has(raw.kind as ItemKind) ? raw.kind as ItemKind : 'other';
+  const kind: ItemKind = (kindFromWords(`${clip(raw.item, 80)} ${material}`) === 'rotating_equipment' ? 'rotating_equipment' : null) ?? aiKind;
+  // Other names must still be this item: two words or a code, sharing a word with it ("ASME Section VIII vessel" for a
+  // pressure vessel; never "API 650 tank", a different item), never a lone "fan" (live run, 14 Oct).
+  const own2 = itemWords(material, clip(raw.item, 80));
+  const synonyms = strings(raw.synonyms, 6, 80).filter((w) => (w.trim().split(/\s+/).length >= 2 || /\d/.test(w)) && isItemWord(w, own2));
+  // Kinds, never names: a named EPC listed as a "maker" would reject a real buyer (live run, 14 Oct: Technip Energies).
+  const makers = strings(raw.makers, 6, 80).filter((w) => MAKER_KIND.test(w));
+  const directBuyers = strings(raw.directBuyers, 6, 80).filter((w) => BUYER_KIND.test(w));
   return {
     version: BRIEF_VERSION, item: atom(raw.item, 80) || material, source: 'ai', productId,
+    kind, synonyms, tenderWords: strings(raw.tenderWords, 4, 80), directBuyers, makers,
+    localItem: Object.fromEntries(markets.filter((m) => countryLanguage(m) !== 'en').map((m) => [m, strings(localRaw[m], 3, 60)]).filter(([, w]) => w.length)),
     // Check 4: conditions only, never sizes.
     mustHave: strings(raw.mustHave, 6, 80).filter((m) => !SIZE.test(m)),
     buying, uses: [...consumingUses(productId).filter(u=>!uses.some(v=>v.name.toLowerCase()===u.name.toLowerCase())),...uses].slice(0,9),
@@ -153,13 +199,16 @@ export function catalogueBrief(material: string, markets: string[], productId: s
   const own = itemWords(material, item?.shortName ?? '');
   const uses = activities.map((a) => ({ name: a, newsWords: a.split(/\s+/).filter((w) => w.length >= 3 && !isItemWord(w, own)).slice(0, 3),
     why: `${a} uses ${item?.shortName ?? material}.`, countries: [], localWords: {} })).filter((u) => u.newsWords.length);
-  return { version: BRIEF_VERSION, item: item?.shortName ?? material, mustHave: [], buying: 'both', uses:[...consumingUses(productId),...uses], buyerRoles: productId ? whoBuys(productId) : [],
-    notBuyers: [], owners: [], places: Object.fromEntries(markets.map((m) => [m, []])), source: 'catalogue', productId };
+  const name = item?.shortName ?? material;
+  return { version: BRIEF_VERSION, item: name, mustHave: [], buying: 'both', uses:[...consumingUses(productId),...uses], buyerRoles: productId ? whoBuys(productId) : [],
+    notBuyers: [], owners: [], places: Object.fromEntries(markets.map((m) => [m, []])), source: 'catalogue', productId,
+    kind: productId && isSearchItemId(productId) ? kindFromWords(material) ?? 'other' : 'other', synonyms: (item?.keywords ?? []).filter((k) => k.includes(' ')).slice(0, 6), tenderWords: [`supply of ${name}`], directBuyers: [], makers: [], localItem: {} };
 }
 
 /** Search the consuming work, not an ASTM catalogue. This is planning knowledge,
  * never a list of seeded companies or evidence of any specific purchase. */
 export function groundingQuery(material: string, productId: string | null, market: string): string {
+  if (isSearchItemId(productId)) return `${material} tender supply project ${nameOf(market)}`;
   const spec = productId ? specUses(productId, parseMaterialSpec(material)) : [];
   const activities = productId ? MATERIAL_ACTIVITIES[productId] ?? [] : [];
   const work = spec[0] ?? activities[0] ?? material;
@@ -249,4 +298,13 @@ export function matchUse(brief: SearchBrief, answer: string | null | undefined):
 export function usesFor(brief: SearchBrief, market: string, n = 4): BriefUse[] {
   const local = brief.uses.filter((u) => !u.countries.length || u.countries.includes(market));
   return (local.length ? local : brief.uses).slice(0, n);
+}
+
+/**
+ * A typed item that is fabricated (pressure vessels, separators, heat exchangers, tanks): steel and equipment
+ * fabricators make it, so they are its competitors, not its buyers (live run, 14 Oct: a Saudi metal fabricator
+ * was saved as a pressure-vessel buyer). For a material (plate, pipe) a fabricator is still a buyer.
+ */
+export function fabricatedItem(brief?: Pick<SearchBrief, 'productId' | 'kind'> | null): boolean {
+  return Boolean(brief?.productId && isSearchItemId(brief.productId) && brief.kind === 'static_equipment');
 }

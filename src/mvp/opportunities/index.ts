@@ -1,5 +1,5 @@
 import { getDb, type Db } from "@/mvp/db";
-import { getCatalogue } from "@/mvp/config/buyers-config";
+import { getCatalogueItem } from "@/mvp/config/buyers-config";
 import { loadBuyerRecords } from "@/mvp/buyers/load";
 import type { BuyerRecord } from "@/mvp/buyers/view";
 import type { RunInput, RunRow } from "@/mvp/types";
@@ -44,8 +44,9 @@ export function doesTheWork(record: BuyerRecord): boolean {
 /** Snapshot only evidence actually read by this search; never use a global/timestamp-based lead list. */
 export async function captureOpportunities(runId: string, input: RunInput, db: Db = getDb()): Promise<number> {
   if (!input.productId) return 0; // historic/unscoped flows are kept separate
-  const product = getCatalogue().items.find(i => i.id === input.productId);
-  if (!product) throw new Error("Search product is not in the catalogue.");
+  // docs/mvp/22: a typed search item ("q:…") is built from its words; only a malformed id is refused.
+  const product = getCatalogueItem(input.productId);
+  if (!product) throw new Error("Unknown search product.");
   const evidence = (await db.query<{ id: string }>(`select e.id from evidence e join run_documents rd on rd.document_id = e.document_id
     where rd.run_id = $1 and e.quote_verified = true`, [runId])).rows;
   const readIds = new Set(evidence.map(e => e.id));

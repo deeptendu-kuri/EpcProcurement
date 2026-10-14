@@ -23,6 +23,7 @@ import { attachStoredHybridRun,createResearchRun,sessionFor,resumeResearchRun } 
 import { processResearchTick,productionResearchDeps } from "@/mvp/research/engine";
 import { startResearchWorker,waitForResearchRun } from "@/mvp/research/worker";
 import { resolveMaterial } from "@/mvp/discovery/material-catalogue";
+import { isSearchItemId } from "@/mvp/discovery/item";
 
 export { fixtureDocs } from "./sources/fixtures";
 export { failStaleRuns } from "./active-runs";
@@ -72,7 +73,7 @@ export async function startRun(input: RunInput): Promise<string> {
   if (input.lanes) clean.lanes = [...new Set(input.lanes)];
   if (!clean.leadKinds.length) clean.leadKinds = ["bid", "supply_subcontract"];
   if (!clean.markets.length) clean.markets = [...getClientProfile().markets];
-  if(clean.productId&&!clean.offline&&!mvpEnv.offline()){
+  if(clean.productId&&!isSearchItemId(clean.productId)&&!clean.offline&&!mvpEnv.offline()){
     const material=resolveMaterial(clean.query,clean.productId);if(material.status!=='resolved')throw new Error(material.question??'Clarify the material before research.');
   }
   if(clean.productId&&!clean.offline&&!mvpEnv.offline()&&!process.env.VITEST){

@@ -43,6 +43,8 @@ export interface RawDoc {
     candidateId?: string;
     /** Provider preview, used only to prioritise reading. Never source/evidence text. */
     searchPreview?: string;
+    /** docs/mvp/22: found by an open-tender search for the item. */
+    tender?: boolean;
     sourcingLane?: 'trigger'|'roundup'|'capability';
     pageKind?: 'article'|'tender_notice'|'filing'|'company_site'|'directory'|'roundup'|'junk';
     /** Doc 19: found by following this contractor down its chain (subcontractor search). */

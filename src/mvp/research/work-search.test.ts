@@ -24,10 +24,11 @@ const brief = (over: Partial<SearchBrief> = {}): SearchBrief => ({
 describe("search plan from a brief", () => {
   it("searches each country for its own work, never the product name alone", () => {
     const plan = sourcePlan({ productId: "gate-globe-check", keyword: "Cryogenic Valves", markets: ["AE", "SA"], mode: "preview", brief: brief() });
-    const award = (m: string) => plan.filter((t) => t.market === m && t.source === "bing-query").map((t) => t.query);
+    const award = (m: string) => plan.filter((t) => t.market === m && t.source === "bing-query" && !t.id.includes(":tender:")).map((t) => t.query);
     expect(award("AE")).toEqual(["LNG liquefaction contract awarded United Arab Emirates", "NGL fractionation contract awarded United Arab Emirates"]);
     expect(award("SA")).toEqual(["NGL fractionation contract awarded Saudi Arabia", "air separation contract awarded Saudi Arabia"]);
-    const news = plan.filter((t) => t.lane === "trigger" && t.source === "tavily").map((t) => t.query);
+    // Award news names the work, never the item; only the tender lane (docs/mvp/22) names it.
+    const news = plan.filter((t) => t.lane === "trigger" && t.source === "tavily" && !t.id.includes(":tender:")).map((t) => t.query);
     expect(news.join(" ")).not.toMatch(/cryogenic valves/i);
     expect(plan.find((t) => t.market === "AE" && t.source === "local-news")).toMatchObject({ localQuery: "الغاز الطبيعي المسال الإمارات" });
     expect(plan.find((t) => t.market === "SA" && t.source === "gdelt-country")?.words).toEqual(["NGL", "fractionation", "air separation"]);
@@ -69,7 +70,7 @@ describe("the brief as a run's first step (MVP_WORK_SEARCH=on)", () => {
     const stored = (await db.query<{ adhoc_query: RunInput }>("select adhoc_query from runs where id=$1", [id])).rows[0].adhoc_query;
     expect(stored.brief?.uses.map((u) => u.name)).toEqual(["LNG liquefaction plant", "NGL fractionation plant", "air separation plant"]);
     const said = (await db.query<{ message: string }>("select message from run_events where run_id=$1", [id])).rows.map((r) => r.message).join("\n");
-    expect(said).toMatch(/Looking for companies doing: LNG liquefaction plant · NGL fractionation plant · air separation plant\. Not: water networks · valve traders/);
+    expect(said).toMatch(/We understood: Cryogenic valves. Searching open tenders for it, and companies doing: LNG liquefaction plant · NGL fractionation plant · air separation plant. Not: water networks · valve traders/);
     expect((await sessionFor(db, id))?.state).toBe("active");
   });
   it("falls back to the catalogue brief without AI, and still plans searches", async () => {

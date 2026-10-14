@@ -1,6 +1,7 @@
 import type { SearchBrief } from '@/mvp/discovery/brief';
 import { namesWork } from '@/mvp/discovery/brief';
-import { buyerPageCandidate } from '@/mvp/discovery/plan';
+import { buyerPageCandidate, namesItem } from '@/mvp/discovery/plan';
+import { tenderWording } from '@/mvp/sourcing/tender-sources';
 import { NEED_WINDOW_MONTHS } from './need';
 
 /** Locate the first actual business paragraph past short menus. This is an
@@ -25,6 +26,10 @@ export function articleAnalysisText(text:string):string {
  * search snippets are introduced; quotes still validate against the full saved
  * original. Prefer actual contract/installation scope to industry navigation. */
 export function workAnalysisText(text:string,brief:SearchBrief,limit=4500):string {
+  // docs/mvp/22: a tender list shows each tender as its own lines (title, agency, due date): those blocks, not the
+  // page's menus, are what the check reads (live probe, 14 Oct: tender18 listings sat after 100 lines of navigation).
+  const tenders=tenderListingBlocks(text,brief);
+  if(tenders.length)return [text.slice(0,200),...tenders].join('\n').slice(0,limit);
   const paragraphs=text.split(/\n+/);
   const score=(p:string)=>/\b(?:awarded|won|wins|secured|signed|received.{0,25}contract)\b/i.test(p)?30:
     /\b(?:EPC|procurement|fabrication|installation|maintenance contract)\b/i.test(p)?20:
@@ -41,6 +46,24 @@ export function workAnalysisText(text:string,brief:SearchBrief,limit=4500):strin
     selected.add(index);spans.push(p);used+=p.length+1;
   }
   return spans.join('\n');
+}
+/**
+ * One block per tender on a tender list page: the lines around a title naming the item (reference, location, title,
+ * buying agency, due date), joined by spaces so the quote still matches the original's whitespace. Only blocks that
+ * carry a buyer or date label ("Agency / Dept", "Due Date"…), so marketing text about the item is never a tender.
+ */
+export function tenderListingBlocks(text:string,brief:SearchBrief,max=8):string[] {
+  if(!brief.productId||!tenderWording(text))return [];
+  const lines=text.split('\n'),blocks:string[]=[];
+  let last=-1;
+  for(let i=0;i<lines.length&&blocks.length<max;i++){
+    const line=lines[i];
+    if(i<=last||line.length>600||!namesItem(line,brief.productId,brief,true))continue;
+    const from=Math.max(0,i-4,last+1),to=Math.min(lines.length,i+7);
+    const block=lines.slice(from,to).map(l=>l.trim()).filter(Boolean).join(' ');
+    if(block.length>=40&&block.length<=900&&/\b(?:agency|dept|department|organi[sz]ation|buyer|purchaser|due date|closing date|bid end|last date|opening date)\b/i.test(block)){blocks.push(block);last=to-1;}
+  }
+  return blocks;
 }
 /** Paragraph references let a provider select literal source text rather than
  * regenerate it. The returned paragraph is still verified against storage. */

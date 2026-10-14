@@ -4,6 +4,9 @@ import { hasTerm, mentionsPhysicalPipeline,MARKET_TERMS } from "@/mvp/pipeline/f
 import type { RunInput } from "@/mvp/types";
 import type { RawDoc } from "@/mvp/pipeline/contracts";
 import { MATERIAL_ACTIVITIES } from "./material";
+import { isSearchItemId, itemPhrases, itemWordsOf } from "./item";
+import type { CatalogueItem } from "@/mvp/config/buyers-config";
+import { tenderWording } from "@/mvp/sourcing/tender-sources";
 
 /** Buying activities, not product sellers. Broad search terms never prove exact product fit. */
 export function buyingActivities(productId: string): string[] { return [...(MATERIAL_ACTIVITIES[productId] ?? [])]; }
@@ -39,7 +42,9 @@ export function researchBudget(input?:BudgetInput) {
 export function queryBudget(input?:BudgetInput): number {
   return researchBudget(input).searchQueries;
 }
-export interface PlannedBuyerQuery {key:string;market:string;lane:"company"|"project"|"activity"|"directory"|"news";activityIndex:number;query:string;includeDomains?:string[];timeRange?:"year";topic?:'news'|'general';days?:number;sourcingLane?:'trigger'|'roundup'|'capability'}
+export interface PlannedBuyerQuery {key:string;market:string;lane:"company"|"project"|"activity"|"directory"|"news";activityIndex:number;query:string;includeDomains?:string[];timeRange?:"year"|"month";topic?:'news'|'general';days?:number;sourcingLane?:'trigger'|'roundup'|'capability';
+  /** docs/mvp/22: a tender search (results are tender candidates) that asks the provider for the page text it read. */
+  tender?:boolean;rawContent?:boolean}
 export function buyerQueries(input: RunInput) {
   const product = input.productId ? getCatalogueItem(input.productId) : undefined;
   const term = input.query.trim() || product?.shortName || '';
@@ -95,9 +100,26 @@ function supportsActivity(section:string,activity:string):boolean {
     const present=activityWords(clause);return [...required].every(word=>present.has(word));
   });
 }
+/** Single words that name many things outside industry ("vessel" is a ship, "fan" a supporter). */
+const AMBIGUOUS_ITEM_WORDS=new Set(["vessel","vessels","fan","fans","separator","separators","tank","tanks","drum","drums","column","columns","tower","towers",
+  "filter","filters","motor","motors","panel","panels","box","boxes","pump","pumps","line","lines","unit","units","system","systems","part","parts","equipment"]);
+const INDUSTRIAL_CONTEXT=/\b(?:plants?|projects?|tenders?|rfq|supply|procure\w*|process|industrial|refiner\w*|petrochemical\w*|oil|gas|power|water|wastewater|sewage|ventilation|hvac|cement|mining|chemical\w*|fertili[sz]er\w*|desalination|epc|contract\w*|install\w*|equipment|factor(?:y|ies)|metro|tunnels?|boilers?|compressors?|mechanical)\b/i;
+/**
+ * A typed search item (docs/mvp/22 §3.2) is named when a source section contains one of its phrases (plural or
+ * singular, punctuation-insensitive: "twin-lobe blower" = "twin lobe blower"). A one-word item counts only beside
+ * industrial context, and never when the word is ambiguous on its own or part of "whistle-blower".
+ */
+function searchItemEvidence(text:string,item:CatalogueItem):MaterialEvidenceKind {
+  const sections=materialSections(text).map(section=>({raw:section,words:` ${itemWordsOf(section)} `}));
+  const phrases=item.keywords.filter(k=>k.includes(" "));
+  if(sections.some(s=>phrases.some(p=>s.words.includes(` ${p} `))))return "explicit";
+  const singles=item.keywords.filter(k=>!k.includes(" ")&&k.length>=5&&!/\d/.test(k)&&!AMBIGUOUS_ITEM_WORDS.has(k));
+  return sections.some(s=>INDUSTRIAL_CONTEXT.test(s.raw)&&singles.some(w=>s.words.includes(` ${w} `)&&!s.words.includes(` whistle ${w} `)))?"explicit":"none";
+}
 /** Classifies source wording; application is a supported inference, not an exact grade or RFQ. */
 export function materialEvidenceKind(text:string,productId:string):MaterialEvidenceKind {
   const product=getCatalogueItem(productId);if(!product)return "none";
+  if(isSearchItemId(productId))return searchItemEvidence(text,product);
   const sections=materialSections(text);
   const keywords=product.keywords.filter(term=>!AMBIGUOUS_TERMS.has(term.toLowerCase()));
   if(sections.some(section=>keywords.some(term=>hasTerm(section,term))))return "explicit";
@@ -129,6 +151,29 @@ export function materialEvidenceKind(text:string,productId:string):MaterialEvide
   }
   return "none";
 }
+/**
+ * Does the text name the item itself: its own words or keywords, or the search brief's name for it and its other
+ * names ("cryogenic valves" for a gate-valve search)? Only multi-word brief names count, never a lone "valves".
+ */
+export function namesItem(text:string,productId:string,brief?:{item:string;synonyms?:string[]}|null,loose=false):boolean {
+  if(materialEvidenceKind(text,productId)==="explicit")return true;
+  if(!brief)return false;
+  const words=` ${itemWordsOf(text)} `;
+  const phrases=[brief.item,...(brief.synonyms??[])].flatMap(itemPhrases).filter(p=>p.includes(" "));
+  if(phrases.some(p=>words.includes(` ${p} `)))return true;
+  // A tender title can split the name ("air cushion fan, type- centrifugal"): every word of the item, in one short span.
+  if(!loose||text.length>900)return false;
+  const has=(w:string)=>words.includes(` ${w} `)||words.includes(` ${w}s `)||words.includes(` ${w.replace(/s$/,"")} `);
+  return phrases.some(p=>p.split(" ").filter(w=>w.length>=3&&!/^\d/.test(w)).every(has));
+}
+/**
+ * docs/mvp/22 §3.6: an open tender, RFQ, bid invitation or supply order that names the item (or one of its other
+ * names). Demand in itself: its issuer is checked as a direct buyer. A tender page that does not name the item is not one.
+ */
+export function tenderForItem(text:string,productId:string,brief?:{item:string;synonyms?:string[]}|null):boolean {
+  if(!productId||!tenderWording(text))return false;
+  return namesItem(text.slice(0,8000),productId,brief);
+}
 export function exactProductEvidence(text: string, productId: string): boolean {
   // Compatibility name: true includes a supported application. Consumers must
   // use materialEvidenceKind to label inference rather than claim exact demand.
@@ -144,10 +189,16 @@ export function buyerPageCandidate(text: string, productId: string): boolean {
  * using/buying it as input or actually installing it still qualify. */
 export function materialOutputOnly(text:string,productId:string):boolean {
   const sections=materialSections(text);
-  const consumes=/\b(?:using|uses|consum\w*|purchas\w*|procur\w*|raw materials?|material inputs?|install\w*|erect\w*|pipeline construction|piping construction)\b/i;
+  // Buying wording, including a tender or RFQ "for supply of" the item (docs/mvp/22): never a seller's own output.
+  const consumes=/\b(?:using|uses|consum\w*|purchas\w*|procur\w*|raw materials?|material inputs?|install\w*|erect\w*|pipeline construction|piping construction|tenders?|e-?tender\w*|rfq|bids? (?:are )?invited|invites? (?:bids?|tenders?|e-?tenders?|quotations?|offers?)|enquir\w*)\b/i;
   if(sections.some(section=>consumes.test(section)&&materialEvidenceKind(section,productId)!=='none'))return false;
+  // A typed item's own makers, fabricators and suppliers sell it (live run, 14 Oct: a metal fabricator was saved as a
+  // pressure-vessel buyer); for catalogue materials, fabricating with them still consumes them.
+  const makes=isSearchItemId(productId)
+    ?/\b(?:manufactur\w*|produc\w*|fabricat\w*|suppliers?|vendors?|exporters?|makers?|stockists?|distributors?)\b[^.;\n]{0,220}/ig
+    :/\b(?:manufactur\w*|produc\w*|pipe mills?|stockists?|distributors?)\b[^.;\n]{0,220}/ig;
   return sections.some(section=>{
-    const output=section.match(/\b(?:manufactur\w*|produc\w*|pipe mills?|stockists?|distributors?)\b[^.;\n]{0,220}/ig)??[];
+    const output=section.match(makes)??[];
     return output.some(clause=>materialEvidenceKind(clause.replace(/\bpipes\b/ig,'pipe'),productId)==='explicit')
       && !consumes.test(section);
   });
@@ -162,7 +213,9 @@ export function buyerResearchPriority(raw:RawDoc,text:string,input:RunInput):num
   if(input.markets.some(code=>[COUNTRIES.find(c=>c.code===code)?.name??"",...(MARKET_TERMS[code as keyof typeof MARKET_TERMS]??[])]
     .filter(term=>term&&!/^(?:ongc|gail|aramco|adnoc|petronas|equinor|kongsberg)$/i.test(term)).some(term=>hasTerm(text,term))))score+=6;
   if(/\b(?:top \d+|market report|market size|cagr)\b/i.test(title))score-=20;
-  if(/tender|\/amp\//i.test(raw.url)||/\b(?:terminat\w*|cancelled|stalled)\b/i.test(title))score-=20;
+  // An open tender naming the item is read first; any other tender page (or an AMP copy) last.
+  if(tenderForItem(`${title}\n${text}`,input.productId??"",input.brief))score+=18;
+  else if(/tender|\/amp\//i.test(raw.url)||/\b(?:terminat\w*|cancelled|stalled)\b/i.test(title))score-=20;
   if(/\b(?:pipe manufacturer|pipe mill|stockist|distributor)\b/i.test(title))score-=25;
   return score;
 }

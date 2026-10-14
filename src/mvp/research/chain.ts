@@ -21,10 +21,10 @@ export const CHAIN_MIN_RATING = 60;
 export interface ChainParent { candidateId: string; company: string }
 
 /** "McDermott pipeline construction subcontractor" — the work that needs the material, plus "subcontractor". */
-export function chainQuery(company: string, input: Pick<RunInput, 'productId' | 'query'>): string {
+export function chainQuery(company: string, input: Pick<RunInput, 'productId' | 'query' | 'brief'>): string {
   const spec = parseMaterialSpec(input.query ?? '');
   const use = hasSpec(spec) ? specUses(input.productId ?? '', spec)[0] : undefined;
-  const work = use ?? MATERIAL_ACTIVITIES[input.productId ?? '']?.[0] ?? getCatalogueItem(input.productId ?? '')?.shortName ?? 'piping';
+  const work = use ?? MATERIAL_ACTIVITIES[input.productId ?? '']?.[0] ?? input.brief?.uses[0]?.name ?? getCatalogueItem(input.productId ?? '')?.shortName ?? 'piping';
   return `"${company.replace(/"/g, '')}" ${work} subcontractor`;
 }
 

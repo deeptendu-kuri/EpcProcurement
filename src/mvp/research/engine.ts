@@ -1,7 +1,9 @@
 import { getDb, type Db } from '@/mvp/db';
 import type { RunInput } from '@/mvp/types';
 import { getClientProfile } from '@/mvp/config/profile';
-import { buyerPageCandidate, buyerResearchPriority } from '@/mvp/discovery/plan';
+import { buyerPageCandidate, buyerResearchPriority, tenderForItem } from '@/mvp/discovery/plan';
+import { registerSearchItemTerms } from '@/mvp/discovery/item';
+import { TENDER_AI_PAGES_PER_COUNTRY, TENDER_AI_TOKENS_PER_COUNTRY, TENDER_SEARCHES_PER_COUNTRY } from '@/mvp/sourcing/tender-sources';
 import { discoverBuyers, saveBuyer, DISCOVERY_VERSION } from '@/mvp/discovery';
 import type { RawDoc, Source, SourceContext } from '@/mvp/pipeline/contracts';
 import { fetchPageText, storeDocument } from '@/mvp/pipeline/read';
@@ -71,6 +73,9 @@ export const productionResearchDeps:ResearchDeps={
       return collectRegistry(entry,ctx.input);
     }
     if(source==='directory-seed')return [payload.raw as RawDoc];
+    // docs/mvp/22 §3.11: a tender list page, read as it is (the read step fetches it).
+    if(source==='tender-page')return [{sourceKey:'tender-page',sourceName:String(payload.query??'Tender list'),tier:'B',url:String(payload.url),title:null,publishedAt:null,text:null,
+      isSample:false,market:String(payload.market),research:{lane:'news',tender:true}}];
     if(source==='tavily')return collectTavilyQuery(ctx,payload.query as Parameters<typeof collectTavilyQuery>[1]);
     if(source==='bing-query')return collectBingQuery(ctx,String(payload.market),String(payload.query));
     if(source==='local-news')return collectLocalNews(ctx,payload as Parameters<typeof collectLocalNews>[1]);
@@ -96,6 +101,8 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
   const session=await sessionFor(db,job.run_id);
   const input=(await db.query<{adhoc_query:RunInput}>('select adhoc_query from runs where id=$1',[job.run_id])).rows[0].adhoc_query;
   if(!session)return {processed:false};
+  // docs/mvp/22: a typed item's other names (from its brief) count as naming it in every step of this search.
+  registerSearchItemTerms(input.productId,[...(input.brief?.synonyms??[]),...(input.brief?.source==='ai'?[input.brief.item]:[])]);
   try{
     if(job.stage==='collect'){
       const ctx:SourceContext={db,runId:job.run_id,input,profile:getClientProfile(),terms:queryTerms(input.query),log:m=>researchProgress(db,job.run_id,'info',m).then(()=>undefined)};
@@ -126,19 +133,25 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
           // docs/mvp/20: a project's follow-ups have their own small allowance (2 projects x 3 searches per country),
           // so the most productive searches are not crowded out by the first award searches.
           const followUp=job.key.startsWith('follow:');
-          const reservation=await reserveBudget(db,job.run_id,followUp?'follow_search':'search',job.key,1,followUp?FOLLOW_SEARCHES_PER_COUNTRY*input.markets.length:session.budget.searchQueries);
+          // docs/mvp/22: open-tender searches have their own small allowance too (two per country), so tenders never
+          // crowd out the award, contractor-list and company searches.
+          const tender=!followUp&&job.key.includes(':tender:');
+          const kind=followUp?'follow_search':tender?'tender_search':'search';
+          const reservation=await reserveBudget(db,job.run_id,kind,job.key,1,followUp?FOLLOW_SEARCHES_PER_COUNTRY*input.markets.length:tender?TENDER_SEARCHES_PER_COUNTRY*input.markets.length:session.budget.searchQueries);
           if(reservation==='exhausted'){
             await completeJob(db,job,{skipped:'Tavily query budget',budgetLimited:true});
             await researchProgress(db,job.run_id,'info','Tavily coverage limit reached; saved pages and free sources continue.');return {processed:true};
           }
           if(reservation==='existing'){await parkJob(db,job,'A previous search request has no committed response; manual review is required before repeating a charged query.');return {processed:true,paused:true};}
-          try{docs=await deps.collect(source,ctx,job.payload);await markBudget(db,job.run_id,followUp?'follow_search':'search',job.key,'completed');}
-          catch(error){await markBudget(db,job.run_id,followUp?'follow_search':'search',job.key,'unknown');throw error;}
+          try{docs=await deps.collect(source,ctx,job.payload);await markBudget(db,job.run_id,kind,job.key,'completed');}
+          catch(error){await markBudget(db,job.run_id,kind,job.key,'unknown');throw error;}
         }
       }else docs=await deps.collect(source,ctx,job.payload);
       if(news)await markBudget(db,job.run_id,'bing_search',job.key,'completed');
       if(job.payload.chainParent)docs=docs.map(raw=>({...raw,research:{lane:'directory',...raw.research,chainParent:job.payload.chainParent as {candidateId:string;company:string}}}));
       if(job.payload.sourcingLane)docs=docs.map(raw=>({...raw,research:{lane:job.payload.sourcingLane==='trigger'?'news':job.payload.sourcingLane==='roundup'?'directory':'company',...raw.research,sourcingLane:job.payload.sourcingLane as 'trigger'|'roundup'|'capability'}}));
+      // docs/mvp/22: everything an open-tender search finds is a tender candidate (its page is checked for the item).
+      if(job.key.includes(':tender:'))docs=docs.map(raw=>({...raw,research:{lane:'news' as const,...raw.research,tender:true}}));
       await enqueueRawDocs(db,job,docs,session.budget.maxPages);
       await researchProgress(db,job.run_id,'collect',`${source}: ${docs.length} original-page candidates. Discovery is saved; contact validation is separate.`);
     }else if(job.stage==='read'){
@@ -153,36 +166,46 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
       if(reservation==='exhausted'){await completeJob(db,job,{budgetLimited:true,skipped:'Page-read budget exhausted.'});await finishIdleResearch(db,job.run_id);return {processed:true,budgetLimited:true};}
       let text=raw.text,title=raw.title,publishedAt=raw.publishedAt;
       let links:{url:string;text:string}[]=[];let tables:string[][][]=[];let format='html';let truncated=false;let pdfPages=0;let finalUrl=raw.url;
+      let searchTextOnly=false;
       if(!text){
         const used=(await db.query<{units:number}>("select coalesce(sum(units),0)::int as units from research_budget_reservations where run_id=$1 and kind='pdf_pages'",[job.run_id])).rows[0].units;
         const page=await deps.read(raw.url,{fullPage:true,maxPdfPages:Math.max(0,Math.min(10,20-used)),allowUrl:url=>!junkReason(url,null,input.markets)});
-        if(!page.ok){
+        // docs/mvp/21 §D3: tender portals often refuse automated readers (captcha, 403). An open-tender result whose own
+        // search text names the item is kept as that text, labelled so; never for any other kind of page.
+        const searchText=!page.ok&&raw.research?.tender&&raw.research.searchPreview?`${raw.title??''}\n${raw.research.searchPreview}`:null;
+        if(searchText&&tenderForItem(searchText,input.productId!,input.brief)){text=searchText;searchTextOnly=true;}
+        else if(!page.ok){
           const warning=raw.research?.registryId?registryReadWarning(raw.research.registryId,page.reason,page.detail):{};
           await completeJob(db,job,{unreadable:true,failureReason:page.reason,...warning});await markBudget(db,job.run_id,'read',job.key,'completed');
           if('requiresManualFetch' in warning&&warning.requiresManualFetch)await researchProgress(db,job.run_id,'info',`Registry ${raw.research?.registryId}: HTTP 403 requiresManualFetch. No access-control bypass was attempted.`);
           if(raw.research?.candidateId)await db.query("update research_candidates set state='unreadable',reason=$2 where id=$1 and run_id=$3",[raw.research.candidateId,`Website read failed (${page.reason}); company research retained.`,job.run_id]);
           await researchProgress(db,job.run_id,'read',`Source read failed (${page.reason}); no invented content substituted.`);return {processed:true};
-        }
+        }else if(page.ok){
         text=page.title&&!page.text.includes(page.title)?`${page.title}\n${page.text}`:page.text;title=page.title??title;publishedAt=page.publishedAt??publishedAt;
         links=page.links??[];tables=page.tables??[];format=page.format??'html';truncated=Boolean(page.truncated);pdfPages=page.pages?.length??0;finalUrl=page.finalUrl??raw.url;
         if(pdfPages){await reserveBudget(db,job.run_id,'pdf_pages',job.key,pdfPages,20);await markBudget(db,job.run_id,'pdf_pages',job.key,'completed');}
+        }
       }
       // storeDocument deduplicates content/URL; all later quotes retain the stored original's provenance.
       publishedAt=pagePublishedAt(text??'',publishedAt??null);
-      const stored=await storeDocument(db,job.run_id,{...raw,url:finalUrl,text,title,publishedAt,publisherKey:raw.publisherKey??publisherKeyFor(finalUrl)});
+      const stored=await storeDocument(db,job.run_id,{...raw,url:finalUrl,text:text??'',title,publishedAt,publisherKey:raw.publisherKey??publisherKeyFor(finalUrl),
+        ...(searchTextOnly?{sourceName:`${raw.sourceName} (search result text: the tender page refuses automated reading; open the link for the full notice)`}:{})});
       await db.query('insert into run_documents(run_id,document_id) values($1,$2) on conflict do nothing',[job.run_id,stored.id]);
       const original=(await db.query<{url:string;title:string|null;source_key:string;source_name:string;tier:RawDoc['tier'];published_at:string|null;is_sample:boolean}>('select url,title,source_key,source_name,tier,published_at,is_sample from source_documents where id=$1',[stored.id])).rows[0];
       const grounded:RawDoc={...raw,url:original.url,title:original.title,text:stored.text,publishedAt:original.published_at,sourceKey:original.source_key,sourceName:original.source_name,tier:original.tier,isSample:original.is_sample};
       const pageKind=classifyPage({url:grounded.url,title:grounded.title,text:stored.text,tables,registryId:raw.research?.registryId,markets:input.markets});
       grounded.research={...grounded.research,lane:grounded.research?.lane??'company',pageKind};
       const list=pageKind==='roundup'||pageKind==='directory';
-      const articleSkip=!raw.structured&&['article','tender_notice','filing'].includes(pageKind)
+      // docs/mvp/22: an open tender, RFQ or supply order that names the item is demand in itself; its issuer is checked
+      // as a direct buyer, never skipped as "no consuming work".
+      const tenderPage=pageKind!=='junk'&&!list&&tenderForItem(`${grounded.title??''}\n${stored.text}`,input.productId!,input.brief);
+      const articleSkip=!raw.structured&&!tenderPage&&['article','tender_notice','filing'].includes(pageKind)
         ?articleResearchReason({text:stored.text,title:grounded.title,publishedAt:grounded.publishedAt},input.productId!,input.brief):null;
       // docs/mvp/20: in a work-based search a page about the work that uses the item qualifies too (news names
       // the project, not the valve); the need check then decides who buys.
       const workPage=Boolean(input.brief?.uses.length&&namesWork(articleAnalysisText(stored.text),input.brief));
-      const candidate=pageKind!=='junk'&&!list&&!articleSkip&&(buyerPageCandidate(stored.text,input.productId!)||workPage)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
-      const award=Boolean(raw.structured)||candidate&&['article','tender_notice','filing'].includes(pageKind);
+      const candidate=pageKind!=='junk'&&!list&&!articleSkip&&(buyerPageCandidate(stored.text,input.productId!)||workPage||tenderPage)&&!/\/(?:jobs?|careers)(?:[/-]|$)/i.test(new URL(grounded.url).pathname);
+      const award=Boolean(raw.structured)||candidate&&(['article','tender_notice','filing'].includes(pageKind)||tenderPage);
       let associated=award||list||articleSkip?null:await candidateForPage(db,job.run_id,grounded);
       if(pageKind!=='junk'&&!list&&!award&&!articleSkip&&!associated){
         const seeded=await seedInvestigations(db,job.run_id,input,stored.id,grounded,stored.text,title,session.budget);
@@ -220,13 +243,14 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
       const repeat=award&&!raw.structured&&(await db.query<{title:string|null}>("select payload->'raw'->>'title' as title from research_jobs where run_id=$1 and stage='analyse' and payload->>'kind'='analyse:award'",[job.run_id])).rows.some(r=>sameStory(r.title,grounded.title));
       const next:Parameters<typeof completeJob>[3]=list?
         [{stage:'analyse',key:`roundup:${stored.id}`,payload:{kind:'analyse:roundup',documentId:stored.id,raw:grounded},priority:EXTRACTOR_PRIORITY[pageKind]}]:award?
-        [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded},priority:repeat?REPEAT_STORY_PRIORITY:input.brief?1300:EXTRACTOR_PRIORITY[pageKind]}]:
+        [{stage:'analyse',key:`award:${stored.id}`,payload:{kind:'analyse:award',documentId:stored.id,raw:grounded,...(tenderPage?{tender:true}:{})},priority:repeat?REPEAT_STORY_PRIORITY:tenderPage?1350:input.brief?1300:EXTRACTOR_PRIORITY[pageKind]}]:
         candidate&&workPage?[{stage:'analyse',key:`work:${stored.id}`,payload:{kind:'analyse:work',documentId:stored.id,raw:grounded},priority:input.brief?1300:EXTRACTOR_PRIORITY.company_site+100}]:
         candidate&&!scoped&&raw.research?.lane!=='directory'?[{stage:'analyse',key:stored.id,payload:{documentId:stored.id,raw:grounded},priority:Math.max(EXTRACTOR_PRIORITY.company_site,buyerResearchPriority(grounded,stored.text,input))}]:[];
       await completeJob(db,job,{documentId:stored.id,candidate,award,pageKind,format,truncated,pdfPages,paginationLimited,requestedUrl:raw.url,finalUrl},next);
       await markBudget(db,job.run_id,'read',job.key,'completed');
       if(articleSkip)await researchProgress(db,job.run_id,'info',`No AI spent on this article: ${articleSkip}`);
-      await researchProgress(db,job.run_id,'read',`Original page saved${candidate?' for company/material analysis':''}.`);
+      await researchProgress(db,job.run_id,'read',tenderPage?`Tender for ${input.brief?.item??'the item'} found${searchTextOnly?' (from its search result; the portal refuses automated reading)':''}: checking who is buying.`
+        :`Original page saved${candidate?' for company/material analysis':''}.`);
     }else if(job.stage==='analyse'){
       if(job.payload.kind==='analyse:brief'){
         // docs/mvp/20: the search brief, grounded in recent news from his countries (budgeted, cached searches),
@@ -252,6 +276,7 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         const provider=deps.briefProvider??budgetedAwardProviders(db,job.run_id,'brief',session.budget).provider('extract_a','openai/gpt-oss-120b');
         const brief=await getSearchBrief(db,{material:input.query,markets:input.markets,productId:input.productId??null},provider,ground,job.run_id);
         const planned={...input,brief};
+        registerSearchItemTerms(input.productId,[...(brief.synonyms??[]),...(brief.source==='ai'?[brief.item]:[])]);
         const jobs=plannedCollectJobs(planned,session.budget);
         if(!await db.tx(async tx=>{
           if(!await owned(tx,job))return false;
@@ -269,7 +294,11 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         // Retain URLs not yet admitted too; idle admission can reuse them with
         // zero provider calls after the initial country-balanced pages drain.
         await completeJob(db,job,{brief:{source:brief.source,uses:brief.uses.map(u=>u.name)},docs:groundDocs},jobs);
-        await researchProgress(db,job.run_id,'check',`Looking for companies doing: ${brief.uses.map(u=>u.name).join(' · ')}${brief.notBuyers.length?`. Not: ${brief.notBuyers.slice(0,3).join(' · ')}`:''}. ${jobs.length} searches planned.`);
+        const kind=brief.kind&&brief.kind!=='other'?` (${brief.kind.replace(/_/g,' ')})`:'';
+        const aka=brief.synonyms?.length?`, also called ${brief.synonyms.slice(0,3).join(' · ')}`:'';
+        await researchProgress(db,job.run_id,'check',brief.source==='ai'
+          ?`We understood: ${brief.item}${kind}${aka}. Searching open tenders for it, and companies doing: ${brief.uses.map(u=>u.name).join(' · ')}${brief.makers?.length?`. Not buyers (they make or sell it): ${brief.makers.slice(0,3).join(' · ')}`:brief.notBuyers.length?`. Not: ${brief.notBuyers.slice(0,3).join(' · ')}`:''}. ${jobs.length} searches planned.`
+          :`The AI could not describe the work that uses ${brief.item}; searching open tenders and direct mentions of it${brief.uses.length?`, and companies doing: ${brief.uses.map(u=>u.name).join(' · ')}`:''}. ${jobs.length} searches planned.`);
         return {processed:true};
       }
       if(job.payload.kind==='analyse:work'){
@@ -328,12 +357,16 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         if(!doc?.text||doc.url!==raw.url)throw new Error('Saved award original is unavailable.');
         // A stored response is a recovery checkpoint: resolution can be replayed without another paid call.
         const previous=(await db.query<{result:{extracted?:Awaited<ReturnType<typeof extractDocument>>;needAnswer?:string}|null}>('select result from research_jobs where id=$1',[job.id])).rows[0]?.result;
-        const providers=budgetedAwardProviders(db,job.run_id,id,session.budget);
+        const providers=budgetedAwardProviders(db,job.run_id,id,analysisBudget(session.budget,input.markets.length,Boolean(job.payload.tender)));
         // Decide whether anyone buys THIS material before paying for project,
         // scope and comparison extraction. Keep the answer as a recovery checkpoint.
-        const workNeed=input.brief?.uses.length?await checkNeed(db,job.run_id,id,
-          {text:doc.text,url:doc.url,title:raw.title??null,publishedAt:doc.published_at},input.brief,input.markets,
+        const needCheck=Boolean(input.brief&&(input.brief.uses.length||job.payload.tender));
+        const workNeed=needCheck?await checkNeed(db,job.run_id,id,
+          {text:doc.text,url:doc.url,title:raw.title??null,publishedAt:doc.published_at},input.brief!,input.markets,
           deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b'),previous?.needAnswer??job.payload.needAnswer as string|undefined).catch(async error=>{
+            // An AI rate limit is a wait, not a verdict (live run, 14 Oct: free-tier 429s silently dropped tender and award
+            // pages): rethrown, this step retries after the limit like every other AI step.
+            if(rateLimited(error))throw error;
             await researchProgress(db,job.run_id,'info',`Need check unavailable: ${error instanceof Error?error.message.slice(0,120):'error'}.`);
             return {result:null,answer:null};}):null;
         if(workNeed?.answer)await db.query("update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2",[job.id,job.lease_token,workNeed.answer]);
@@ -343,6 +376,8 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
           for(const prior of await recheckRelatedNeeds(db,job.run_id,doc.text,input.brief!,input.markets,deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b')))
             await registerNeedCandidates(db,job.run_id,prior.documentId,prior.result);
           const saved=await saveLikelyBuyers(db,job.run_id,input);
+          const tenderBuyers=workNeed.result.companies.filter(c=>c.verdict==='lead'&&c.role==='direct_buyer');
+          if(tenderBuyers.length)await researchProgress(db,job.run_id,'check',`Open demand: ${tenderBuyers.map(c=>c.name).join(', ')} ${tenderBuyers.length===1?'is':'are'} buying ${input.brief!.item} (tender or order on the source).`);
           if(saved.saved)await researchProgress(db,job.run_id,'check',`Saved ${saved.saved} source-backed potential buyers before project extraction. Contacts and exact specifications remain unconfirmed.`);
           if(!workNeed.result.companies.some(c=>['lead','owner'].includes(c.verdict))){
             await completeJob(db,job,{needAnswer:workNeed.answer,skipped:'No relevant buying work; project/contact passes not requested.'});
@@ -354,20 +389,20 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         // must not spend 3-4 extra calls on the first story ahead of other work.
         // The durable follow-on keeps the exact answer and original; no second
         // paid need check, new schema or provider architecture is introduced.
-        if(input.brief?.uses.length&&job.payload.kind==='analyse:award'){
+        if(needCheck&&job.payload.kind==='analyse:award'){
           if(!workNeed?.result||!workNeed.answer){
             await completeJob(db,job,{needAnswer:workNeed?.answer??null,budgetLimited:true,skipped:'Need check unavailable; no speculative buyer or further paid extraction.'});
           }else{
             const follow=process.env.TAVILY_API_KEY?.trim()?await projectsToFollow(db,job.run_id,workNeed.result):[];
             const next:{stage:'collect'|'analyse';key:string;payload:Record<string,unknown>;priority:number}[]=[
-              {stage:'analyse',key:`award-details:${id}`,payload:{kind:'analyse:award-details',documentId:id,raw,needAnswer:workNeed.answer},priority:200},
+              {stage:'analyse',key:`award-details:${id}`,payload:{kind:'analyse:award-details',documentId:id,raw,needAnswer:workNeed.answer,...(job.payload.tender?{tender:true}:{})},priority:200},
             ];
-            for(const {project,market} of follow)for(const [n,query] of followUpQueries(project,input.brief.item).entries())
+            for(const {project,market} of follow)for(const [n,query] of followUpQueries(project,input.brief!.item).entries())
               next.push({stage:'collect',key:followKey(market,project,n),payload:{source:'tavily',sourcingLane:'trigger',
                 query:{key:followKey(market,project,n),market,lane:'news',activityIndex:0,query,topic:'general',sourcingLane:'trigger'}},priority:300});
             const accepted=workNeed.result.companies.filter(c=>c.verdict==='lead');
             await completeJob(db,job,{needAnswer:workNeed.answer,accepted:accepted.map(c=>c.name),detailsDeferred:true},next);
-            await researchProgress(db,job.run_id,'check',`${workNeed.result.project??'Work'}: ${accepted.length} potential ${input.brief.item} buyers saved from evidence. Other countries checked before optional project details.`);
+            await researchProgress(db,job.run_id,'check',`${workNeed.result.project??'Work'}: ${accepted.length} potential ${input.brief!.item} buyers saved from evidence. Other countries checked before optional project details.`);
           }
           await finishIdleResearch(db,job.run_id);return {processed:true,runId:job.run_id};
         }
@@ -384,12 +419,13 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
         if(!resolved)return {processed:true,stale:true};
         const triggers=await persistAwardTriggers(db,job.run_id,input.productId!,await awardTriggerSnapshots(db,id));
         // Without AI (catalogue brief) the need check cannot judge: award winners follow today's path.
-        if(input.brief?.uses.length){
+        if(needCheck&&input.brief){
           // docs/mvp/20: the need check decides. Only companies doing work that needs the item, in his countries,
           // recently, with a verified sentence join the shortlist; the answer is kept so a replay costs nothing.
           const saved=(previous as {needAnswer?:string}|undefined)?.needAnswer??null;
           const need=workNeed??await checkNeed(db,job.run_id,id,{text:doc.text,url:doc.url,title:raw.title??null,publishedAt:doc.published_at},input.brief,input.markets,
             deps.needProvider??providers.provider('extract_a','openai/gpt-oss-120b'),saved).catch(async error=>{
+              if(rateLimited(error))throw error;
               await researchProgress(db,job.run_id,'info',`Need check skipped for one article: ${error instanceof Error?error.message.slice(0,120):'error'}.`);
               return {result:null,answer:null};});
           if(need.answer)await db.query(`update research_jobs set result=coalesce(result,'{}'::jsonb)||jsonb_build_object('needAnswer',$3::text) where id=$1 and lease_token=$2`,[job.id,job.lease_token,need.answer]);
@@ -509,6 +545,17 @@ async function processJob(db:Db,deps:ResearchDeps,job:ResearchJob) {
     await finishIdleResearch(db,job.run_id);
     return {processed:true,failed:true};
   }
+}
+/**
+ * docs/mvp/22: a tender page's check gets a small AI allowance on top of the search's own (live run, 14 Oct: Quick
+ * searches spent all 20 AI pages on news before any tender page was checked).
+ */
+/** An AI provider's rate or quota limit (per minute or per day): handled by waiting and retrying, never as an answer. */
+export function rateLimited(error:unknown):boolean {
+  return error instanceof QuotaExceededError||error instanceof LLMHttpError&&error.status===429||error instanceof Error&&/\b429\b|rate.?limit/i.test(error.message);
+}
+export function analysisBudget(budget:ResearchBudget,markets:number,tender:boolean):ResearchBudget {
+  return tender?{...budget,maxAiPages:budget.maxAiPages+TENDER_AI_PAGES_PER_COUNTRY*markets,maxAiTokens:budget.maxAiTokens+TENDER_AI_TOKENS_PER_COUNTRY*markets}:budget;
 }
 export async function finishIdleResearch(db:Db=getDb(),runId?:string) {
   const active=runId?[runId]:(await db.query<{run_id:string}>("select run_id from research_sessions where state='active' order by created_at limit 20")).rows.map(s=>s.run_id);

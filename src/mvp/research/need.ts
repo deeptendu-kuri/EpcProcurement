@@ -14,17 +14,38 @@ import { originalQuote,companyNames,namesCompany as literalNamesCompany } from '
 import { detectCountry, detectMarkets } from '@/mvp/pipeline/filter';
 import { matchUse, type SearchBrief } from '@/mvp/discovery/brief';
 import { companyKey, initialsOf, sameCompanyName } from './company-names';
-import { articleAnalysisText,workAnalysisParagraphs } from './relevance';
+import { articleAnalysisText,tenderListingBlocks,workAnalysisParagraphs } from './relevance';
 import { junkCompanyReason } from '@/mvp/sourcing/entities';
-import { materialOutputOnly } from '@/mvp/discovery/plan';
+import { materialOutputOnly, namesItem } from '@/mvp/discovery/plan';
+import { tenderWording } from '@/mvp/sourcing/tender-sources';
 import {currentWorkProof,namesProject,type CurrentWorkDocument,type CurrentWorkProof} from './current-work';
 import {ownDocumentIdentity} from './attribution';
 import {pagePublishedAt} from './page-date';
 import {missingMaterialOnly,potentialNeedReason,stainlessWorkApplication,sourceWorkApplication} from '@/mvp/discovery/potential-work';
 import {engineeringOnlySource} from '@/mvp/discovery/work-scope';
 
-export type NeedRole = 'owner' | 'developer' | 'epc' | 'jv_partner' | 'subcontractor' | 'maintenance_contractor' | 'seller_of_item' | 'other_supplier' | 'consultant' | 'investor' | 'other';
+export type NeedRole = 'owner' | 'developer' | 'epc' | 'jv_partner' | 'subcontractor' | 'maintenance_contractor' | 'direct_buyer' | 'seller_of_item' | 'other_supplier' | 'consultant' | 'investor' | 'other';
 export type Verdict = 'lead' | 'owner' | 'rejected';
+/** The use recorded for a direct buyer (its tender or order is the demand). */
+export const DIRECT_PURCHASE = 'direct purchase (tender or order)';
+/** Parts of the item or work on it, not the item (live probe, 14 Oct: the AI accepted impeller, pulley, spares and overhaul tenders). */
+const PART_OR_SERVICE = /\b(?:spares?|spare parts?|impellers?|pulleys?|bearings?|seals?|gaskets?|couplings?|repair(?:ing|s)?|overhaul(?:ing|s)?|refurbish\w*|recondition\w*|rewind\w*|servicing|annual maintenance|amc)\b/i;
+/**
+ * Not an organisation: a portal or sector label standing in for a hidden buyer (live run 6, 14 Oct: tendersniper's
+ * "Generation · GEM" listing became "Generation GEM"), or a catch-all ("Corporations And Associations And Others").
+ */
+export function maskedIssuer(name: string): boolean {
+  const n = name.replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+  return /\b(?:gem|cppp|e-?procure\w*|e-?tenders?|tenders?|portal|bidding support)\b/i.test(n) && !/\b(?:limited|ltd|corporation|company|board|authority|department|ministry|army|navy|air force|council)\b/i.test(n)
+    || /\band others\b/i.test(n)
+    || /^(?:defen[cs]e|generation|transmission|distribution|railways?|power|energy|oil (?:and|&) gas|central government|state government|psus?|government|others?|private|public sector)$/i.test(n);
+}
+/** A tender whose title is for parts of the item or work on it, unless the searched item is that part or service. */
+export function partOrServiceTender(text: string, pkg: string, item: string): boolean {
+  if (PART_OR_SERVICE.test(item)) return false;
+  const title = text.match(/\btender\s+for\s+([\s\S]{0,300}?)(?:\bAgency\b|\bDue Date\b|$)/i)?.[1] ?? pkg;
+  return PART_OR_SERVICE.test(title);
+}
 export interface NeedCompany { name: string; role: NeedRole; package: string; quote: string; quoteVerified: boolean; since: string | null; verdict: Verdict; reason: string; identityQuote?:string; applicationUse?:string }
 export interface NeedResult {
   project: string | null; country: string | null; market: string | null; date: string | null; use: string | null;
@@ -33,7 +54,7 @@ export interface NeedResult {
   currentWork?:CurrentWorkProof|null;
 }
 
-const ROLES = new Set<NeedRole>(['owner', 'developer', 'epc', 'jv_partner', 'subcontractor', 'maintenance_contractor', 'seller_of_item', 'other_supplier', 'consultant', 'investor', 'other']);
+const ROLES = new Set<NeedRole>(['owner', 'developer', 'epc', 'jv_partner', 'subcontractor', 'maintenance_contractor', 'direct_buyer', 'seller_of_item', 'other_supplier', 'consultant', 'investor', 'other']);
 /** Roles that buy the material for the work. */
 const DOES_WORK = new Set<NeedRole>(['epc', 'jv_partner', 'subcontractor', 'maintenance_contractor']);
 /** Makers and traders are recognised by trade words, never by the item's own words (§4 check 3). */
@@ -49,6 +70,11 @@ const CIVIL_ONLY = /^(?:(?:marine|heavy|general)\s+)?(?:civil|roads?|bridges?|dr
  * the award (smoke test, 10 Oct: the Ruwais LNG EPC, awarded early 2025 and built until 2028, was dropped at 18).
  */
 export const NEED_WINDOW_MONTHS = 30;
+/**
+ * docs/mvp/22 §3.7: a tender, RFQ or purchase order is demand only while it is current. Indexed tender pages go back
+ * a decade (doc 21 §D5), so a direct buyer needs a date on the source within this window.
+ */
+export const DIRECT_BUY_WINDOW_MONTHS = 12;
 
 const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.replace(/\s+/g, ' ').trim().slice(0, n) : '');
 /** Does the sentence name this company: its core name (legal suffixes dropped) or its initials? */
@@ -69,7 +95,7 @@ export function needPrompt(doc: { text: string; url: string; title: string | nul
   return {
     system: 'Extract facts only from the page text. Never invent. Reply with JSON only.',
     user: `Uses we care about: ${brief.uses.map((u) => u.name).join('; ')}.
-Item sold: ${brief.item}${brief.mustHave.length ? ` (must-have: ${brief.mustHave.join(', ')})` : ''}. Not buyers: ${brief.notBuyers.join('; ') || 'none listed'}.
+Item sold: ${brief.item}${brief.mustHave.length ? ` (must-have: ${brief.mustHave.join(', ')})` : ''}.${brief.synonyms?.length ? ` Also called: ${brief.synonyms.join('; ')}.` : ''} Not buyers: ${brief.notBuyers.join('; ') || 'none listed'}.${brief.makers?.length ? ` Makers and sellers of the item (competitors, never buyers): ${brief.makers.join('; ')}.` : ''}
 Page (${doc.publishedAt?.slice(0, 10) ?? 'undated'}) ${doc.url}
 Title: ${doc.title ?? ''}
 Source paragraphs (original text; choose the paragraph index, do not stitch headings or rewrite punctuation):
@@ -83,9 +109,11 @@ Return {"project": project name or null, "country": country where the work is do
 "needWhy": one line explaining that verdict,
   Treat this as a POTENTIAL engineering application, never a confirmed RFQ, exact grade, quantity or purchasing status unless a literal source quote explicitly establishes it. A plant using pipes does not establish ASTM A312 TP316L demand.
   A contract win is a stronger buying signal, NOT a requirement. Regular material-consuming work also qualifies. Do not reject a potential buyer for missing contract value, contact, email, exact specification or an unknown date; leave unknown facts null. Recency is ranked later.
-"companies": [{"name": company, "role": one of owner|developer|epc|jv_partner|subcontractor|maintenance_contractor|seller_of_item|other_supplier|consultant|investor|other, "package": what it does in this work, "quoteIndex": the integer index of the ONE paragraph proving this company's own work, "quote": optional exact sentence from that paragraph (no rewording, shortening or joining other headings), "since": "YYYY" or "YYYY-MM" when the text says when it got this work, else null,
+"companies": [{"name": company, "role": one of owner|developer|epc|jv_partner|subcontractor|maintenance_contractor|direct_buyer|seller_of_item|other_supplier|consultant|investor|other, "package": what it does in this work, "quoteIndex": the integer index of the ONE paragraph proving this company's own work, "quote": optional exact sentence from that paragraph (no rewording, shortening or joining other headings), "since": "YYYY" or "YYYY-MM" when the text says when it got this work, else null,
   "buysItem": "yes" if this company's OWN package would buy the item sold (an EPC, process or piping, mechanical, tank or plant contractor usually does), "no" if its package would not (e.g. dredging, jetty or marine civil works, roads, buildings only, electrical only, drilling, engineering or design only)}]}
 If an own-company report lists its work in bullets without repeating its name, also return "identityQuote": its literal company-name header. Keep the work quote and header separate; do not stitch them into an invented sentence.
+Tenders and orders: direct_buyer = the organisation that issues a tender, RFQ, bid invitation or enquiry, or places a purchase order, to BUY the item sold for itself (its quote must name that organisation and the item; "date" is the tender or order date). A company that won a contract or order to SUPPLY, make or fabricate the item is seller_of_item (a competitor), also on a tender page. A tender only for services on the item (inspection, testing, repair, overhaul, AMC, O&M) or only for its spare parts is not a purchase of the item: buysItem "no", unless the item sold is that service or part.
+On a page listing several tenders, add to the same "companies" list one direct_buyer (the agency or department) for each listed tender whose title names the item.
 Roles: epc = won the engineering, procurement and construction contract; jv_partner = partner in a CONSTRUCTION joint venture that won such a contract; developer = developer, sponsor or shareholder of a concession (IWP, IPP, IWTP), not the builder; owner = owns or operates the plant or field, including equity partners that co-own or co-develop a field or plant with the operator (e.g. oil majors partnering in a field) — they are never jv_partner.
 If the page is a company's own page describing its regular work, list that company with role subcontractor or maintenance_contractor and project null.`,
   };
@@ -110,6 +138,20 @@ export function workDate(quote: string, since: string | null, articleDate: strin
   const article = articleDate ? Number(articleDate.slice(0, 4)) : new Date().getFullYear();
   return years.length && Math.max(...years) < article - 1 ? `${Math.max(...years)}-06` : articleDate?.slice(0, 10) ?? null;
 }
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+/** The due or closing date printed on a tender listing ("Due Date : Oct 23, 2026", "Bid End Date: 23-10-2026"), as YYYY-MM-DD. */
+export function tenderDueDate(text: string): string | null {
+  const m = text.match(/\b(?:due|closing|last|end|submission|opening)\s+date\s*(?:&\s*time)?\s*:?\s*([A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}[-/ .][A-Za-z]{3,9}[-/ .]\d{4}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4}|\d{4}-\d{2}-\d{2})/i)?.[1];
+  if (!m) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const iso = (y: number, mo: number, d: number) => (mo >= 1 && mo <= 12 && d >= 1 && d <= 31 ? `${y}-${pad(mo)}-${pad(d)}` : null);
+  let p: RegExpMatchArray | null;
+  if ((p = m.match(/^(\d{4})-(\d{2})-(\d{2})$/))) return iso(+p[1], +p[2], +p[3]);
+  if ((p = m.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/))) return iso(+p[3], +p[2], +p[1]); // India and the Gulf write day first
+  if ((p = m.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$/))) return iso(+p[3], MONTHS.indexOf(p[1].slice(0, 3).toLowerCase()) + 1, +p[2]);
+  if ((p = m.match(/^(\d{1,2})[-/ .]([A-Za-z]{3,9})[-/ .](\d{4})$/))) return iso(+p[3], MONTHS.indexOf(p[2].slice(0, 3).toLowerCase()) + 1, +p[1]);
+  return null;
+}
 const monthsAgo = (date: string | null, now: Date) => (date ? (now.getTime() - Date.parse(date.length === 7 ? `${date}-15` : date)) / 2.63e9 : null);
 
 /** Parse and judge the AI's answer for one page. */
@@ -117,6 +159,11 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
   let raw: Record<string, unknown>;
   try { raw = JSON.parse(firstJsonObject(text) ?? 'null') as Record<string, unknown>; } catch { return null; }
   if (!raw || typeof raw !== 'object') return null;
+  // A list page answer sometimes groups companies per tender (live probe, 14 Oct): the same companies, flattened.
+  if (!Array.isArray(raw.companies) && Array.isArray(raw.tenders)) {
+    const groups = (raw.tenders as Record<string, unknown>[]).filter((t) => t && typeof t === 'object');
+    raw = { ...(groups[0] ?? {}), companies: groups.flatMap((t) => (Array.isArray(t.companies) ? t.companies : []).map((c: Record<string, unknown>) => ({ date: t.date, ...c }))) };
+  }
   const use = matchUse(brief, clip(raw.use, 120))?.name ?? null;
   let needsItem:'yes'|'no'|'unclear' = raw.needsItem === 'yes' || raw.needsItem === 'no' ? raw.needsItem : 'unclear';
   const project = clip(raw.project, 160) || null, country = clip(raw.country, 80) || null;
@@ -125,10 +172,12 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
   // work there (including documented local place names), not just a search filter.
   const sourceMarket = workMarket(articleAnalysisText(doc.text),brief,markets);
   const market = claimedMarket ? (claimedMarket===sourceMarket?claimedMarket:null) : (project ? null : sourceMarket);
+  // A tender listing often omits the country it is in: the page's own country stands when no other chosen country appears.
+  const directMarket = market ?? (claimedMarket && !sourceMarket ? claimedMarket : null);
   const needWhy = clip(raw.needWhy, 300);
   const progress=project&&namesProject(doc.text,project)?currentWorkProof(project,doc.related??[],now):null;
   const currentWork=progress&&workMarket(progress.quote,brief,markets)===market?progress:null;
-  const companies: NeedCompany[] = (Array.isArray(raw.companies) ? raw.companies : []).slice(0, 25).flatMap((c: Record<string, unknown>) => {
+  const companies: NeedCompany[] = (Array.isArray(raw.companies) ? raw.companies : []).slice(0, 25).flatMap((c: Record<string, unknown>): NeedCompany[] => {
     const name = clip(c?.name, 120);
     if (!name||junkCompanyReason(name)) return [];
     const role: NeedRole = ROLES.has(c?.role as NeedRole) ? (c.role as NeedRole) : 'other';
@@ -157,6 +206,29 @@ export function judgeNeed(text: string, doc: { text: string; publishedAt: string
     const sells = role === 'seller_of_item' || SELLER.test(`${name} ${pkg}`) || Boolean(brief.productId&&materialOutputOnly(literal??quote,brief.productId));
     const completed = /\b(?:completed|delivered|commissioned|handed over)\b/i.test(quote)&&! /\b(?:ongoing|under construction|currently|maintenance|revamp|expansion)\b/i.test(quote);
     const owns = role === 'owner' || role === 'developer';
+    // docs/mvp/22 §3.7: a tender or order for the item is demand in itself; the use list does not apply to it.
+    if (role === 'direct_buyer') {
+      const named = Boolean(brief.productId && literal && namesItem(literal, brief.productId, brief, true));
+      // A listing's own due date shows the tender is current: an open tender (due ahead) is dated this month.
+      const due = tenderDueDate(literal ?? quote), dueAge = monthsAgo(due, now);
+      const tenderDate = due && dueAge !== null && dueAge > -12 ? (dueAge < 0 ? now.toISOString().slice(0, 7) : due.slice(0, 7))
+        : date ?? workDate('', null, clip(c?.date, 10) || clip(raw.date, 10) || doc.publishedAt);
+      const tenderAge = monthsAgo(tenderDate, now);
+      const directWhy = [
+        sells && 'sells the item (a competitor)',
+        maskedIssuer(name) && 'the listing does not name the buying organisation',
+        !named && 'the tender or order sentence does not name the item',
+        (c?.buysItem === 'no' || partOrServiceTender(literal ?? quote, pkg, brief.item)) && 'buys services or spare parts, not the item',
+        !directMarket && `outside the chosen countries (${country ?? 'unknown'})`,
+        tenderAge === null && 'no date on the tender or order; cannot confirm it is current',
+        tenderAge !== null && tenderAge > DIRECT_BUY_WINDOW_MONTHS && `tender or order older than ${DIRECT_BUY_WINDOW_MONTHS} months (${tenderDate})`,
+        tenderAge !== null && tenderAge < -1 && 'future-dated tender; date not established',
+        !quoteVerified && 'sentence not found in the source',
+      ].filter((x): x is string => Boolean(x));
+      return [{ name, role, package: pkg, quote: literal ?? quote, quoteVerified, since: tenderDate, verdict: directWhy.length ? 'rejected' as const : 'lead' as const, identityQuote,
+        applicationUse: DIRECT_PURCHASE, reason: directWhy.join('; ') || (!tenderWording(literal ?? quote) ? 'buys the item directly (purchase order)'
+          : due && dueAge !== null && dueAge > 0.04 ? `issued a tender for the item (closed ${due})` : `issues an open tender or RFQ for the item${due ? ` (due ${due})` : ''}`) }];
+    }
     const why = [
       sells && 'sells the item (a competitor)',
       !DOES_WORK.has(role) && !owns && !sells && `role ${role}`,
@@ -194,7 +266,9 @@ export async function checkNeed(db: Queryable, runId: string, documentId: string
   brief: SearchBrief, markets: string[], provider: LLMProvider, saved?: string | null): Promise<{ result: NeedResult | null; answer: string | null }> {
   let answer = saved ?? null;
   if (answer === null) {
-    const res = await provider.complete({ ...needPrompt(doc, brief), json: true, maxTokens: 1500, temperature: 0, purpose: 'need_check', runId, singleAttempt: true });
+    // A tender list page answers one company per listing (live probe, 14 Oct: eight listings outgrew 1500 tokens).
+    const maxTokens = tenderListingBlocks(doc.text, brief).length > 2 ? 3000 : 1500;
+    const res = await provider.complete({ ...needPrompt(doc, brief), json: true, maxTokens, temperature: 0, purpose: 'need_check', runId, singleAttempt: true });
     answer = res.text;
   }
   // Bounded by the run's already-read pages; never query the internet or another
@@ -209,7 +283,8 @@ export async function checkNeed(db: Queryable, runId: string, documentId: string
   for (const c of result?.companies ?? [])
     await db.query(`insert into need_checks(run_id,document_id,company_name,role,package,quote,quote_verified,work_date,project,project_country,market,use_name,needs_item,need_why,verdict,reason)
       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-      [runId, documentId, c.name, c.role, c.package, c.quote, c.quoteVerified, c.since, result!.project, result!.country, result!.market, c.applicationUse??result!.use, result!.needsItem, c.verdict==='lead'?potentialNeedReason(c.applicationUse??result!.use):result!.needWhy, c.verdict, c.reason]);
+      [runId, documentId, c.name, c.role, c.package, c.quote, c.quoteVerified, c.since, result!.project, result!.country, result!.market, c.applicationUse??result!.use, result!.needsItem,
+        c.verdict==='lead'?(c.role==='direct_buyer'?`${c.reason[0].toUpperCase()}${c.reason.slice(1)} on the source. Quantity, specification and closing date are on the tender itself.`:potentialNeedReason(c.applicationUse??result!.use)):result!.needWhy, c.verdict, c.reason]);
   return { result, answer };
 }
 

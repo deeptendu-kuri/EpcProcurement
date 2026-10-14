@@ -10,7 +10,7 @@
 import { z } from 'zod';
 import type { Db, Queryable } from '@/mvp/db';
 import type { LLMProvider } from '@/mvp/llm/types';
-import { matchUse, type SearchBrief } from '@/mvp/discovery/brief';
+import { fabricatedItem, matchUse, type SearchBrief } from '@/mvp/discovery/brief';
 import type { RunInput } from '@/mvp/types';
 import { getCatalogue, getCatalogueItem } from '@/mvp/config/buyers-config';
 import { whoBuys } from '@/mvp/discovery/material-catalogue';
@@ -187,7 +187,7 @@ const ownPageHost = (row: JudgedRow): string | null => {
   return sourceHost && firstWord && sourceHost.startsWith(firstWord) ? sourceHost : null;
 };
 /** What the rules may know about the search: the stockist setting and the searched countries. */
-export interface ConsistencyOptions { resellers?: boolean; markets?: string[] }
+export interface ConsistencyOptions { resellers?: boolean; markets?: string[]; brief?: Pick<SearchBrief, 'productId' | 'kind'> | null }
 /**
  * Organisations that do not buy the material themselves (web audit, 10 Oct): investors, holding companies,
  * offtakers and procurement agencies, government and research bodies, consultants and project managers,
@@ -224,6 +224,9 @@ export function consistentType(r: Judged, row: JudgedRow, productName: string, o
   const ownSiteMaker = Boolean(row.domain) && hostOf(row.url) === row.domain!.replace(/^www\./, '') && /\b(?:manufacturers?|makers?|mills?|producers?)\b/i.test(row.title ?? '') && /pipe|tube|fitting|flange/i.test(row.title ?? '');
   if ((MAKER.test(r.role) || ownSiteMaker) && label && SELLER_DOMAIN.test(label.replace(/[^a-z]/g, ''))) return 'competitor';
   if (MAKER.test(r.role) && sellsMaterial(r, product) && !/fabricat/i.test(r.role)) return 'competitor';
+  // A fabricator of a typed fabricated item (pressure vessels, exchangers) makes it: a competitor, not a buyer.
+  if (fabricatedItem(opts.brief) && (r.buyerType === 'end_user' || r.buyerType === 'subcontractor')
+    && /\bfabricat\w*|\bworkshops?\b/i.test(`${r.role} ${row.identity_quote ?? ''}`)) return 'competitor';
   // It receives bids or awards the contract: the procuring owner or agency, never a contractor.
   if (AWARDS_WORK.test(row.identity_quote ?? '') && new RegExp(`^\\W*${escapeRe(row.company.split(/\s+/)[0] ?? '')}`, 'i').test(row.identity_quote ?? '')
     && (r.buyerType === 'contractor' || r.buyerType === 'subcontractor')) return 'owner';

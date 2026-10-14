@@ -6,6 +6,7 @@ import type { Db } from "@/mvp/db";
 import type { RunInput } from "@/mvp/types";
 import type { RawDoc } from "@/mvp/pipeline/contracts";
 import { materialEvidenceKind, materialOutputOnly } from "./plan";
+import { fabricatedItem } from "./brief";
 import { attributedCountry,attributedScope,companyNames,namesCompany,originalQuote,otherWorkSubject } from "./evidence";
 import { buyerActivity, buyerPriority } from "./activity";
 import { companyContactsFromPage } from "@/mvp/enrichment/public-contacts";
@@ -62,6 +63,7 @@ export function buyerEvidence(b:DiscoveredBuyer,text:string,input:RunInput,bundl
   // Stockists and traders are secondary: shown under Companies found, never saved as leads or emailed.
   if(b.role==='channel_customer')return fail(SECONDARY_REASON);
   if(!["epc_contractor","subcontractor","fabricator","input_manufacturer","owner"].includes(b.role))return fail("Not a buying-compatible contractor/fabricator.");
+  if(b.role==="fabricator"&&fabricatedItem(input.brief))return fail("Fabricates this kind of equipment itself: a competitor, not a buyer.");
   const productText=bundle?bundleSource(bundle,b.productQuote)?.text??'':text;
   const activityText=bundle&&b.activityQuote?bundleSource(bundle,b.activityQuote)?.text??'':text;
   const productQuote=(bundle?bundleScope(bundle,b.productQuote,names):null)??attributedScope(productText,b.productQuote,companyQuote,names)

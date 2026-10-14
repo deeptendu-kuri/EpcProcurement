@@ -7,6 +7,7 @@ import {potentialNeedReason} from '@/mvp/discovery/potential-work';
 
 const ROLE_WORD: Record<string, string> = {
   epc: 'EPC contractor', jv_partner: 'Construction joint-venture partner', subcontractor: 'Subcontractor', maintenance_contractor: 'Maintenance contractor',
+  direct_buyer: 'Buyer: its own tender or order for the item',
 };
 /** Buying now: work won in the last 6 months; soon: within 18; still building: within 30 (big plants keep buying). */
 export function buyingWindow(date: string | null, now = new Date()): NeedCard['window'] {
@@ -28,12 +29,16 @@ export async function needCard(db: Queryable, runId: string, company: string, it
   // The strongest signal: a maker named in the same article as supplying the item to this work.
   const competitor = (await db.query<{ company_name: string; package: string | null }>(
     "select company_name, package from need_checks where run_id=$1 and document_id=$2 and role='seller_of_item' limit 1", [runId, best.document_id])).rows[0];
+  // docs/mvp/22: a direct buyer's own tender or order is the demand, not an inferred application of its work.
+  const direct = best.role === 'direct_buyer';
   return {
-    item, work: best.quote, why: potentialNeedReason(best.use_name), use: best.use_name, project: best.project, date: best.work_date,
+    item, work: best.quote, why: direct ? best.need_why ?? 'Its own tender or purchase order names the item.' : potentialNeedReason(best.use_name), use: direct ? null : best.use_name, project: best.project, date: best.work_date,
     window: buyingWindow(best.work_date, now), role: ROLE_WORD[best.role] ?? null, country: best.market ? marketName(best.market) : null,
     url: best.url, source: hostOf(best.url),
     competitor: competitor ? `${competitor.company_name}${competitor.package ? `: ${competitor.package}` : ''}` : null,
-    checks: ['Sentence found in the source', ...(best.work_date ? ['Date of the work read from the source'] : []), ...(best.market ? ['Work is in your countries'] : [])],
+    checks: direct
+      ? ['Tender or order sentence found in the source', 'It names the item', ...(best.work_date ? ['Dated within the last 12 months'] : []), ...(best.market ? ['In your countries'] : [])]
+      : ['Sentence found in the source', ...(best.work_date ? ['Date of the work read from the source'] : []), ...(best.market ? ['Work is in your countries'] : [])],
     more: rows.length - 1,
   };
 }

@@ -7,11 +7,15 @@ import type { ResearchMode, PlannedBuyerQuery } from '@/mvp/discovery/plan';
 import { RESEARCH_SOURCES } from '@/mvp/research/registry';
 import { TED_COUNTRIES } from '@/mvp/pipeline/sources/ted';
 import { usesFor, workQueryWords, type SearchBrief } from '@/mvp/discovery/brief';
+import { countryLanguage } from '@/mvp/config/country-meta';
+import { LOCAL_TENDER_WORDS, tenderDomains, tenderListPages } from './tender-sources';
 
 export type SourcingLane = 'trigger' | 'roundup' | 'capability';
 export interface SourceTask {
-  id:string;lane:SourcingLane;source:'bing-query'|'tavily'|'ted'|'registry'|'local-news'|'gdelt-country';market:string;priority:number;
+  id:string;lane:SourcingLane;source:'bing-query'|'tavily'|'ted'|'registry'|'local-news'|'gdelt-country'|'tender-page';market:string;priority:number;
   query?:string;url?:string;topic?:'news'|'general';days?:number;registryId?:string;includeDomains?:string[];
+  /** docs/mvp/22: an open-tender search (most recent year, page text from the provider). */
+  tender?:boolean;timeRange?:'year'|'month';
   /** local-news: what to translate; gdelt-country: English words to match in any language. */
   material?:string;work?:string;words?:string[];
   /** local-news from a search brief: the query in the country's own words, used as is (no translation). */
@@ -31,6 +35,12 @@ export const PIPING_PRODUCTS=new Set(['line-pipe','cs-process-pipe','ss-duplex-p
  * for piping materials the news searches ask for awarded projects that consume them (web audit, 10 Oct).
  */
 export const PROJECT_AWARD_QUERIES=['EPC contract awarded','pipeline project contract awarded','refinery petrochemical gas plant EPC contract','desalination power plant EPC contract awarded'];
+/** Tender searches outrank every other paid search: an open tender naming the item is the strongest demand (docs/mvp/22 §3.5). */
+export const TENDER_PRIORITY=1290;
+/** The item as tender searches name it: the brief's short name, else his own words (never a catalogue family name). */
+function tenderItem(input:SourcePlanInput,fallback:string):string {
+  return (input.brief?.source==='ai'?input.brief.item:'')||input.keyword?.trim()||fallback;
+}
 /**
  * Ordered tasks, not promises of buyers (docs/mvp/19). For every country: award news (English, the
  * country's own language and GDELT's local outlets), contractor lists, stockists when he sells to them,
@@ -38,6 +48,7 @@ export const PROJECT_AWARD_QUERIES=['EPC contract awarded','pipeline project con
  * alternate between countries, so every country is searched before any country gets a second search.
  */
 export function sourcePlan(input:SourcePlanInput):SourceTask[] {
+  // A typed item (q:…) is an item built from its own words (docs/mvp/22); only a malformed id is refused.
   const product=getCatalogueItem(input.productId);
   if(!product)throw new Error('Unknown sourcing product.');
   const activities=MATERIAL_ACTIVITIES[input.productId]??[product.shortName];
@@ -52,19 +63,36 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
   const tasks:(SourceTask&{round:number;order:number})[]=[];
   markets.forEach(({code,name},order)=>{
     const rounds:Record<string,number>={};
-    const add=(lane:SourcingLane,source:SourceTask['source'],n:number,extra:Partial<SourceTask>)=>{
+    const add=(lane:SourcingLane,source:SourceTask['source'],n:number,extra:Partial<SourceTask>,tag='')=>{
       if(input.lanes&&!input.lanes.includes(lane))return;
       const round=rounds[lane]=(rounds[lane]??-1)+1;
-      const priority=input.brief&&source==='tavily'?({trigger:1260,capability:1220,roundup:1190}[lane])-n*100-order:BASE_PRIORITY[lane];
+      const priority=tag==='tender'&&source==='tender-page'?TENDER_PRIORITY+20-n-order
+        :tag==='tender'&&source==='tavily'?TENDER_PRIORITY-n*100-order
+        :input.brief&&source==='tavily'?({trigger:1260,capability:1220,roundup:1190}[lane])-n*100-order:BASE_PRIORITY[lane];
       // Work-based requests share the first paid-query tier across the lanes.
       // Otherwise Quick's entire allowance was spent on trigger news before a
       // single contractor-list or company search could run.
-      tasks.push({id:`hybrid-v2:${input.productId}:${code}:${lane}:${source}:${n}`,lane,source,market:code,priority,round,order,...extra});
+      tasks.push({id:`hybrid-v2:${input.productId}:${code}:${lane}${tag?`:${tag}`:''}:${source}:${n}`,lane,source,market:code,priority,round,order,...extra});
     };
+    // ── tenders: open tenders, RFQs and supply orders that name the item (docs/mvp/22 §3.5); the issuer buys it.
+    // Part of the brief-based search (production); the legacy catalogue plan below is unchanged. ──
+    const item=tenderItem(input,product.shortName);
+    const domains=input.brief?tenderDomains(code):[];
+    if(input.brief&&domains.length)add('trigger','tavily',0,{query:`${item} tender ${name}`,topic:'general',includeDomains:domains,tender:true,timeRange:'year'},'tender');
+    // A tender list page read directly (no search credit), where the country has one that names the buyer.
+    if(input.brief)tenderListPages(item,code).forEach((page,n)=>add('trigger','tender-page',n,{url:page.url,query:page.name,tender:true},'tender'));
+    if(input.brief){
+      add('trigger','tavily',domains.length?1:0,{query:`${input.brief.tenderWords?.[0]??`supply of ${item}`} tender ${name}`,topic:'general',tender:true,timeRange:'year'},'tender');
+      add('trigger','bing-query',0,{query:`"${item}" tender ${name}`},'tender');
+      add('trigger','bing-query',1,{query:`"${item}" order ${name}`},'tender');
+    }
+    const localItem=input.brief?.localItem?.[code]?.[0],tenderWord=LOCAL_TENDER_WORDS[countryLanguage(code)];
+    if(localItem&&tenderWord)add('trigger','local-news',0,{query:`"${item}" tender ${name}`,material:item,work:'tender',localQuery:`${tenderWord} ${localItem}`,localWords:[localItem,tenderWord]},'tender');
     const activity=activities[0];
     if(input.brief){
       // docs/mvp/20: this country's own uses (they differ between countries), searched by their headline words.
       const brief=input.brief,work=usesFor(brief,code,4);
+      // No work described (the AI brief failed for a typed item): tenders and direct mentions still run.
       if(!work.length)return;
       const words=(n:number)=>workQueryWords(work[n]).slice(0,2).join(' ');
       // ── trigger: awards for the work that uses the item, in English, the country's language, GDELT and tenders ──
@@ -123,5 +151,6 @@ export function sourcePlan(input:SourcePlanInput):SourceTask[] {
 export function tavilyTask(task:SourceTask):PlannedBuyerQuery {
   if(task.source!=='tavily'||!task.query)throw new Error('Task is not a Tavily query.');
   return {key:task.id,market:task.market,lane:task.lane==='trigger'?'news':task.lane==='roundup'?'directory':'company',
-    activityIndex:0,query:task.query,topic:task.topic,days:task.days,sourcingLane:task.lane,includeDomains:task.includeDomains};
+    activityIndex:0,query:task.query,topic:task.topic,days:task.days,sourcingLane:task.lane,includeDomains:task.includeDomains,
+    ...(task.tender?{tender:true,rawContent:true}:{}),...(task.timeRange?{timeRange:task.timeRange}:{})};
 }
