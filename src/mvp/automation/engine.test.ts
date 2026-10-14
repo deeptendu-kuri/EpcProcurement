@@ -365,8 +365,8 @@ describe("persistent demo research-to-meeting funnel",()=>{
     await setFunnelEnabled(false);expect(await processFunnelTick()).toEqual({processed:false});
   });
   it("limits chasing to two working-hour follow-ups and resumes a conversation only on an actual reply",async()=>{
-    await setFunnelEnabled(true);const s=await seed();await processFunnelTick();
     vi.setSystemTime(new Date("2026-10-12T05:00:00Z"));
+    await setFunnelEnabled(true);const s=await seed();await processFunnelTick();
     for(let i=0;i<3;i++) {
       await db.query("update funnel_threads set next_action_at=now()-interval '1 minute' where opportunity_id=$1",[s.o]);
       await db.query("update funnel_messages set created_at=now()-interval '4 days' where thread_id=(select id from funnel_threads where opportunity_id=$1) and direction='out'",[s.o]);
