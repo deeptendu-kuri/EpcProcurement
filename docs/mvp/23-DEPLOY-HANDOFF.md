@@ -11,7 +11,7 @@ For Codex (or whoever deploys). Written 14 Oct 2026, after the local end-to-end 
 Read docs 21 and 22 for the why; this file is only the how.
 
 ## 1. What is being deployed
-Branch `feat/universal-search` = `origin/main` (`5df6b51`) + 4 commits, so this is a **fast-forward**:
+Branch `feat/universal-search` = `origin/main` (`5df6b51`) + 5 commits (the 4 below plus this handoff, `3424c39`), so this is a **fast-forward**:
 
 | Commit | What |
 |---|---|
