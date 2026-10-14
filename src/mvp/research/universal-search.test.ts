@@ -18,7 +18,8 @@ import { tenderListPages, tenderWording } from "@/mvp/sourcing/tender-sources";
 import { listOurProducts } from "@/mvp/products/our-products";
 import { runInputSchema } from "@/app/api/mvp/_shared/schemas";
 import { judgeNeed, maskedIssuer, tenderDueDate } from "./need";
-import { inChosenCountry } from "./likely";
+import { inChosenCountry, oneNamePerCompany } from "./likely";
+import { TYPED_ROLE_LABEL } from "@/mvp/buyers/view";
 import { tenderListingBlocks, workAnalysisText } from "./relevance";
 import { createResearchRun, sessionFor } from "./store";
 import { analysisBudget, processResearchTick, rateLimited, type ResearchDeps } from "./engine";
@@ -275,6 +276,17 @@ describe("a likely buyer is placed in a chosen country (live run 7, 14 Oct)", ()
     expect(inChosenCountry(company("Example Montagens builds gas pipelines.", "Pipeline contractors in Brazil", null), ["BR"])).toBe(true);
     expect(inChosenCountry(company("Example Montagens builds gas pipelines.", null, "https://www.example.com.br"), ["BR"])).toBe(true);
     expect(inChosenCountry(company("Example Ltd builds pipelines.", null, "example.co.uk"), ["GB"])).toBe(true);
+  });
+});
+
+describe("one lead per company, in plain words (local test, 14 Oct)", () => {
+  it("keeps one entry for a company named twice, under its fullest name, and none already saved", () => {
+    const picks = [{ name: "EIL" }, { name: "Engineers India Limited" }, { name: "JNK India" }, { name: "Technip Energies" }];
+    expect(oneNamePerCompany(picks).map((p) => p.name)).toEqual(["Engineers India Limited", "JNK India", "Technip Energies"]);
+    expect(oneNamePerCompany(picks, ["Technip Energies Ltd"]).map((p) => p.name)).toEqual(["Engineers India Limited", "JNK India"]);
+  });
+  it("labels a typed product's leads by role, never with pipe words", () => {
+    expect([TYPED_ROLE_LABEL.owner(true), TYPED_ROLE_LABEL.owner(false), TYPED_ROLE_LABEL.epc_contractor(false)]).toEqual(["Buyer · own tender", "Buyer", "Contractor"]);
   });
 });
 

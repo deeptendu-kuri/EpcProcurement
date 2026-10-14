@@ -61,6 +61,12 @@ export function inChosenCountry(c: { quote: string | null; source: { title: stri
   return code.length === 2 && markets.includes(code);
 }
 
+/** One entry per company, under its fullest name; none this search already saved under another name. */
+export function oneNamePerCompany<T extends { name: string }>(picks: T[], savedNames: readonly string[] = []): T[] {
+  return picks.filter((c, i) => !savedNames.some((n) => sameCompanyName(n, c.name))
+    && !picks.some((o, j) => j !== i && sameCompanyName(o.name, c.name) && (o.name.length > c.name.length || (o.name.length === c.name.length && j < i))));
+}
+
 export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInput, 'productId' | 'query' | 'contactRole' | 'brief'> & { markets?: string[] }): Promise<{ saved: number; listing: number }> {
   const productId = input.productId;
   if (!productId || !getCatalogueItem(productId)) return { saved: 0, listing: 0 };
@@ -88,11 +94,16 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
       && (!work || Boolean(c.quote && namesWork(c.quote, input.brief!))))))
     .slice(0, LIKELY_MAX_PER_SEARCH);
   if (!picks.length) return { saved: 0, listing: 0 };
+  // One company, two names (local test, 14 Oct: "EIL" and "Engineers India Limited" from one tender became two leads
+  // and two emails): keep the fullest name, and never a company this search already saved under another name.
+  const savedNames = (await db.query<{ name: string }>(
+    'select c.canonical_name as name from search_opportunities o join companies c on c.id=o.company_id where o.run_id=$1', [runId])).rows.map((r) => r.name);
+  const unique = oneNamePerCompany(picks, savedNames);
   const docs = new Map((await db.query<{ id: string; doc: string | null; text: string | null; url: string | null; tier: string | null; publisher_key: string | null; found_via?:{currentWork?:{roleDocumentId:string;evidenceId:string;date:string}} }>(
     `select c.id,c.identity_document_id as doc,d.text,d.url,d.tier,d.publisher_key,c.found_via from research_candidates c left join source_documents d on d.id=c.identity_document_id
      where c.id=any($1::uuid[])`, [picks.map((p) => p.id)])).rows.map((r) => [r.id, r]));
   let saved = 0, listing = 0;
-  for (const c of picks) {
+  for (const c of unique) {
     const need = needFor(c.name);
     const direct = need?.role === 'direct_buyer';
     const role = direct ? 'owner' : need ? (need.role === 'subcontractor' || need.role === 'maintenance_contractor' ? 'subcontractor' : 'epc_contractor') : ROLE[c.buyerType!]!;
@@ -173,7 +184,7 @@ export async function saveLikelyBuyers(db: Db, runId: string, input: Pick<RunInp
       }
       const lead = (await tx.query<{ id: string }>(`insert into leads(kind,buyer_company_id,client_product_ids,score_breakdown,gate_results,class,reasons,scoring_version,run_id,buyer_type)
         values('supply_subcontract',$1,$2::text[],'{}','[]','research',$3::jsonb,1,$4,$5)
-        on conflict on constraint leads_candidate_uniq do update set updated_at=now() returning id`, [company.id, [productId], JSON.stringify([{ text: reason, evidenceIds: evidence }]), runId, role])).rows[0];
+        on conflict on constraint leads_candidate_uniq do update set updated_at=now(),client_product_ids=array(select distinct unnest(leads.client_product_ids||excluded.client_product_ids)) returning id`, [company.id, [productId], JSON.stringify([{ text: reason, evidenceIds: evidence }]), runId, role])).rows[0];
       const inserted = await tx.query(`insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,contact_role,buying_reason,evidence_ids,discovery_kind,fit_score,material_fit_kind,activity_status,verification,activity_date,activity_quote,discovery_version)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid[],'company',$10,$11,$12,$13,$14::date,$15,0) on conflict(run_id,company_id,product_id) do nothing returning id`,
         [runId, lead.id, company.id, input.query ?? label, productId, label, input.contactRole ?? 'buyer', reason, evidence,

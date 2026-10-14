@@ -43,7 +43,7 @@ export async function persistRoundupAwards(db:Db,runId:string,input:RunInput,res
       const reason=`Potential ${searchedProductLabel(input.productId!,input.query)} application: ${c.quote} Purchasing requirements and contacts remain unconfirmed.`;
       const lead=(await tx.query<{id:string}>(`insert into leads(kind,buyer_company_id,project_id,client_product_ids,score_breakdown,gate_results,class,reasons,scoring_version,run_id,buyer_type)
         values('supply_subcontract',$1,$2,$3::text[],'{}','[]','watch',$4::jsonb,1,$5,$6)
-        on conflict on constraint leads_candidate_uniq do update set updated_at=now() returning id`,[company.id,projectId,[input.productId],JSON.stringify([{text:reason,evidenceIds}]),runId,c.role==='subcontractor'?'subcontractor':'epc_contractor'])).rows[0];
+        on conflict on constraint leads_candidate_uniq do update set updated_at=now(),client_product_ids=array(select distinct unnest(leads.client_product_ids||excluded.client_product_ids)) returning id`,[company.id,projectId,[input.productId],JSON.stringify([{text:reason,evidenceIds}]),runId,c.role==='subcontractor'?'subcontractor':'epc_contractor'])).rows[0];
       const saved=await tx.query(`insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,contact_role,buying_reason,evidence_ids,trigger_id,trigger_kind,trigger_date,operating_country)
         values($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid[],$10,$11,$12::date,$13)
         on conflict(run_id,company_id,product_id) do update set evidence_ids=array(select distinct unnest(search_opportunities.evidence_ids||excluded.evidence_ids)) returning id`,

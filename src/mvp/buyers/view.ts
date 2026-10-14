@@ -46,6 +46,17 @@ import { CONSULTANT_REASON, isConsultant, plainWords, supplierTypeKeyFor, whatTh
 import { companyGroupKey } from "./group";
 import { isPlaceName } from "@/mvp/pipeline/merge";
 import { capabilityLabel } from "@/mvp/discovery/locations";
+import { isSearchItemId } from "@/mvp/discovery/item";
+
+/** Role words for a typed product's leads ("Buyer · own tender", "Contractor"). */
+export const TYPED_ROLE_LABEL: Record<BuyerRole, (ownTender: boolean) => string> = {
+  owner: (t) => (t ? "Buyer · own tender" : "Buyer"),
+  epc_contractor: () => "Contractor",
+  subcontractor: () => "Subcontractor",
+  fabricator: () => "Fabricator",
+  manufacturer: () => "Manufacturer",
+  distributor: () => "Stockist",
+};
 
 export const PLACE_NAME_REASON = "Place name, not a company";
 import { currentStep, windowSteps } from "./window";
@@ -366,7 +377,11 @@ export function buildBuyerView(input: BuyerInput): BuyerRecord {
     const ev = input.evidence[id];
     return ev?.verified ? (lead.client_product_ids ?? []).map(product => capabilityLabel(product, ev.quote)).filter(Boolean) : [];
   })[0];
-  const whatTheyDo = capability ?? whatTheyDoLabel(typeKey, role === "owner" && openTender);
+  // docs/mvp/22: a typed product has no catalogue role map; its leads get plain role words.
+  const typedItem = (lead.client_product_ids ?? []).some(isSearchItemId);
+  const ownTender = reasons.some((r) => /\b(?:tender|rfq)\b/i.test(r.text ?? ""));
+  const typedLabel = typedItem ? TYPED_ROLE_LABEL[role](ownTender) : null;
+  const whatTheyDo = capability ?? typedLabel ?? whatTheyDoLabel(typeKey, role === "owner" && openTender);
   const consultant = isConsultant(name, buyer.types ?? []);
   const placeName = isPlaceName(name);
 

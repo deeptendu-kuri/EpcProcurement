@@ -198,7 +198,7 @@ export async function saveBuyer(db:Db,runId:string,input:RunInput,documentId:str
     const role=b.role==='input_manufacturer'?'manufacturer':b.role==='channel_customer'?'distributor':b.role;
     const lead=(await tx.query<{id:string}>(`insert into leads(kind,buyer_company_id,project_id,client_product_ids,score_breakdown,gate_results,class,reasons,scoring_version,run_id,buyer_type)
       values('supply_subcontract',$1,$2,$3::text[],'{}','[]','research',$4::jsonb,1,$5,$6)
-      on conflict on constraint leads_candidate_uniq do update set updated_at=now() returning id`,[company.id,projectId,[product.id],JSON.stringify([{text:reason,evidenceIds:evidence}]),runId,role])).rows[0];
+      on conflict on constraint leads_candidate_uniq do update set updated_at=now(),client_product_ids=array(select distinct unnest(leads.client_product_ids||excluded.client_product_ids)) returning id`,[company.id,projectId,[product.id],JSON.stringify([{text:reason,evidenceIds:evidence}]),runId,role])).rows[0];
     const inserted=await tx.query(`insert into search_opportunities(run_id,lead_id,company_id,keyword,product_id,product_name,contact_role,buying_reason,evidence_ids,discovery_kind,fit_score,material_fit_kind,activity_status,activity_date,activity_quote,priority_components,discovery_version)
       values($1,$2,$3,$4,$5,$6,$7,$8,$9::uuid[],$10,$11,$12,$13,$14,$15,$16::jsonb,$17) on conflict(run_id,company_id,product_id) do nothing returning id`,
       [runId,lead.id,company.id,input.query,product.id,searchedProductLabel(product.id,input.query),input.contactRole??"buyer",reason,evidence,b.project?"project":"company",priority.score,fit,activity.status,activity.date,activity.quote,JSON.stringify(priority.components),DISCOVERY_VERSION]);

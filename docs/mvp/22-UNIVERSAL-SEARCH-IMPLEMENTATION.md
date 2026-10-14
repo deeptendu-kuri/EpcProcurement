@@ -304,6 +304,29 @@ A lead is a claim: "this company buys this product, as this source shows". Every
 
 Every new live run should add its claims to this set. A false lead found by the client becomes a labelled row and a failing test first, then a fix.
 
+### 3.17 Local test of the real app with email (14 Oct)
+Setup:
+1. Run `node scripts/build-local-proof.mjs --discovery`, then `node scripts/start-local-funnel.mjs --demo --activate`.
+2. This runs on the local database and sends only to the approved inbox.
+3. Search: "pressure vessels", India, Quick.
+
+What worked:
+- Settings, Dashboard and `/find?q=` show his seven products.
+- The search finished in about 6 minutes.
+- **Engineers India Limited** was saved from its live tender: "pressure vessel -cs (up to 25mm) for Bina Petchem and Refinery Expansion Project", due 19 Oct, fit 95.
+- The email check approved it (`verified_tender`). Its demo email names the tender and its closing date. It was accepted by the email provider and sent to the approved inbox only.
+- JNK India and Technip Energies were saved and emailed too, with "We also supply …".
+
+Found, and fixed:
+- **One company, two leads.** The same tender produced "EIL" and "Engineers India Limited". They are now one lead under the fullest name (`oneNamePerCompany` in `research/likely.ts`).
+- **Pipe-era role labels.** "Utility" and "Pipeline builder" came from the catalogue's pipe map. A typed product's leads now read "Buyer · own tender", "Buyer", "Contractor" or "Subcontractor" (`TYPED_ROLE_LABEL` in `buyers/view.ts`).
+- **A lead found again keeps only its first product.** Saving it again now adds the searched product (`client_product_ids` merged on the lead upsert), so the lead is labelled and sold for every product it was found for.
+- **Email queue blocked (this bug was there before).** The worker takes the one oldest due thread each tick. An active thread waiting for a follow-up (outside working hours) returned without moving its next action, so every new search's emails waited behind it. Such a thread is now snoozed for 10 minutes after its tick.
+
+Still open:
+- The seller's company name is empty (`SALES_COMPANY_NAME` is not set), so the email says "I'm Deeptendu Kuri" with no company. Set it to the client's company before the client demo.
+- The tender title in the email is quoted as the portal writes it, in lower case with reference codes.
+
 ## 4. What is NOT in scope
 - Editable "Our products" and company profile in Settings (separate change; used for email context, not for search).
 - Paid project databases or trade data (MEED, Volza).

@@ -483,6 +483,9 @@ export async function processFunnelTick():Promise<{processed:boolean;enrolled?:n
       and next_action_at<=now() and recipient=$1 order by next_action_at limit 1`,[AUTOMATION_RECIPIENT])).rows;
     for (const t of threads) {
       try {await advanceThread(t);} catch(e) {await updateState(t,"review",errorText(e));await note(db,t.opportunity_id,`Automation needs review: ${errorText(e)}`);}
+      // An active thread only waiting for its follow-up (outside working hours, not due yet) must not stay first in
+      // the queue: local test, 14 Oct, one such thread blocked every new search's emails.
+      if(t.state==="active")await db.query("update funnel_threads set next_action_at=now()+interval '10 minutes' where id=$1 and state='active' and next_action_at=$2",[t.id,t.next_action_at]);
     }
     await deliverOne();
     await db.query("update funnel_control set last_tick_at=now(),last_error=null where id=1 and worker_lease=$1",[lease]);
